@@ -2,7 +2,7 @@
 
 import { FileUp, X } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
 
@@ -29,9 +29,21 @@ import type { ModelsResponse, Project } from "@/lib/types"
 
 const MAX_FILE_MB = 50
 
+function firstAvailableModel<T>(
+  groups: Record<string, T[]>,
+  availability: Record<string, boolean>,
+  toValue: (provider: string, entry: T) => string
+): string | null {
+  for (const [provider, entries] of Object.entries(groups)) {
+    if (availability[provider] && entries.length > 0) {
+      return toValue(provider, entries[0])
+    }
+  }
+  return null
+}
+
 export default function NewProjectPage() {
   const router = useRouter()
-  const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const [step, setStep] = useState<1 | 2>(1)
@@ -45,35 +57,23 @@ export default function NewProjectPage() {
   const [topK, setTopK] = useState(5)
   const [submitting, setSubmitting] = useState(false)
 
-  // once we know which providers are reachable, default to an available one
-  // (e.g. fall back to Ollama when no OpenAI key is configured)
-  useEffect(() => {
-    if (!models) return
-    const { availability, catalog } = models
-    const firstAvailable = <T,>(
-      groups: Record<string, T[]>,
-      toValue: (provider: string, entry: T) => string
-    ): string | null => {
-      for (const [provider, entries] of Object.entries(groups)) {
-        if (availability[provider] && entries.length > 0) {
-          return toValue(provider, entries[0])
-        }
-      }
-      return null
-    }
-    setEmbedding((current) => {
-      const [provider] = current.split("/", 1)
-      if (availability[provider]) return current
-      return (
-        firstAvailable(catalog.embedding, (p, e) => `${p}/${e.model}`) ?? current
-      )
-    })
-    setLlm((current) => {
-      const [provider] = current.split("/", 1)
-      if (availability[provider]) return current
-      return firstAvailable(catalog.llm, (p, m) => `${p}/${m}`) ?? current
-    })
-  }, [models])
+  const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher, {
+    onSuccess({ availability, catalog }) {
+      setEmbedding((current) => {
+        const [provider] = current.split("/", 1)
+        if (availability[provider]) return current
+        return (
+          firstAvailableModel(catalog.embedding, availability, (p, e) => `${p}/${e.model}`) ??
+          current
+        )
+      })
+      setLlm((current) => {
+        const [provider] = current.split("/", 1)
+        if (availability[provider]) return current
+        return firstAvailableModel(catalog.llm, availability, (p, m) => `${p}/${m}`) ?? current
+      })
+    },
+  })
 
   function addFiles(list: FileList | null) {
     if (!list) return

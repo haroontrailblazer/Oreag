@@ -1,6 +1,4 @@
-import Link from "next/link"
-
-import { SignOutButton } from "@/components/sign-out-button"
+import { DashboardSidebar } from "@/components/dashboard-sidebar"
 
 export default function DashboardLayout({
   children,
@@ -8,16 +6,11 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-muted/20">
-      <header className="border-b bg-background">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-          <Link href="/dashboard" className="text-lg font-semibold">
-            Oreag
-          </Link>
-          <SignOutButton />
-        </div>
-      </header>
-      <main className="mx-auto max-w-5xl p-4 py-8">{children}</main>
+    <div className="min-h-screen bg-background md:grid md:grid-cols-[16rem_minmax(0,1fr)]">
+      <DashboardSidebar />
+      <main className="min-w-0 bg-muted/20">
+        <div className="mx-auto max-w-6xl p-4 py-6 md:p-8">{children}</div>
+      </main>
     </div>
   )
 }
