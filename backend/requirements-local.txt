@@ -1,0 +1,4 @@
+# Optional: local embeddings via sentence-transformers.
+# WARNING: pulls PyTorch (~2.5 GB download). Only install if you want
+# the "sentence_transformers" embedding provider.
+sentence-transformers>=3.0
