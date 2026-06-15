@@ -1,7 +1,7 @@
 "use client"
 
 import { KeyRound, Plus } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
 
@@ -30,7 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { API_BASE, api, fetcher } from "@/lib/api"
+import { getApiBase, api, fetcher } from "@/lib/api"
 import type { ApiKey, ApiKeyCreated, Project } from "@/lib/types"
 
 export function ApiTab({ project }: { project: Project }) {
@@ -41,7 +41,13 @@ export function ApiTab({ project }: { project: Project }) {
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null)
   const [creating, setCreating] = useState(false)
 
-  const endpoint = `${API_BASE}/v1/projects/${project.id}/query`
+  // Resolve the public base URL on the client so the copyable endpoint reflects
+  // the host the dashboard is actually open on (localhost or a LAN IP).
+  const [apiBase, setApiBase] = useState("")
+  useEffect(() => setApiBase(getApiBase()), [])
+
+  const endpoint = `${apiBase}/v1/projects/${project.id}/query`
+  const memoryGraphEndpoint = `${apiBase}/v1/projects/${project.id}/memory-graph`
 
   const curlExample = `curl -X POST ${endpoint} \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
@@ -100,6 +106,10 @@ const { answer, sources } = await res.json();`
         </CardHeader>
         <CardContent className="space-y-4">
           <CopyField value={endpoint} />
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">Agent memory graph</h3>
+            <CopyField value={memoryGraphEndpoint} />
+          </div>
           <div className="space-y-2">
             <h3 className="text-sm font-medium">curl</h3>
             <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">

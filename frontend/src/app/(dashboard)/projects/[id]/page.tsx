@@ -1,13 +1,14 @@
 "use client"
 
-import { use } from "react"
+import { Loader2 } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import { use, useEffect, useState } from "react"
 import useSWR from "swr"
 
 import { ApiTab } from "@/components/project/api-tab"
 import { FilesTab } from "@/components/project/files-tab"
 import { PlaygroundTab } from "@/components/project/playground-tab"
 import { SettingsTab } from "@/components/project/settings-tab"
-import { StatusBadge } from "@/components/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher } from "@/lib/api"
@@ -19,6 +20,15 @@ export default function ProjectPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
+  const searchParams = useSearchParams()
+  const selectedFileId = searchParams.get("file")
+  const [tab, setTab] = useState("files")
+
+  // A ?file=<id> link (from the sidebar) opens the Files tab on that file.
+  useEffect(() => {
+    if (selectedFileId) setTab("files")
+  }, [selectedFileId])
+
   const {
     data: project,
     error,
@@ -43,7 +53,12 @@ export default function ProjectPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold">{project.name}</h1>
-        <StatusBadge status={project.status} />
+        {project.status === "indexing" && (
+          <Loader2
+            className="size-4 animate-spin text-muted-foreground"
+            aria-label="Rendering"
+          />
+        )}
         <span className="text-sm text-muted-foreground">
           {project.file_count} files · {project.chunk_count} chunks ·{" "}
           {project.embedding_provider}/{project.embedding_model} ·{" "}
@@ -51,7 +66,7 @@ export default function ProjectPage({
         </span>
       </div>
 
-      <Tabs defaultValue="files">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="files">Files</TabsTrigger>
           <TabsTrigger value="playground">Playground</TabsTrigger>
@@ -59,7 +74,11 @@ export default function ProjectPage({
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="files" className="mt-4">
-          <FilesTab project={project} onChanged={() => mutate()} />
+          <FilesTab
+            project={project}
+            onChanged={() => mutate()}
+            selectedFileId={selectedFileId}
+          />
         </TabsContent>
         <TabsContent value="playground" className="mt-4">
           <PlaygroundTab project={project} />

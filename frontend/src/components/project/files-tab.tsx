@@ -1,23 +1,64 @@
 "use client"
 
-import { FileUp, RotateCcw, Trash2 } from "lucide-react"
-import { useRef, useState } from "react"
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  FileUp,
+  Loader2,
+  MoreHorizontal,
+  RotateCcw,
+  Trash2,
+} from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
 
-import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { api, fetcher } from "@/lib/api"
 import type { FileRecord, Project } from "@/lib/types"
+import { cn } from "@/lib/utils"
+
+const ACCEPTED_FILE_TYPES = [
+  ".pdf",
+  ".docx",
+  ".pptx",
+  ".xlsx",
+  ".xls",
+  ".html",
+  ".htm",
+  ".csv",
+  ".json",
+  ".xml",
+  ".txt",
+  ".md",
+  ".rtf",
+  ".odt",
+  ".ods",
+  ".odp",
+  ".epub",
+  ".eml",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".bmp",
+  ".tif",
+  ".tiff",
+  ".wav",
+  ".mp3",
+  ".m4a",
+  ".zip",
+].join(",")
 
 function formatSize(bytes: number | null): string {
   if (bytes == null) return "—"
@@ -25,15 +66,71 @@ function formatSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+const FILE_STATUS = {
+  pending: {
+    label: "Queued",
+    icon: Clock3,
+    className:
+      "border-transparent bg-transparent text-amber-700 dark:text-amber-400",
+  },
+  processing: {
+    label: "Indexing",
+    icon: Loader2,
+    className:
+      "border-transparent bg-transparent text-sky-700 dark:text-sky-400",
+  },
+  indexed: {
+    label: "Indexed",
+    icon: CheckCircle2,
+    className: "border-transparent bg-transparent text-muted-foreground",
+  },
+  failed: {
+    label: "Needs review",
+    icon: AlertCircle,
+    className:
+      "border-transparent bg-transparent text-red-700 dark:text-red-400",
+  },
+} satisfies Record<
+  FileRecord["status"],
+  {
+    label: string
+    icon: React.ComponentType<{ className?: string }>
+    className: string
+  }
+>
+
+function FileStatus({ status }: { status: FileRecord["status"] }) {
+  const config = FILE_STATUS[status]
+  const Icon = config.icon
+
+  return (
+    <span
+      aria-label={config.label}
+      title={config.label}
+      className={cn(
+        "inline-flex size-8 shrink-0 items-center justify-center rounded-full border",
+        config.className
+      )}
+    >
+      <Icon
+        className={cn("size-3.5", status === "processing" && "animate-spin")}
+      />
+    </span>
+  )
+}
+
 export function FilesTab({
   project,
   onChanged,
+  selectedFileId,
 }: {
   project: Project
   onChanged: () => void
+  selectedFileId?: string | null
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [highlightId, setHighlightId] = useState<string | null>(null)
 
   const { data: files, mutate } = useSWR<FileRecord[]>(
     `/api/projects/${project.id}/files`,
@@ -47,12 +144,24 @@ export function FilesTab({
     }
   )
 
+  // Scroll to and briefly highlight the file targeted by a ?file=<id> link.
+  useEffect(() => {
+    if (!selectedFileId || !files) return
+    const el = document.getElementById(`file-${selectedFileId}`)
+    if (!el) return
+    el.scrollIntoView({ behavior: "smooth", block: "center" })
+    setHighlightId(selectedFileId)
+    const timer = setTimeout(() => setHighlightId(null), 2200)
+    return () => clearTimeout(timer)
+  }, [selectedFileId, files])
+
   async function handleUpload(list: FileList | null) {
     if (!list || list.length === 0) return
     const form = new FormData()
     for (const file of Array.from(list)) {
-      if (!file.name.toLowerCase().endsWith(".pdf")) {
-        toast.error(`${file.name}: only PDF files are supported`)
+      const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`
+      if (!ACCEPTED_FILE_TYPES.split(",").includes(extension)) {
+        toast.error(`${file.name}: unsupported file type`)
         return
       }
       form.append("uploads", file)
@@ -75,9 +184,6 @@ export function FilesTab({
   }
 
   async function handleDelete(file: FileRecord) {
-    if (!confirm(`Delete ${file.filename}? Its content will be removed from the index.`)) {
-      return
-    }
     try {
       await api(`/api/projects/${project.id}/files/${file.id}`, {
         method: "DELETE",
@@ -102,95 +208,180 @@ export function FilesTab({
     }
   }
 
+  async function handleReindexAll() {
+    try {
+      await api(`/api/projects/${project.id}/reindex`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      })
+      toast.success("Re-indexing started")
+      mutate()
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Re-index failed")
+    }
+  }
+
+  async function handleRetryFailed() {
+    const failed = files?.filter((file) => file.status === "failed") ?? []
+    if (failed.length === 0) {
+      toast.info("No failed files to retry")
+      return
+    }
+    try {
+      await Promise.all(
+        failed.map((file) =>
+          api(`/api/projects/${project.id}/files/${file.id}/retry`, {
+            method: "POST",
+          })
+        )
+      )
+      toast.success(`Retrying ${failed.length} failed file${failed.length === 1 ? "" : "s"}`)
+      mutate()
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Retry failed")
+    }
+  }
+
+  const fileCount = files?.length ?? 0
+  const totalChunks = files?.reduce((sum, file) => sum + file.chunk_count, 0) ?? 0
+
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button
-          onClick={() => fileInput.current?.click()}
-          disabled={uploading}
-        >
-          <FileUp className="size-4" />
-          {uploading ? "Uploading…" : "Add files"}
-        </Button>
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".pdf"
-          multiple
-          hidden
-          onChange={(e) => handleUpload(e.target.files)}
-        />
+    <Card className="gap-0 overflow-hidden p-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
+        <div className="space-y-0.5">
+          <h3 className="text-sm font-semibold">Files</h3>
+          <p className="text-xs text-muted-foreground">
+            {fileCount === 0
+              ? "No documents yet"
+              : `${fileCount} document${fileCount === 1 ? "" : "s"} · ${totalChunks} chunk${
+                  totalChunks === 1 ? "" : "s"
+                }`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => fileInput.current?.click()} disabled={uploading}>
+            <FileUp className="size-4" />
+            {uploading ? "Uploading…" : "Add files"}
+          </Button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept={ACCEPTED_FILE_TYPES}
+            multiple
+            hidden
+            onChange={(e) => handleUpload(e.target.files)}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" aria-label="File actions">
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={handleRetryFailed}>
+                <RotateCcw className="size-4" />
+                Retry failed files
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleReindexAll}>
+                <RotateCcw className="size-4" />
+                Re-index all files
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>File</TableHead>
-                <TableHead>Size</TableHead>
-                <TableHead>Pages</TableHead>
-                <TableHead>Chunks</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-24" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {!files || files.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={6}
-                    className="py-10 text-center text-muted-foreground"
-                  >
-                    No files yet — add PDFs to build the knowledge base.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                files.map((file) => (
-                  <TableRow key={file.id}>
-                    <TableCell className="max-w-56 truncate font-medium">
-                      {file.filename}
-                      {file.error && (
-                        <p className="truncate text-xs font-normal text-destructive">
-                          {file.error}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell>{formatSize(file.size_bytes)}</TableCell>
-                    <TableCell>{file.page_count ?? "—"}</TableCell>
-                    <TableCell>{file.chunk_count}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={file.status} />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {file.status === "failed" && (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title="Retry indexing"
-                            onClick={() => handleRetry(file)}
-                          >
-                            <RotateCcw className="size-4" />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          title="Delete file"
-                          onClick={() => handleDelete(file)}
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
+      {fileCount === 0 ? (
+        <div className="px-6 py-16 text-center">
+          <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <FileText className="size-5" />
+          </div>
+          <p className="text-sm font-medium">No files yet</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Add documents to build this knowledge base.
+          </p>
+        </div>
+      ) : (
+        <ul className="divide-y">
+          {(files ?? []).map((file) => {
+            const meta = [
+              (file.source_extension ?? "").replace(".", "").toUpperCase() || null,
+              formatSize(file.size_bytes),
+              file.page_count != null
+                ? `${file.page_count} page${file.page_count === 1 ? "" : "s"}`
+                : null,
+              `${file.chunk_count} chunk${file.chunk_count === 1 ? "" : "s"}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+            return (
+              <li
+                key={file.id}
+                id={`file-${file.id}`}
+                className={cn(
+                  "flex scroll-mt-24 items-center gap-4 px-6 py-3.5 transition-colors hover:bg-muted/40",
+                  highlightId === file.id &&
+                    "bg-primary/10 ring-1 ring-inset ring-primary/30"
+                )}
+              >
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <FileText className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">
+                    {file.filename}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {meta}
+                  </div>
+                  {file.error && (
+                    <p className="mt-0.5 truncate text-xs text-destructive">
+                      {file.error}
+                    </p>
+                  )}
+                  {file.conversion_error &&
+                    file.conversion_error !== file.error && (
+                      <p className="mt-0.5 truncate text-xs text-destructive">
+                        {file.conversion_error}
+                      </p>
+                    )}
+                </div>
+                <FileStatus status={file.status} />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`${file.filename} actions`}
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      disabled={file.status === "processing"}
+                      onSelect={() => handleRetry(file)}
+                    >
+                      <RotateCcw className="size-4" />
+                      {file.status === "failed" ? "Retry indexing" : "Re-index file"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => handleDelete(file)}
+                    >
+                      <Trash2 className="size-4" />
+                      Delete file
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </Card>
   )
 }

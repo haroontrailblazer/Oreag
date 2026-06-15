@@ -13,8 +13,10 @@ from app.providers.registry import (
     validate_llm,
 )
 from app.schemas import ProjectCreate
+from app.services.conversion import is_supported_upload, markdown_path_for
 from app.services.generation import build_user_prompt
 from app.services.ingestion import parse_pdf
+from app.services.memory_graph import _sections
 
 
 class TestRegistry:
@@ -98,6 +100,26 @@ class TestGeneration:
         assert prompt.endswith("Question: what?")
 
 
+class TestConversion:
+    def test_supported_upload_extensions(self):
+        assert is_supported_upload("handbook.pdf")
+        assert is_supported_upload("notes.docx")
+        assert is_supported_upload("site.html")
+        assert is_supported_upload("dataset.csv")
+        assert not is_supported_upload("binary.exe")
+
+    def test_markdown_sidecar_path(self):
+        assert markdown_path_for("owner/project/file.pdf") == "owner/project/file.pdf.md"
+
+
+class TestMemoryGraph:
+    def test_sections_from_markdown_headings(self):
+        sections = _sections("# Intro\nAlpha\n## Details\nBeta", "file-id")
+        assert [section.title for section in sections] == ["Intro", "Details"]
+        assert [section.level for section in sections] == [1, 2]
+        assert sections[0].end == sections[1].start
+
+
 class TestParsePdf:
     def test_extracts_pages_with_text(self):
         doc = pymupdf.open()
@@ -144,3 +166,9 @@ class TestApiSurface:
             headers={"Authorization": "Bearer wrong_prefix_key"},
         )
         assert res.status_code == 401
+
+    def test_memory_graph_routes_require_auth(self):
+        client = TestClient(app)
+        project_id = "00000000-0000-0000-0000-000000000000"
+        assert client.get(f"/api/projects/{project_id}/memory-graph").status_code == 401
+        assert client.get(f"/v1/projects/{project_id}/memory-graph").status_code == 401

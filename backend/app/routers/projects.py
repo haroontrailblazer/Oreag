@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..auth.jwt import get_current_user
 from ..db import get_db
-from ..models import File, Project
+from ..models import File, Project, QueryLog
 from ..providers.registry import embedding_dimensions, validate_llm
 from ..schemas import ProjectCreate, ProjectOut, ProjectUpdate
 from ..services import storage
@@ -15,10 +15,13 @@ from .deps import get_owned_project
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
-def _counts(db: Session, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[int, int]]:
+def _counts(
+    db: Session, project_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, tuple[int, int, int]]:
+    """project_id -> (file_count, chunk_count, query_count)"""
     if not project_ids:
         return {}
-    rows = db.execute(
+    file_rows = db.execute(
         select(
             File.project_id,
             func.count(),
@@ -27,12 +30,24 @@ def _counts(db: Session, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[
         .where(File.project_id.in_(project_ids))
         .group_by(File.project_id)
     ).all()
-    return {pid: (fc, cc) for pid, fc, cc in rows}
+    files = {pid: (fc, cc) for pid, fc, cc in file_rows}
+    query_rows = db.execute(
+        select(QueryLog.project_id, func.count())
+        .where(QueryLog.project_id.in_(project_ids))
+        .group_by(QueryLog.project_id)
+    ).all()
+    queries = {pid: qc for pid, qc in query_rows}
+    return {
+        pid: (*files.get(pid, (0, 0)), queries.get(pid, 0))
+        for pid in set(files) | set(queries)
+    }
 
 
 def _to_out(project: Project, counts: dict) -> ProjectOut:
     out = ProjectOut.model_validate(project)
-    out.file_count, out.chunk_count = counts.get(project.id, (0, 0))
+    out.file_count, out.chunk_count, out.query_count = counts.get(
+        project.id, (0, 0, 0)
+    )
     return out
 
 
@@ -116,9 +131,12 @@ def update_project(
 def delete_project(
     project: Project = Depends(get_owned_project), db: Session = Depends(get_db)
 ):
-    paths = db.scalars(
-        select(File.storage_path).where(File.project_id == project.id)
-    ).all()
+    files = db.scalars(select(File).where(File.project_id == project.id)).all()
+    paths: list[str] = []
+    for file in files:
+        paths.append(file.storage_path)
+        if file.markdown_storage_path:
+            paths.append(file.markdown_storage_path)
     db.delete(project)  # cascades to files/chunks/keys/logs
     db.commit()
-    storage.delete(list(paths))
+    storage.delete(paths)

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
 
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://192.168.56.1:3000"
 
     max_upload_bytes: int = 50 * 1024 * 1024
 

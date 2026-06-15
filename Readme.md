@@ -18,8 +18,9 @@ Providers: **OpenAI** (embeddings + chat), **Ollama** (local, optional), **sente
 
 ### 1. Supabase
 
-Create a project at [supabase.com](https://supabase.com), then run the SQL in
-`supabase/migrations/0001_init.sql` and `0002_rls.sql` (SQL Editor, in order).
+Create a project at [supabase.com](https://supabase.com), then run every file in
+`supabase/migrations/` in order (SQL Editor): `0001_init.sql`, `0002_rls.sql`,
+`0003_markitdown_memory_graph.sql`.
 
 ### 2. Backend
 
@@ -53,6 +54,19 @@ npm run dev
 ```
 
 App runs at http://localhost:3000.
+
+### Accessing from another device on your network (LAN)
+
+`next dev` already listens on all interfaces, so the frontend is reachable at
+`http://<your-lan-ip>:3000`. The frontend automatically calls the backend at the
+same host, so just start the backend on all interfaces too:
+
+```powershell
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+No env changes are needed — the app follows whatever host you open it on, and the
+backend's CORS already allows localhost and any private-LAN origin.
 
 ## Using your generated RAG API
 

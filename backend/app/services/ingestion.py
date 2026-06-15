@@ -12,6 +12,7 @@ from ..db import SessionLocal
 from ..models import Chunk, File, Project
 from ..providers.registry import get_embedder
 from . import storage
+from .conversion import convert_to_markdown, markdown_path_for
 
 logger = logging.getLogger(__name__)
 
@@ -65,19 +66,26 @@ def ingest_file(file_id: uuid.UUID) -> None:
         project.status = "indexing"
         db.commit()
 
-        pdf_bytes = storage.download(file.storage_path)
-        pages = parse_pdf(pdf_bytes)
-        if not pages:
-            raise ValueError("No extractable text found in this PDF")
-        file.page_count = pages[-1][0]
+        source_bytes = storage.download(file.storage_path)
+        converted = convert_to_markdown(source_bytes, file.filename)
+        file.page_count = converted.page_count
+        file.conversion_error = None
+
+        markdown_path = file.markdown_storage_path or markdown_path_for(file.storage_path)
+        storage.upload_file(
+            markdown_path,
+            converted.markdown.encode("utf-8"),
+            "text/markdown; charset=utf-8",
+            upsert=True,
+        )
+        file.markdown_storage_path = markdown_path
 
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=project.chunk_size, chunk_overlap=project.chunk_overlap
         )
-        chunks: list[tuple[int, int, str]] = []  # (chunk_index, page_number, content)
-        for page_number, text in pages:
-            for piece in splitter.split_text(text):
-                chunks.append((len(chunks), page_number, piece))
+        chunks: list[tuple[int, int | None, str]] = []  # (chunk_index, page_number, content)
+        for piece in splitter.split_text(converted.markdown):
+            chunks.append((len(chunks), None, piece))
         if not chunks:
             raise ValueError("Document produced no chunks")
 
@@ -119,6 +127,7 @@ def ingest_file(file_id: uuid.UUID) -> None:
         if file is not None:
             file.status = "failed"
             file.error = str(exc)[:500]
+            file.conversion_error = str(exc)[:500]
             project = db.get(Project, file.project_id)
             if project is not None:
                 recompute_project_status(db, project)

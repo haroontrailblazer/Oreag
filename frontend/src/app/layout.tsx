@@ -18,12 +18,7 @@ export const metadata: Metadata = {
   title: "Oreag — RAG as a Service",
   description:
     "Turn your PDFs into a queryable RAG API: upload documents, tune chunking and embeddings, get an API endpoint.",
-  icons: {
-    icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
-      { url: "/favicon.ico", sizes: "any" },
-    ],
-  },
+  // Favicons are picked up from the app/ file conventions: icon.svg + favicon.ico
 };
 
 export default function RootLayout({

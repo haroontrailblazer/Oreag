@@ -15,17 +15,21 @@ export interface Project {
   updated_at: string
   file_count: number
   chunk_count: number
+  query_count: number
 }
 
 export interface FileRecord {
   id: string
   project_id: string
   filename: string
+  content_type: string | null
+  source_extension: string | null
   size_bytes: number | null
   page_count: number | null
   chunk_count: number
   status: "pending" | "processing" | "indexed" | "failed"
   error: string | null
+  conversion_error: string | null
   created_at: string
   indexed_at: string | null
 }

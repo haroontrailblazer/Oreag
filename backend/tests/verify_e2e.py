@@ -124,6 +124,12 @@ db.expire_all()
 file = db.get(File, file_id)
 check("file indexed", file.status == "indexed", f"status={file.status} err={file.error}")
 check("file has chunks", file.chunk_count > 0, f"chunk_count={file.chunk_count}")
+check(
+    "markdown sidecar stored (MarkItDown)",
+    bool(file.markdown_storage_path),
+    f"path={file.markdown_storage_path}",
+)
+check("no conversion error", file.conversion_error is None, f"err={file.conversion_error}")
 
 chunk_rows = db.query(Chunk).filter(Chunk.project_id == project_id).count()
 check("chunks persisted in pgvector", chunk_rows > 0, f"rows={chunk_rows}")
@@ -160,10 +166,45 @@ try:
 except httpx.ConnectError:
     print("SKIP public /v1 checks — backend not running on :8000")
 
+# second file (same content) -> must auto-link to the first via similarity
+file_id2 = uuid.uuid4()
+storage_path2 = f"{owner_id}/{project_id}/{file_id2}.pdf"
+storage.upload_pdf(storage_path2, pdf_bytes)
+db.add(
+    File(
+        id=file_id2,
+        project_id=project_id,
+        filename="RAG With LangGraph (copy).pdf",
+        storage_path=storage_path2,
+        size_bytes=len(pdf_bytes),
+    )
+)
+db.commit()
+print("Ingesting second file…")
+ingest_file(file_id2)
+
+# memory graph (built in-process, no JWT needed)
+from app.services.memory_graph import build_memory_graph  # noqa: E402
+
+graph = build_memory_graph(db, project)
+related = [e for e in graph.edges if e.type == "related"]
+check("memory graph includes chunk nodes", any(n.type == "chunk" for n in graph.nodes))
+check(
+    "two file nodes present",
+    sum(1 for n in graph.nodes if n.type == "file") == 2,
+)
+check("cross-file related edges exist", len(related) > 0, f"{len(related)} related")
+check(
+    "file-to-file related edge present",
+    any(e.source.startswith("file:") and e.target.startswith("file:") for e in related),
+)
+
 # cleanup
 db.delete(project)
 db.commit()
-storage.delete([storage_path])
+storage.delete(
+    [storage_path, storage_path2, storage_path + ".md", storage_path2 + ".md"]
+)
 db.close()
 
 print()

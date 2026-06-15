@@ -28,6 +28,37 @@ import { api, fetcher } from "@/lib/api"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 const MAX_FILE_MB = 50
+const ACCEPTED_FILE_TYPES = [
+  ".pdf",
+  ".docx",
+  ".pptx",
+  ".xlsx",
+  ".xls",
+  ".html",
+  ".htm",
+  ".csv",
+  ".json",
+  ".xml",
+  ".txt",
+  ".md",
+  ".rtf",
+  ".odt",
+  ".ods",
+  ".odp",
+  ".epub",
+  ".eml",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".bmp",
+  ".tif",
+  ".tiff",
+  ".wav",
+  ".mp3",
+  ".m4a",
+  ".zip",
+].join(",")
 
 function firstAvailableModel<T>(
   groups: Record<string, T[]>,
@@ -79,8 +110,9 @@ export default function NewProjectPage() {
     if (!list) return
     const next = [...files]
     for (const file of Array.from(list)) {
-      if (!file.name.toLowerCase().endsWith(".pdf")) {
-        toast.error(`${file.name}: only PDF files are supported`)
+      const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`
+      if (!ACCEPTED_FILE_TYPES.split(",").includes(extension)) {
+        toast.error(`${file.name}: unsupported file type`)
         continue
       }
       if (file.size > MAX_FILE_MB * 1024 * 1024) {
@@ -140,7 +172,7 @@ export default function NewProjectPage() {
           <CardHeader>
             <CardTitle>1. Name and documents</CardTitle>
             <CardDescription>
-              Give the project a name and upload the PDFs it should know about.
+              Give the project a name and upload the files it should know about.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -163,7 +195,7 @@ export default function NewProjectPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>PDF documents</Label>
+              <Label>Documents</Label>
               <button
                 type="button"
                 onClick={() => fileInput.current?.click()}
@@ -175,13 +207,13 @@ export default function NewProjectPage() {
                 className="flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 text-sm text-muted-foreground hover:bg-muted/40"
               >
                 <FileUp className="size-6" />
-                Drag and drop PDFs here, or click to browse (max {MAX_FILE_MB}{" "}
+                Drag and drop files here, or click to browse (max {MAX_FILE_MB}{" "}
                 MB each)
               </button>
               <input
                 ref={fileInput}
                 type="file"
-                accept=".pdf"
+                accept={ACCEPTED_FILE_TYPES}
                 multiple
                 hidden
                 onChange={(e) => addFiles(e.target.files)}
@@ -209,7 +241,7 @@ export default function NewProjectPage() {
             </div>
             <div className="flex justify-end">
               <Button onClick={() => setStep(2)} disabled={!name.trim()}>
-                Next: configuration
+                Configure
               </Button>
             </div>
           </CardContent>

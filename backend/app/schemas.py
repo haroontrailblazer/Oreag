@@ -54,6 +54,7 @@ class ProjectOut(BaseModel):
     updated_at: datetime
     file_count: int = 0
     chunk_count: int = 0
+    query_count: int = 0
 
 
 class FileOut(BaseModel):
@@ -62,11 +63,14 @@ class FileOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
     filename: str
+    content_type: str | None = None
+    source_extension: str | None = None
     size_bytes: int | None
     page_count: int | None
     chunk_count: int
     status: str
     error: str | None
+    conversion_error: str | None = None
     created_at: datetime
     indexed_at: datetime | None
 
@@ -117,3 +121,25 @@ class ProjectInfo(BaseModel):
     name: str
     status: str
     file_count: int
+    chunk_count: int = 0
+
+
+class MemoryGraphNode(BaseModel):
+    id: str
+    type: str
+    label: str
+    text: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class MemoryGraphEdge(BaseModel):
+    source: str
+    target: str
+    type: str
+    metadata: dict = Field(default_factory=dict)
+
+
+class MemoryGraphResponse(BaseModel):
+    project: ProjectInfo
+    nodes: list[MemoryGraphNode]
+    edges: list[MemoryGraphEdge]

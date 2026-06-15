@@ -12,6 +12,7 @@ from ..models import Chunk, File, Project
 from ..providers.registry import embedding_dimensions
 from ..schemas import FileOut, ReindexRequest
 from ..services import storage
+from ..services.conversion import content_type_for, is_supported_upload, source_extension
 from ..services.ingestion import ingest_file, recompute_project_status
 from .deps import get_owned_project
 
@@ -36,23 +37,28 @@ async def upload_files(
 ):
     created: list[File] = []
     for upload in uploads:
-        if not (upload.filename or "").lower().endswith(".pdf"):
-            raise HTTPException(400, f"Only PDF files are supported: {upload.filename}")
+        filename = upload.filename or "upload"
+        if not is_supported_upload(filename):
+            raise HTTPException(400, f"Unsupported file type: {filename}")
         data = await upload.read()
         if len(data) > settings.max_upload_bytes:
             raise HTTPException(
                 413,
-                f"{upload.filename} exceeds the "
+                f"{filename} exceeds the "
                 f"{settings.max_upload_bytes // (1024 * 1024)} MB limit",
             )
         file_id = uuid.uuid4()
-        path = f"{project.owner_id}/{project.id}/{file_id}.pdf"
-        storage.upload_pdf(path, data)
+        extension = source_extension(filename)
+        content_type = content_type_for(filename, upload.content_type)
+        path = f"{project.owner_id}/{project.id}/{file_id}{extension}"
+        storage.upload_file(path, data, content_type)
         record = File(
             id=file_id,
             project_id=project.id,
-            filename=upload.filename,
+            filename=filename,
             storage_path=path,
+            content_type=content_type,
+            source_extension=extension,
             size_bytes=len(data),
         )
         db.add(record)
@@ -74,11 +80,13 @@ def delete_file(
     file = db.get(File, file_id)
     if file is None or file.project_id != project.id:
         raise HTTPException(404, "File not found")
-    storage_path = file.storage_path
+    paths = [file.storage_path]
+    if file.markdown_storage_path:
+        paths.append(file.markdown_storage_path)
     db.delete(file)  # cascades to its chunks
     recompute_project_status(db, project)
     db.commit()
-    storage.delete([storage_path])
+    storage.delete(paths)
 
 
 @router.post("/files/{file_id}/retry", response_model=FileOut)
@@ -95,6 +103,7 @@ def retry_file(
         raise HTTPException(409, "File is already being processed")
     file.status = "pending"
     file.error = None
+    file.conversion_error = None
     project.status = "indexing"
     db.commit()
     background_tasks.add_task(ingest_file, file.id)
@@ -132,6 +141,7 @@ def reindex_project(
         file.status = "pending"
         file.chunk_count = 0
         file.error = None
+        file.conversion_error = None
     project.status = "indexing" if files else "empty"
     db.commit()
 
