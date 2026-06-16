@@ -10,7 +10,6 @@ re-index ("update memory") at any time from the dashboard.
 - **frontend/** — Next.js (App Router, TypeScript, Tailwind, shadcn/ui). Auth via Supabase.
 - **backend/** — FastAPI. Ingestion (PyMuPDF → chunking → embeddings → pgvector), retrieval, generation, API-key management.
 - **supabase/** — SQL migrations: Postgres metadata tables, pgvector `chunks`, RLS policies, private storage bucket.
-- **legacy/** — the original prototype, kept for reference.
 
 Providers: **OpenAI** (embeddings + chat), **Ollama** (local, optional), **sentence-transformers** (local embeddings, optional).
 
@@ -20,7 +19,8 @@ Providers: **OpenAI** (embeddings + chat), **Ollama** (local, optional), **sente
 
 Create a project at [supabase.com](https://supabase.com), then run every file in
 `supabase/migrations/` in order (SQL Editor): `0001_init.sql`, `0002_rls.sql`,
-`0003_markitdown_memory_graph.sql`.
+`0003_markitdown_memory_graph.sql`, `0004_per_file_chunking.sql`,
+`0005_provider_keys.sql`.
 
 ### 2. Backend
 

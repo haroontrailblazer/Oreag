@@ -24,17 +24,19 @@ outlive a serverless request). Deploy it as a normal container instead. A
 | `SUPABASE_URL` | `https://<ref>.supabase.co` |
 | `SUPABASE_ANON_KEY` | publishable/anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | secret key (Storage access) |
-| `OPENAI_API_KEY` | **required in the cloud** — Ollama is localhost-only and won't be reachable from a cloud host |
+| `APP_ENCRYPTION_KEY` | **required** — Fernet key that encrypts users' own provider keys at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `JWT_MODE` | `jwks` |
 | `CORS_ORIGINS` | your Vercel URL, e.g. `https://oreag.vercel.app` (comma-separate multiple) |
 
 After it deploys you get a public URL, e.g. `https://oreag-api.onrender.com`.
 Confirm `GET https://oreag-api.onrender.com/healthz` returns `{"status":"ok"}`.
 
-> Provider note: in the cloud, use **OpenAI**. `/api/models` probes Ollama and
-> will report it unavailable, so the wizard automatically greys out local
-> options. To use local models you'd have to host Ollama yourself and point
-> `OLLAMA_BASE_URL` at it.
+> Provider note: this is **bring-your-own-key (BYOK)** — the server ships no
+> shared provider key. Each user adds their own OpenAI / Gemini / Anthropic key
+> under **Settings → API keys**, and `/api/models` reports a provider available
+> once that user has a key for it. Ollama is localhost-only, so in the cloud it
+> is reported unavailable (the wizard greys it out); to use local models, run
+> the backend on a host that can reach your Ollama and set `OLLAMA_BASE_URL`.
 
 ## 2. Frontend → Vercel
 
@@ -64,6 +66,7 @@ You get a URL, e.g. `https://oreag.vercel.app`.
 
 ## Smoke test after deploy
 
-Sign up → confirm email → create a project (OpenAI models) → upload a PDF →
-watch it index → ask a question in the Playground → copy the `curl` from the API
-tab and run it against the public `/v1` endpoint.
+Sign up → confirm email → **Settings → API keys: add your OpenAI (and/or Gemini
+/ Anthropic) key** → create a project → upload a PDF → watch it index → ask a
+question in the Playground → copy the `curl` from the API tab and run it against
+the public `/v1` endpoint.

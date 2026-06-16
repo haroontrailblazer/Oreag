@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import crypto
 from ..auth.jwt import get_current_user
 from ..db import get_db
 from ..models import File, Project, QueryLog
@@ -13,6 +14,17 @@ from ..services import storage
 from .deps import get_owned_project
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+
+def _set_key_override(project: Project, slot: str, value: str | None) -> None:
+    """Apply a per-project BYOK override. slot is 'embedding' or 'llm'.
+    None = leave unchanged, "" = clear, any other value = encrypt + store."""
+    pair = crypto.apply_override(value)
+    if pair is None:
+        return
+    encrypted, masked = pair
+    setattr(project, f"{slot}_key_encrypted", encrypted)
+    setattr(project, f"{slot}_key_last4", masked)
 
 
 def _counts(
@@ -91,6 +103,8 @@ def create_project(
         llm_model=body.llm_model,
         top_k=body.top_k,
     )
+    _set_key_override(project, "embedding", body.embedding_api_key)
+    _set_key_override(project, "llm", body.llm_api_key)
     db.add(project)
     db.commit()
     return _to_out(project, {})
@@ -123,6 +137,8 @@ def update_project(
         project.description = body.description
     if body.top_k is not None:
         project.top_k = body.top_k
+    _set_key_override(project, "embedding", body.embedding_api_key)
+    _set_key_override(project, "llm", body.llm_api_key)
     db.commit()
     return _to_out(project, _counts(db, [project.id]))
 

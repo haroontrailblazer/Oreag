@@ -59,6 +59,11 @@ export function SettingsTab({
   const [confirmReindex, setConfirmReindex] = useState(false)
   const [reindexing, setReindexing] = useState(false)
 
+  // per-project key overrides
+  const [llmKeyInput, setLlmKeyInput] = useState("")
+  const [embKeyInput, setEmbKeyInput] = useState("")
+  const [savingKey, setSavingKey] = useState<"llm" | "embedding" | null>(null)
+
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -86,6 +91,27 @@ export function SettingsTab({
       toast.error(err instanceof Error ? err.message : "Save failed")
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function saveKeyOverride(
+    field: "llm_api_key" | "embedding_api_key",
+    value: string
+  ) {
+    setSavingKey(field === "llm_api_key" ? "llm" : "embedding")
+    try {
+      await api(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ [field]: value }),
+      })
+      toast.success(value === "" ? "Reverted to account key" : "Project key saved")
+      setLlmKeyInput("")
+      setEmbKeyInput("")
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save key")
+    } finally {
+      setSavingKey(null)
     }
   }
 
@@ -182,6 +208,96 @@ export function SettingsTab({
           <Button onClick={handleSave} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Provider key overrides</CardTitle>
+          <CardDescription>
+            This project uses your{" "}
+            <a href="/settings/api-keys" className="underline">
+              account API keys
+            </a>{" "}
+            by default. Set a key here to use a different one just for this
+            project. Local providers (Ollama) need no key.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>
+              Answer model (LLM) key —{" "}
+              {project.llm_key_last4 ? (
+                <span className="font-mono">project key ••••{project.llm_key_last4}</span>
+              ) : (
+                "using account key"
+              )}
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                type="password"
+                autoComplete="off"
+                placeholder="Paste a key for this project"
+                value={llmKeyInput}
+                onChange={(e) => setLlmKeyInput(e.target.value)}
+              />
+              <Button
+                variant="outline"
+                disabled={!llmKeyInput.trim() || savingKey === "llm"}
+                onClick={() => saveKeyOverride("llm_api_key", llmKeyInput.trim())}
+              >
+                Save
+              </Button>
+              {project.llm_key_last4 && (
+                <Button
+                  variant="ghost"
+                  disabled={savingKey === "llm"}
+                  onClick={() => saveKeyOverride("llm_api_key", "")}
+                >
+                  Use account key
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>
+              Embedding key —{" "}
+              {project.embedding_key_last4 ? (
+                <span className="font-mono">
+                  project key ••••{project.embedding_key_last4}
+                </span>
+              ) : (
+                "using account key"
+              )}
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                type="password"
+                autoComplete="off"
+                placeholder="Paste a key for this project"
+                value={embKeyInput}
+                onChange={(e) => setEmbKeyInput(e.target.value)}
+              />
+              <Button
+                variant="outline"
+                disabled={!embKeyInput.trim() || savingKey === "embedding"}
+                onClick={() =>
+                  saveKeyOverride("embedding_api_key", embKeyInput.trim())
+                }
+              >
+                Save
+              </Button>
+              {project.embedding_key_last4 && (
+                <Button
+                  variant="ghost"
+                  disabled={savingKey === "embedding"}
+                  onClick={() => saveKeyOverride("embedding_api_key", "")}
+                >
+                  Use account key
+                </Button>
+              )}
+            </div>
+          </div>
         </CardContent>
       </Card>
 

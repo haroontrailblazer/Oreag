@@ -1,18 +1,22 @@
 import hashlib
+import uuid
 
 import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 
+from app import crypto
 from app.auth.api_keys import KEY_PREFIX, generate_api_key, hash_key
 from app.main import app
+from app.models import Project, ProviderKey
+from app.providers import resolver
 from app.providers.registry import (
     CATALOG,
     embedding_dimensions,
     get_embedder,
     validate_llm,
 )
-from app.schemas import ProjectCreate
+from app.schemas import ProjectCreate, ProjectOut, ProviderKeyOut
 from app.services.conversion import is_supported_upload, markdown_path_for
 from app.services.generation import build_user_prompt
 from app.services.ingestion import parse_pdf
@@ -51,6 +55,79 @@ class TestRegistry:
             for model in models:
                 validate_llm(provider, model)
 
+    def test_byok_providers_present(self):
+        assert "gemini" in CATALOG["embedding"]
+        assert "gemini" in CATALOG["llm"]
+        assert "anthropic" in CATALOG["llm"]
+        # Anthropic is chat-only — no embedding model
+        assert "anthropic" not in CATALOG["embedding"]
+
+    def test_anthropic_has_no_embedder(self):
+        with pytest.raises(ValueError):
+            get_embedder("anthropic", "claude-haiku-4-5-20251001")
+
+
+class TestCrypto:
+    def test_encrypt_roundtrip(self):
+        assert crypto.decrypt(crypto.encrypt("hello-secret")) == "hello-secret"
+
+    def test_last4(self):
+        assert crypto.last4("sk-proj-abcd1234") == "1234"
+
+    def test_apply_override(self):
+        assert crypto.apply_override(None) is None  # leave unchanged
+        assert crypto.apply_override("") == (None, None)  # clear
+        enc, masked = crypto.apply_override("sk-test-wxyz5678")
+        assert masked == "5678"
+        assert crypto.decrypt(enc) == "sk-test-wxyz5678"
+
+
+class TestResolver:
+    def test_requires_key(self):
+        assert resolver.requires_key("openai")
+        assert resolver.requires_key("gemini")
+        assert resolver.requires_key("anthropic")
+        assert not resolver.requires_key("ollama")
+        assert not resolver.requires_key("sentence_transformers")
+
+    def test_project_override_takes_precedence(self):
+        project = Project(
+            owner_id=uuid.uuid4(),
+            llm_provider="openai",
+            llm_key_encrypted=crypto.encrypt("project-key"),
+        )
+        # db is never touched when a project override is present
+        assert resolver.resolve_llm_key(None, project) == "project-key"
+
+    def test_keyless_provider_returns_none(self):
+        project = Project(owner_id=uuid.uuid4(), embedding_provider="ollama")
+        assert resolver.resolve_embedding_key(None, project) is None
+
+    def test_falls_back_to_account_key(self):
+        class FakeDB:
+            def __init__(self, row):
+                self.row = row
+
+            def scalar(self, *args, **kwargs):
+                return self.row
+
+        account = ProviderKey(
+            owner_id=uuid.uuid4(),
+            provider="anthropic",
+            encrypted_key=crypto.encrypt("account-key"),
+            last4="-key",
+        )
+        project = Project(owner_id=account.owner_id, llm_provider="anthropic")
+        assert resolver.resolve_llm_key(FakeDB(account), project) == "account-key"
+
+    def test_no_key_anywhere_returns_none(self):
+        class FakeDB:
+            def scalar(self, *args, **kwargs):
+                return None
+
+        project = Project(owner_id=uuid.uuid4(), llm_provider="openai")
+        assert resolver.resolve_llm_key(FakeDB(), project) is None
+
 
 class TestApiKeys:
     def test_generate_format(self):
@@ -86,6 +163,19 @@ class TestSchemas:
     def test_name_required(self):
         with pytest.raises(ValueError):
             ProjectCreate(name="")
+
+    def test_key_material_never_serialized(self):
+        # masked outputs must never expose raw or encrypted keys
+        provider_fields = set(ProviderKeyOut.model_fields)
+        assert "encrypted_key" not in provider_fields
+        assert "key" not in provider_fields
+        assert "last4" in provider_fields
+
+        project_fields = set(ProjectOut.model_fields)
+        assert "embedding_key_encrypted" not in project_fields
+        assert "llm_key_encrypted" not in project_fields
+        assert "embedding_key_last4" in project_fields
+        assert "llm_key_last4" in project_fields
 
 
 class TestGeneration:
@@ -149,6 +239,7 @@ class TestApiSurface:
         client = TestClient(app)
         assert client.get("/api/projects").status_code == 401
         assert client.get("/api/models").status_code == 401
+        assert client.get("/api/provider-keys").status_code == 401
 
     def test_public_route_requires_api_key(self):
         client = TestClient(app)

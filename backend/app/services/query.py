@@ -32,7 +32,7 @@ def run_query(
     started = time.perf_counter()
     try:
         sources = retrieval.retrieve(db, project, question, top_k)
-        answer = generation.generate_answer(project, question, sources)
+        answer = generation.generate_answer(db, project, question, sources)
     except ProviderUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     latency_ms = int((time.perf_counter() - started) * 1000)

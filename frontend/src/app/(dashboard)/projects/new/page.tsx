@@ -1,6 +1,7 @@
 "use client"
 
 import { FileUp, X } from "lucide-react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useRef, useState } from "react"
 import { toast } from "sonner"
@@ -257,6 +258,21 @@ export default function NewProjectPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {models &&
+              (!availability[embedding.split("/")[0]] ||
+                !availability[llm.split("/")[0]]) && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                  A selected provider has no key yet. Add your own key in{" "}
+                  <Link
+                    href="/settings/api-keys"
+                    className="font-medium underline"
+                  >
+                    Settings → API keys
+                  </Link>{" "}
+                  — or pick a local Ollama model. You can also set a per-project
+                  key in the project&apos;s settings after creating it.
+                </div>
+              )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="chunk-size">Chunk size</Label>

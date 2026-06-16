@@ -26,6 +26,12 @@ class Project(Base):
     llm_provider: Mapped[str] = mapped_column(Text, default="openai")
     llm_model: Mapped[str] = mapped_column(Text, default="gpt-4o-mini")
     top_k: Mapped[int] = mapped_column(Integer, default=5)
+    # Optional per-project BYOK key overrides (Fernet ciphertext + last4 for
+    # display). When null, key resolution falls back to the owner's account key.
+    embedding_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    embedding_key_last4: Mapped[str | None] = mapped_column(Text)
+    llm_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    llm_key_last4: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="empty")  # empty|indexing|ready|error
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -87,6 +93,23 @@ class ApiKey(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProviderKey(Base):
+    """Account-level BYOK provider credential (one per owner+provider)."""
+
+    __tablename__ = "provider_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    provider: Mapped[str] = mapped_column(Text)  # openai|gemini|anthropic
+    label: Mapped[str] = mapped_column(Text, default="default")
+    encrypted_key: Mapped[str] = mapped_column(Text)
+    last4: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class QueryLog(Base):

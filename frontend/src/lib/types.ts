@@ -16,6 +16,20 @@ export interface Project {
   file_count: number
   chunk_count: number
   query_count: number
+  // Masked per-project key overrides (null = using the account-level key).
+  embedding_key_last4: string | null
+  llm_key_last4: string | null
+}
+
+export type ProviderId = "openai" | "gemini" | "anthropic"
+
+export interface ProviderKey {
+  id: string
+  provider: ProviderId
+  label: string
+  last4: string
+  created_at: string
+  updated_at: string
 }
 
 export interface FileRecord {

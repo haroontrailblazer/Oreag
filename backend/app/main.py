@@ -5,7 +5,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routers import files, keys, memory_graph, meta, playground, projects, rag_v1
+from .routers import (
+    files,
+    keys,
+    memory_graph,
+    meta,
+    playground,
+    projects,
+    provider_keys,
+    rag_v1,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -51,6 +60,7 @@ app.add_middleware(
 app.include_router(projects.router)
 app.include_router(files.router)
 app.include_router(keys.router)
+app.include_router(provider_keys.router)
 app.include_router(memory_graph.owner_router)
 app.include_router(playground.router)
 app.include_router(meta.router)

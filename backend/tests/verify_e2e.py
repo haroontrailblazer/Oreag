@@ -6,7 +6,7 @@ services directly + the public API via the running server for the key path).
   python -m tests.verify_e2e
 
 Reads credentials from backend/.env. Creates a throwaway user + project,
-uploads the legacy reference PDF, runs ingestion synchronously, then queries
+uploads the reference PDF fixture, runs ingestion synchronously, then queries
 both the retrieval pipeline directly and the public /v1 endpoint with a key.
 """
 import secrets
@@ -28,7 +28,7 @@ from app.services.query import run_query
 API = "http://localhost:8000"
 EMBEDDING = ("ollama", "nomic-embed-text", 768)
 LLM = ("ollama", "llama3.1")
-PDF = Path(__file__).resolve().parents[2] / "legacy" / "RAG With LangGraph.pdf"
+PDF = Path(__file__).resolve().parent / "fixtures" / "RAG With LangGraph.pdf"
 
 ok = True
 

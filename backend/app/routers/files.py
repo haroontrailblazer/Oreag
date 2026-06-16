@@ -6,6 +6,7 @@ from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import crypto
 from ..config import settings
 from ..db import get_db
 from ..models import Chunk, File, Project
@@ -37,6 +38,7 @@ async def upload_files(
     top_k: int | None = Form(None),
     embedding_provider: str | None = Form(None),
     embedding_model: str | None = Form(None),
+    embedding_api_key: str | None = Form(None),
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
 ):
@@ -74,6 +76,10 @@ async def upload_files(
         project.embedding_model = embedding_model
         project.embedding_dimensions = dimensions
         reindex_existing = True
+
+    pair = crypto.apply_override(embedding_api_key)
+    if pair is not None:
+        project.embedding_key_encrypted, project.embedding_key_last4 = pair
 
     created: list[File] = []
     for upload in uploads:
@@ -191,6 +197,9 @@ def reindex_project(
         project.embedding_provider = provider
         project.embedding_model = model
         project.embedding_dimensions = dimensions
+    pair = crypto.apply_override(body.embedding_api_key)
+    if pair is not None:
+        project.embedding_key_encrypted, project.embedding_key_last4 = pair
     if body.chunk_size is not None:
         project.chunk_size = body.chunk_size
     if body.chunk_overlap is not None:

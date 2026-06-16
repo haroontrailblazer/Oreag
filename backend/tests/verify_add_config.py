@@ -20,7 +20,7 @@ SUPABASE_URL = settings.supabase_url
 ANON = settings.supabase_anon_key
 DSN = settings.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
 API = "http://localhost:8000"
-PDF = Path(__file__).resolve().parents[2] / "legacy" / "RAG With LangGraph.pdf"
+PDF = Path(__file__).resolve().parent / "fixtures" / "RAG With LangGraph.pdf"
 
 ok = True
 

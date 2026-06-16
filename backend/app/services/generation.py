@@ -1,4 +1,7 @@
+from sqlalchemy.orm import Session
+
 from ..models import Project
+from ..providers import resolver
 from ..providers.registry import get_llm
 
 SYSTEM_PROMPT = (
@@ -17,6 +20,9 @@ def build_user_prompt(question: str, sources: list[dict]) -> str:
     return f"Context:\n{context}\n\nQuestion: {question}"
 
 
-def generate_answer(project: Project, question: str, sources: list[dict]) -> str:
-    llm = get_llm(project.llm_provider, project.llm_model)
+def generate_answer(
+    db: Session, project: Project, question: str, sources: list[dict]
+) -> str:
+    api_key = resolver.resolve_llm_key(db, project)
+    llm = get_llm(project.llm_provider, project.llm_model, api_key)
     return llm.generate(SYSTEM_PROMPT, build_user_prompt(question, sources))

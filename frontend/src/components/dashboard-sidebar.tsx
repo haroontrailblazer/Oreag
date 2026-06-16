@@ -6,6 +6,7 @@ import {
   FileText,
   FolderKanban,
   Home,
+  KeyRound,
   Plus,
   Search,
 } from "lucide-react"
@@ -29,6 +30,7 @@ import { cn } from "@/lib/utils"
 const mainNav = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/projects/new", label: "New project", icon: Plus },
+  { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
 ]
 
 const statusTone: Record<Project["status"], string> = {

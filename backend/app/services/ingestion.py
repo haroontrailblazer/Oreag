@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..models import Chunk, File, Project
+from ..providers import resolver
 from ..providers.registry import get_embedder
 from . import storage
 from .conversion import convert_to_markdown, markdown_path_for
@@ -94,7 +95,10 @@ def ingest_file(file_id: uuid.UUID) -> None:
         if not chunks:
             raise ValueError("Document produced no chunks")
 
-        embedder = get_embedder(project.embedding_provider, project.embedding_model)
+        api_key = resolver.resolve_embedding_key(db, project)
+        embedder = get_embedder(
+            project.embedding_provider, project.embedding_model, api_key
+        )
 
         # idempotent re-runs: drop anything from a previous attempt
         db.execute(sql_delete(Chunk).where(Chunk.file_id == file.id))

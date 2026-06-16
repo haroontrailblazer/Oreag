@@ -1,7 +1,11 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Per-project BYOK key override fields. None = leave unchanged; "" = clear
+# (fall back to the account-level key); any other value = set for this project.
 
 
 class ProjectCreate(BaseModel):
@@ -14,6 +18,8 @@ class ProjectCreate(BaseModel):
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o-mini"
     top_k: int = Field(default=5, ge=1, le=20)
+    embedding_api_key: str | None = None
+    llm_api_key: str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -24,6 +30,9 @@ class ProjectUpdate(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     top_k: int | None = Field(default=None, ge=1, le=20)
+    # Changing a key (not the model) is a safe, instant edit — no reindex needed.
+    embedding_api_key: str | None = None
+    llm_api_key: str | None = None
 
 
 class ReindexRequest(BaseModel):
@@ -33,6 +42,7 @@ class ReindexRequest(BaseModel):
     chunk_overlap: int | None = Field(default=None, ge=0)
     embedding_provider: str | None = None
     embedding_model: str | None = None
+    embedding_api_key: str | None = None
 
 
 class ProjectOut(BaseModel):
@@ -55,6 +65,9 @@ class ProjectOut(BaseModel):
     file_count: int = 0
     chunk_count: int = 0
     query_count: int = 0
+    # Masked display of any per-project key override (null = using account key).
+    embedding_key_last4: str | None = None
+    llm_key_last4: str | None = None
 
 
 class FileOut(BaseModel):
@@ -92,6 +105,25 @@ class ApiKeyCreated(ApiKeyOut):
 
 class ApiKeyCreate(BaseModel):
     name: str = Field(default="default", min_length=1, max_length=100)
+
+
+class ProviderKeyCreate(BaseModel):
+    provider: Literal["openai", "gemini", "anthropic"]
+    key: str = Field(min_length=8, max_length=500)
+    label: str = Field(default="default", min_length=1, max_length=100)
+
+
+class ProviderKeyOut(BaseModel):
+    """Masked view — the raw/encrypted key is never serialized."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    provider: str
+    label: str
+    last4: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class QueryRequest(BaseModel):

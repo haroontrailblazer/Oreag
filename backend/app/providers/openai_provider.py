@@ -1,24 +1,24 @@
 from openai import OpenAI
 
-from ..config import settings
 from .base import ProviderUnavailableError
 
 EMBED_BATCH_SIZE = 100
 
 
-def _client() -> OpenAI:
-    if not settings.openai_api_key:
+def _client(api_key: str | None) -> OpenAI:
+    if not api_key:
         raise ProviderUnavailableError(
-            "OPENAI_API_KEY is not configured on the server"
+            "No OpenAI API key configured. Add one in Settings → API keys "
+            "or set a per-project key."
         )
-    return OpenAI(api_key=settings.openai_api_key)
+    return OpenAI(api_key=api_key)
 
 
 class OpenAIEmbedder:
-    def __init__(self, model: str, dimensions: int):
+    def __init__(self, model: str, dimensions: int, api_key: str | None = None):
         self.model = model
         self.dimensions = dimensions
-        self.client = _client()
+        self.client = _client(api_key)
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
@@ -34,9 +34,9 @@ class OpenAIEmbedder:
 
 
 class OpenAILLM:
-    def __init__(self, model: str):
+    def __init__(self, model: str, api_key: str | None = None):
         self.model = model
-        self.client = _client()
+        self.client = _client(api_key)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         resp = self.client.chat.completions.create(

@@ -14,7 +14,11 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     supabase_jwt_aud: str = "authenticated"
 
-    openai_api_key: str = ""
+    # BYOK: users supply their own provider keys; no shared server key is used.
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    app_encryption_key: str = ""
+
+    openai_api_key: str = ""  # deprecated — kept only so old .env files don't error
     ollama_base_url: str = "http://localhost:11434"
 
     cors_origins: str = "http://localhost:3000,http://192.168.56.1:3000"

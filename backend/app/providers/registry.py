@@ -7,6 +7,10 @@ CATALOG: dict = {
             {"model": "text-embedding-3-small", "dimensions": 1536},
             {"model": "text-embedding-3-large", "dimensions": 3072},
         ],
+        "gemini": [
+            {"model": "text-embedding-004", "dimensions": 768},
+            {"model": "gemini-embedding-001", "dimensions": 3072},
+        ],
         "ollama": [
             {"model": "nomic-embed-text", "dimensions": 768},
             {"model": "mxbai-embed-large", "dimensions": 1024},
@@ -17,6 +21,8 @@ CATALOG: dict = {
     },
     "llm": {
         "openai": ["gpt-4o-mini", "gpt-4o"],
+        "gemini": ["gemini-2.0-flash", "gemini-1.5-pro"],
+        "anthropic": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"],
         "ollama": ["llama3.1", "mistral", "qwen2.5"],
     },
 }
@@ -35,12 +41,18 @@ def validate_llm(provider: str, model: str) -> None:
         raise ValueError(f"Unknown LLM: {provider}/{model}")
 
 
-def get_embedder(provider: str, model: str) -> EmbeddingProvider:
+def get_embedder(
+    provider: str, model: str, api_key: str | None = None
+) -> EmbeddingProvider:
     dimensions = embedding_dimensions(provider, model)
     if provider == "openai":
         from .openai_provider import OpenAIEmbedder
 
-        return OpenAIEmbedder(model, dimensions)
+        return OpenAIEmbedder(model, dimensions, api_key)
+    if provider == "gemini":
+        from .gemini_provider import GeminiEmbedder
+
+        return GeminiEmbedder(model, dimensions, api_key)
     if provider == "ollama":
         from .ollama_provider import OllamaEmbedder
 
@@ -52,12 +64,20 @@ def get_embedder(provider: str, model: str) -> EmbeddingProvider:
     raise ValueError(f"Unknown embedding provider: {provider}")
 
 
-def get_llm(provider: str, model: str) -> LLMProvider:
+def get_llm(provider: str, model: str, api_key: str | None = None) -> LLMProvider:
     validate_llm(provider, model)
     if provider == "openai":
         from .openai_provider import OpenAILLM
 
-        return OpenAILLM(model)
+        return OpenAILLM(model, api_key)
+    if provider == "gemini":
+        from .gemini_provider import GeminiLLM
+
+        return GeminiLLM(model, api_key)
+    if provider == "anthropic":
+        from .anthropic_provider import AnthropicLLM
+
+        return AnthropicLLM(model, api_key)
     if provider == "ollama":
         from .ollama_provider import OllamaLLM
 
