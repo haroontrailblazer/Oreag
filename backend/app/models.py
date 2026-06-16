@@ -45,6 +45,8 @@ class File(Base):
     content_type: Mapped[str | None] = mapped_column(Text)
     source_extension: Mapped[str | None] = mapped_column(Text)
     markdown_storage_path: Mapped[str | None] = mapped_column(Text)
+    chunk_size: Mapped[int | None] = mapped_column(Integer)
+    chunk_overlap: Mapped[int | None] = mapped_column(Integer)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     page_count: Mapped[int | None] = mapped_column(Integer)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)

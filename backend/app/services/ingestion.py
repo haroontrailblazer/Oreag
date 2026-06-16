@@ -80,8 +80,13 @@ def ingest_file(file_id: uuid.UUID) -> None:
         )
         file.markdown_storage_path = markdown_path
 
+        # per-file overrides fall back to the project defaults
+        chunk_size = file.chunk_size or project.chunk_size
+        chunk_overlap = (
+            file.chunk_overlap if file.chunk_overlap is not None else project.chunk_overlap
+        )
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=project.chunk_size, chunk_overlap=project.chunk_overlap
+            chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
         chunks: list[tuple[int, int | None, str]] = []  # (chunk_index, page_number, content)
         for piece in splitter.split_text(converted.markdown):

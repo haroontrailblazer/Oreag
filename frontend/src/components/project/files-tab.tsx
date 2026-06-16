@@ -5,16 +5,16 @@ import {
   CheckCircle2,
   Clock3,
   FileText,
-  FileUp,
   Loader2,
   MoreHorizontal,
   RotateCcw,
   Trash2,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
 
+import { AddFilesDialog } from "@/components/project/add-files-dialog"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
@@ -27,38 +27,6 @@ import {
 import { api, fetcher } from "@/lib/api"
 import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
-
-const ACCEPTED_FILE_TYPES = [
-  ".pdf",
-  ".docx",
-  ".pptx",
-  ".xlsx",
-  ".xls",
-  ".html",
-  ".htm",
-  ".csv",
-  ".json",
-  ".xml",
-  ".txt",
-  ".md",
-  ".rtf",
-  ".odt",
-  ".ods",
-  ".odp",
-  ".epub",
-  ".eml",
-  ".jpg",
-  ".jpeg",
-  ".png",
-  ".gif",
-  ".bmp",
-  ".tif",
-  ".tiff",
-  ".wav",
-  ".mp3",
-  ".m4a",
-  ".zip",
-].join(",")
 
 function formatSize(bytes: number | null): string {
   if (bytes == null) return "—"
@@ -128,8 +96,6 @@ export function FilesTab({
   onChanged: () => void
   selectedFileId?: string | null
 }) {
-  const fileInput = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
   const [highlightId, setHighlightId] = useState<string | null>(null)
 
   const { data: files, mutate } = useSWR<FileRecord[]>(
@@ -154,34 +120,6 @@ export function FilesTab({
     const timer = setTimeout(() => setHighlightId(null), 2200)
     return () => clearTimeout(timer)
   }, [selectedFileId, files])
-
-  async function handleUpload(list: FileList | null) {
-    if (!list || list.length === 0) return
-    const form = new FormData()
-    for (const file of Array.from(list)) {
-      const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`
-      if (!ACCEPTED_FILE_TYPES.split(",").includes(extension)) {
-        toast.error(`${file.name}: unsupported file type`)
-        return
-      }
-      form.append("uploads", file)
-    }
-    setUploading(true)
-    try {
-      await api(`/api/projects/${project.id}/files`, {
-        method: "POST",
-        body: form,
-      })
-      toast.success("Upload complete — indexing started")
-      mutate()
-      onChanged()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Upload failed")
-    } finally {
-      setUploading(false)
-      if (fileInput.current) fileInput.current.value = ""
-    }
-  }
 
   async function handleDelete(file: FileRecord) {
     try {
@@ -261,17 +199,12 @@ export function FilesTab({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={() => fileInput.current?.click()} disabled={uploading}>
-            <FileUp className="size-4" />
-            {uploading ? "Uploading…" : "Add files"}
-          </Button>
-          <input
-            ref={fileInput}
-            type="file"
-            accept={ACCEPTED_FILE_TYPES}
-            multiple
-            hidden
-            onChange={(e) => handleUpload(e.target.files)}
+          <AddFilesDialog
+            project={project}
+            onUploaded={() => {
+              mutate()
+              onChanged()
+            }}
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

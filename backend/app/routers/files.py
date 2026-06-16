@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
 from fastapi import File as FastAPIFile
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
@@ -32,9 +32,49 @@ def list_files(
 async def upload_files(
     background_tasks: BackgroundTasks,
     uploads: list[UploadFile] = FastAPIFile(...),
+    chunk_size: int | None = Form(None),
+    chunk_overlap: int | None = Form(None),
+    top_k: int | None = Form(None),
+    embedding_provider: str | None = Form(None),
+    embedding_model: str | None = Form(None),
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
 ):
+    # validate the per-file chunking overrides (null = use project defaults)
+    if chunk_size is not None and not (100 <= chunk_size <= 8000):
+        raise HTTPException(422, "chunk_size must be between 100 and 8000")
+    if chunk_overlap is not None and chunk_overlap < 0:
+        raise HTTPException(422, "chunk_overlap must be >= 0")
+    effective_size = chunk_size if chunk_size is not None else project.chunk_size
+    if chunk_overlap is not None and chunk_overlap >= effective_size:
+        raise HTTPException(422, "chunk_overlap must be smaller than chunk_size")
+
+    # top_k is a project/query setting
+    if top_k is not None:
+        if not (1 <= top_k <= 20):
+            raise HTTPException(422, "top_k must be between 1 and 20")
+        project.top_k = top_k
+
+    # embedding model is project-wide (uniform vector dimension); changing it
+    # re-indexes every existing file too.
+    reindex_existing = False
+    if (
+        embedding_provider
+        and embedding_model
+        and (
+            embedding_provider != project.embedding_provider
+            or embedding_model != project.embedding_model
+        )
+    ):
+        try:
+            dimensions = embedding_dimensions(embedding_provider, embedding_model)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        project.embedding_provider = embedding_provider
+        project.embedding_model = embedding_model
+        project.embedding_dimensions = dimensions
+        reindex_existing = True
+
     created: list[File] = []
     for upload in uploads:
         filename = upload.filename or "upload"
@@ -59,15 +99,38 @@ async def upload_files(
             storage_path=path,
             content_type=content_type,
             source_extension=extension,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
             size_bytes=len(data),
         )
         db.add(record)
         created.append(record)
 
+    # a new embedding model means every existing file must be re-embedded
+    existing: list[File] = []
+    if reindex_existing:
+        new_ids = {record.id for record in created}
+        db.execute(sql_delete(Chunk).where(Chunk.project_id == project.id))
+        existing = [
+            f
+            for f in db.scalars(
+                select(File).where(File.project_id == project.id)
+            ).all()
+            if f.id not in new_ids
+        ]
+        for f in existing:
+            f.status = "pending"
+            f.chunk_count = 0
+            f.error = None
+            f.conversion_error = None
+
     project.status = "indexing"
     db.commit()
+
     for record in created:
         background_tasks.add_task(ingest_file, record.id)
+    for f in existing:
+        background_tasks.add_task(ingest_file, f.id)
     return created
 
 
