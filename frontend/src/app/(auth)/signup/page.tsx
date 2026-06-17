@@ -21,6 +21,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false)
   const [attempted, setAttempted] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
+  const [existing, setExisting] = useState(false)
 
   const failing = passwordFailures(password)
 
@@ -31,6 +32,7 @@ export default function SignupPage() {
       return
     }
     setLoading(true)
+    setExisting(false)
     const supabase = createClient()
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -40,6 +42,13 @@ export default function SignupPage() {
     setLoading(false)
     if (error) {
       toast.error(error.message)
+      return
+    }
+    // Supabase hides already-registered emails (enumeration protection): instead
+    // of erroring it returns a user with an empty `identities` array. Detect that
+    // and tell the user to sign in, rather than pretending we sent a new email.
+    if (data.user && (data.user.identities?.length ?? 0) === 0) {
+      setExisting(true)
       return
     }
     if (data.session) {
@@ -61,6 +70,15 @@ export default function SignupPage() {
       ) : (
         <>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {existing && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                You already have an account with this email.{" "}
+                <Link href="/login" className="font-medium underline">
+                  Sign in instead
+                </Link>
+                .
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -69,7 +87,10 @@ export default function SignupPage() {
                 required
                 placeholder="you@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setExisting(false)
+                }}
                 className="bg-muted/50"
               />
             </div>
