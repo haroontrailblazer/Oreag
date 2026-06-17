@@ -5,6 +5,9 @@ import { NextResponse } from "next/server"
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
+  const nextParam = searchParams.get("next") ?? "/dashboard"
+  // only allow internal redirects (no open-redirect via ?next=https://evil.com)
+  const next = nextParam.startsWith("/") ? nextParam : "/dashboard"
 
   if (code) {
     const cookieStore = await cookies()
@@ -26,7 +29,7 @@ export async function GET(request: Request) {
     )
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
-      return NextResponse.redirect(`${origin}/dashboard`)
+      return NextResponse.redirect(`${origin}${next}`)
     }
   }
   return NextResponse.redirect(`${origin}/login`)
