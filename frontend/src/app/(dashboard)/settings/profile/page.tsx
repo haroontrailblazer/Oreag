@@ -20,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { SetPasswordForm } from "@/components/set-password-form"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { api } from "@/lib/api"
@@ -69,6 +70,22 @@ export default function ProfilePage() {
             <Label htmlFor="profile-email">Email</Label>
             <Input id="profile-email" value={email ?? ""} readOnly disabled />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Change password</CardTitle>
+          <CardDescription>
+            Set a new password (min 12 characters, one uppercase, one special
+            character).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SetPasswordForm
+            submitLabel="Update password"
+            onSuccess={() => toast.success("Password updated")}
+          />
         </CardContent>
       </Card>
 
