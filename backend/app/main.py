@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .routers import (
+    account,
     files,
     keys,
     memory_graph,
@@ -61,6 +62,7 @@ app.include_router(projects.router)
 app.include_router(files.router)
 app.include_router(keys.router)
 app.include_router(provider_keys.router)
+app.include_router(account.router)
 app.include_router(memory_graph.owner_router)
 app.include_router(playground.router)
 app.include_router(meta.router)

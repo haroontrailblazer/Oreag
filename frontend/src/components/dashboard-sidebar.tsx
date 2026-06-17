@@ -16,7 +16,7 @@ import { usePathname } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
 
-import { SignOutButton } from "@/components/sign-out-button"
+import { UserMenu } from "@/components/user-menu"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -185,7 +185,7 @@ export function DashboardSidebar() {
             </span>
           </Link>
           <div className="md:hidden">
-            <SignOutButton />
+            <UserMenu compact />
           </div>
         </div>
 
@@ -293,7 +293,7 @@ export function DashboardSidebar() {
           </Button>
           <ThemeToggle />
           <div className="hidden md:block">
-            <SignOutButton />
+            <UserMenu />
           </div>
         </div>
       </div>

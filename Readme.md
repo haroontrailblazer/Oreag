@@ -1,82 +1,295 @@
-# Oreag — RAG as a Service
+<div align="center">
 
-Build a RAG (Retrieval-Augmented Generation) over your own PDFs from a web UI:
-upload documents, choose chunking and embedding settings, and get a dedicated
-API endpoint + API key to query your knowledge base from any app. Add files or
-re-index ("update memory") at any time from the dashboard.
+# Oreag — RAG & Memory as a Service
 
-## Architecture
+**Turn your documents into a production-ready, queryable RAG API — with a built-in memory graph — from a web dashboard.**
 
-- **frontend/** — Next.js (App Router, TypeScript, Tailwind, shadcn/ui). Auth via Supabase.
-- **backend/** — FastAPI. Ingestion (PyMuPDF → chunking → embeddings → pgvector), retrieval, generation, API-key management.
-- **supabase/** — SQL migrations: Postgres metadata tables, pgvector `chunks`, RLS policies, private storage bucket.
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white)
+![pgvector](https://img.shields.io/badge/Postgres%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)
 
-Providers: **OpenAI** (embeddings + chat), **Ollama** (local, optional), **sentence-transformers** (local embeddings, optional).
+</div>
 
-## Setup (Windows)
+---
 
-### 1. Supabase
+## Overview
 
-Create a project at [supabase.com](https://supabase.com), then run every file in
-`supabase/migrations/` in order (SQL Editor): `0001_init.sql`, `0002_rls.sql`,
-`0003_markitdown_memory_graph.sql`, `0004_per_file_chunking.sql`,
-`0005_provider_keys.sql`.
+Oreag lets a user upload documents (PDF, DOCX, PPTX, HTML, CSV, …), tune chunking
+and embedding settings, and instantly get a **dedicated, API-key-protected RAG
+endpoint** to query that knowledge base from any application — plus an **agent
+memory graph** derived from the same content. It is **multi-tenant** and
+**bring-your-own-key (BYOK)**: each user supplies their own OpenAI / Gemini /
+Anthropic credentials (or runs a local Ollama model), stored encrypted at rest.
 
-### 2. Backend
+## Features
 
-```powershell
-cd backend
-py -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env   # then fill in the values
-uvicorn app.main:app --reload
+- **Any document to an API** — upload, auto-convert to Markdown, chunk, embed, and serve.
+- **Per-project RAG endpoint** — `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
+- **Agent memory graph** — a queryable graph of sections and entities derived from indexed content.
+- **BYOK, multi-provider** — OpenAI, Google Gemini, Anthropic, Ollama (local), sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
+- **Secure by design** — Supabase Auth (JWT/JWKS), Row-Level Security, SHA-256-hashed API keys, Fernet-encrypted provider keys.
+- **Tunable** — chunk size/overlap (global or per-file), embedding model, LLM, top-K — with one-click re-index.
+
+---
+
+## System Architecture
+
+> Thick arrows are the primary request paths; dotted arrows are authentication. Each tier is colour-coded.
+
+```mermaid
+flowchart TB
+    subgraph client["CLIENT TIER"]
+        Browser["Web Browser<br/>Dashboard UI"]
+        ExtApp["External App / Agent<br/>your code"]
+    end
+
+    subgraph edge["PRESENTATION TIER — Vercel"]
+        Next["Next.js 16 · App Router<br/>React 19 · Tailwind · shadcn/ui · SWR"]
+        AuthRt["Route Handlers<br/>/auth/confirm · /auth/callback"]
+    end
+
+    subgraph appt["APPLICATION TIER — Render · FastAPI"]
+        API["Dashboard API<br/>/api/*"]
+        PublicAPI["Public RAG API<br/>/v1/*"]
+        subgraph services["Domain Services"]
+            Ingest["Ingestion<br/>background tasks"]
+            Retrieve["Retrieval"]
+            Generate["Generation"]
+            MemGraph["Memory Graph"]
+        end
+        Resolver["BYOK Key Resolver<br/>Fernet decrypt"]
+        Registry["Provider Registry"]
+    end
+
+    subgraph datat["DATA TIER — Supabase"]
+        Auth["Auth<br/>JWT / JWKS"]
+        PG[("Postgres + pgvector<br/>projects · files · chunks<br/>provider_keys · api_keys · query_logs")]
+        Store[["Storage<br/>project-files bucket"]]
+    end
+
+    subgraph ai["AI PROVIDERS — BYOK / local"]
+        OpenAI["OpenAI"]
+        Gemini["Google Gemini"]
+        Anthropic["Anthropic Claude"]
+        Ollama["Ollama · local"]
+    end
+
+    Browser ==>|HTTPS| Next
+    Browser -.->|"sign in / sign up"| Auth
+    AuthRt -.->|verifyOtp| Auth
+    Next ==>|"Bearer JWT"| API
+    ExtApp ==>|"Bearer oreag_sk_…"| PublicAPI
+
+    API -.->|validate JWT · JWKS| Auth
+    API --> Ingest & Retrieve & Generate & MemGraph
+    PublicAPI --> Retrieve & Generate & MemGraph
+
+    Ingest & Retrieve & Generate --> Resolver
+    Resolver -->|decrypt keys| PG
+    Resolver --> Registry
+    Registry --> OpenAI & Gemini & Anthropic & Ollama
+
+    Ingest -->|raw + markdown| Store
+    Ingest -->|chunks + vectors| PG
+    Retrieve -->|cosine search| PG
+    Generate --> PG
+    MemGraph --> PG
+
+    classDef tClient fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef tEdge fill:#f4f4f5,stroke:#18181b,color:#18181b
+    classDef tApp fill:#d1fae5,stroke:#059669,color:#064e3b
+    classDef tData fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef tAI fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+
+    class Browser,ExtApp tClient
+    class Next,AuthRt tEdge
+    class API,PublicAPI,Ingest,Retrieve,Generate,MemGraph,Resolver,Registry tApp
+    class Auth,PG,Store tData
+    class OpenAI,Gemini,Anthropic,Ollama tAI
 ```
 
-API runs at http://localhost:8000 (interactive docs at /docs).
+---
 
-Optional local embeddings (downloads PyTorch, ~2.5 GB):
+## Core Flows
 
-```powershell
-pip install -r requirements-local.txt
+### 1. Document Ingestion (write path)
+
+```mermaid
+flowchart LR
+    A(["Upload<br/>PDF · DOCX · …"]) --> B["Supabase Storage<br/>raw file"]
+    A --> C["File row created<br/>status: pending"]
+    C --> D{{"Background task<br/>ingest_file()"}}
+    D --> E["Convert to Markdown<br/>PyMuPDF / MarkItDown"]
+    E --> F["Chunk<br/>RecursiveCharacterTextSplitter"]
+    F --> G["Embed in batches<br/>resolved BYOK key"]
+    G --> H[("pgvector chunks<br/>content + embedding")]
+    H --> I(["status: indexed<br/>project status recomputed"])
+    G -.->|exception| J(["status: failed<br/>error shown in Files tab"])
+
+    classDef start fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef proc fill:#f1f5f9,stroke:#475569,color:#0f172a
+    classDef task fill:#fef9c3,stroke:#ca8a04,color:#713f12
+    classDef store fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef ok fill:#d1fae5,stroke:#059669,color:#064e3b
+    classDef bad fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+
+    class A start
+    class B,H store
+    class C,E,F,G proc
+    class D task
+    class I ok
+    class J bad
 ```
 
-Optional local LLM: install [Ollama](https://ollama.com) and pull a model,
-e.g. `ollama pull llama3.1` and `ollama pull nomic-embed-text`.
+### 2. Query / RAG (read path)
 
-### 3. Frontend
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Caller
+    participant API as FastAPI · /v1
+    participant R as Retrieval
+    participant RV as Key Resolver
+    participant E as Embedder
+    participant DB as pgvector
+    participant L as LLM
 
-```powershell
-cd frontend
-npm install
-copy .env.example .env.local   # then fill in the values
-npm run dev
+    C->>+API: POST /v1/projects/{id}/query
+    Note over API,DB: validate API key (SHA-256) and check indexed content
+    opt invalid key or no chunks
+        API-->>C: 401 / 409
+    end
+
+    API->>+R: retrieve(question, top_k)
+    R->>RV: resolve embedding key
+    alt per-project override
+        RV-->>R: decrypt project key
+    else account-level key
+        RV-->>R: decrypt account key
+    else none and key required
+        RV-->>R: 503 — no key configured
+    end
+    R->>E: embed_query(question)
+    E-->>R: query vector
+    R->>DB: nearest-neighbour search (top_k)
+    Note right of DB: ORDER BY embedding <=> qvec
+    DB-->>R: top-k chunks
+    R-->>-API: sources
+
+    API->>+L: generate(context + question)
+    L-->>-API: grounded answer
+    API->>DB: write query_logs
+    API-->>-C: 200 — answer + sources + latency
 ```
 
-App runs at http://localhost:3000.
+### 3. BYOK Key Resolution
 
-### Accessing from another device on your network (LAN)
+```mermaid
+flowchart TD
+    S(["Need a provider key<br/>for embedding or LLM"]) --> Q1{"Provider needs a key?<br/>Ollama / ST are local"}
+    Q1 -->|"No · local"| Local(["Use local provider<br/>no key required"])
+    Q1 -->|Yes| Q2{"Per-project<br/>override set?"}
+    Q2 -->|Yes| D1["Decrypt project key<br/>Fernet · projects table"]
+    Q2 -->|No| Q3{"Account-level key<br/>for this provider?"}
+    Q3 -->|Yes| D2["Decrypt account key<br/>Fernet · provider_keys"]
+    Q3 -->|No| Err(["HTTP 503<br/>add a key in Settings → API keys"])
+    D1 --> Use(["Call provider with key"])
+    D2 --> Use
+    Local --> Use
 
-`next dev` already listens on all interfaces, so the frontend is reachable at
-`http://<your-lan-ip>:3000`. The frontend automatically calls the backend at the
-same host, so just start the backend on all interfaces too:
+    classDef start fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef decision fill:#fef9c3,stroke:#ca8a04,color:#713f12
+    classDef action fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef ok fill:#d1fae5,stroke:#059669,color:#064e3b
+    classDef bad fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
 
-```powershell
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+    class S start
+    class Q1,Q2,Q3 decision
+    class D1,D2 action
+    class Use,Local ok
+    class Err bad
 ```
 
-No env changes are needed — the app follows whatever host you open it on, and the
-backend's CORS already allows localhost and any private-LAN origin.
+### 4. Authentication & Email Confirmation
 
-## Using your generated RAG API
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant FE as Next.js · Vercel
+    participant SB as Supabase Auth
+    participant M as Email
 
-Every project gets API keys (Project → API tab). Query it from anywhere:
+    Note over U,SB: Sign up
+    U->>+FE: submit email + password
+    FE->>+SB: auth.signUp()
+    alt email confirmation required
+        SB->>M: send branded confirm email
+        SB-->>FE: session = null
+        FE-->>U: "Check your inbox"
+    else confirmations disabled
+        SB-->>FE: active session
+        FE-->>U: redirect → /dashboard
+    end
+    deactivate SB
+    deactivate FE
 
-```bash
-curl -X POST http://localhost:8000/v1/projects/<project-id>/query \
-  -H "Authorization: Bearer oreag_sk_..." \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What does the handbook say about onboarding?"}'
+    Note over U,SB: Confirm
+    M-->>U: click link → /auth/confirm?token_hash
+    U->>+FE: GET /auth/confirm
+    FE->>+SB: verifyOtp(token_hash, type)
+    alt token valid
+        SB-->>FE: session (Set-Cookie)
+        FE-->>U: 302 → /dashboard
+    else expired or invalid
+        SB-->>FE: error
+        FE-->>U: 302 → /login?error
+    end
+    deactivate SB
+    deactivate FE
 ```
 
-Response: `{ "answer": "...", "sources": [{ "filename", "page_number", "content", "similarity" }], "model", "latency_ms" }`
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | Next.js 16 (App Router), React 19, TypeScript, Tailwind v4, shadcn/ui, SWR |
+| **Backend** | FastAPI, SQLAlchemy 2, Pydantic, Uvicorn |
+| **Database** | Supabase Postgres + `pgvector` |
+| **Auth** | Supabase Auth (JWT / JWKS) |
+| **Storage** | Supabase Storage (private bucket) |
+| **AI providers** | OpenAI · Google Gemini · Anthropic · Ollama · sentence-transformers |
+| **Ingestion** | PyMuPDF, MarkItDown, LangChain text splitters |
+| **Crypto** | `cryptography` (Fernet) for BYOK keys |
+| **Hosting** | Vercel (frontend) · Render (backend) · Supabase (data) |
+
+## Repository Structure
+
+```
+Oreag/
+├── frontend/                 # Next.js dashboard (Vercel)
+│   └── src/
+│       ├── app/              # routes: (auth), (dashboard), auth/confirm, auth/callback
+│       ├── components/       # UI, project tabs, settings (provider keys)
+│       └── lib/              # api client, supabase client/server, types
+├── backend/                  # FastAPI service (Render)
+│   └── app/
+│       ├── routers/          # projects, files, keys, provider_keys, meta, playground, rag_v1, memory_graph
+│       ├── providers/        # registry, resolver, openai/gemini/anthropic/ollama/st
+│       ├── services/         # ingestion, retrieval, generation, query, memory_graph, conversion, storage
+│       ├── crypto.py         # Fernet encrypt/decrypt for BYOK keys
+│       └── models.py, schemas.py, config.py, db.py, main.py
+├── supabase/
+│   ├── migrations/           # 0001…0005 (tables, RLS, pgvector, provider_keys)
+│   └── templates/            # branded auth email templates
+├── render.yaml               # backend blueprint
+└── DEPLOY.md                 # production deploy guide
+```
+
+---
