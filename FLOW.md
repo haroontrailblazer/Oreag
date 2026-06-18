@@ -21,6 +21,7 @@ GitLab, VS Code, Obsidian, and most Markdown viewers.
 | Tier | Colour |
 |---|---|
 | Client | 🟦 sky |
+| Coding agents · MCP | 🩷 rose |
 | Presentation · Vercel | ⬜ zinc |
 | Application · Render · FastAPI | 🟩 emerald |
 | Data · Supabase | 🟢 green |
@@ -37,6 +38,7 @@ GitLab, VS Code, Obsidian, and most Markdown viewers.
 | 3 | [Query / RAG](#3-query--rag--read-path) | sequence |
 | 4 | [BYOK Key Resolution](#4-byok-key-resolution) | decision tree |
 | 5 | [Authentication & Email Confirmation](#5-authentication--email-confirmation) | sequence |
+| 6 | [Agent Memory & Docs Recall (MCP)](#6-agent-memory--docs-recall-mcp) | sequence |
 
 ---
 
@@ -51,7 +53,13 @@ flowchart TB
     subgraph client["CLIENT TIER"]
         direction LR
         Browser["Web Browser<br/>Dashboard UI"]
-        ExtApp["External App / Agent<br/>your code"]
+        ExtApp["External App<br/>your code"]
+    end
+
+    subgraph agents["CODING AGENTS"]
+        direction LR
+        Agent["Claude Code · Codex · Claude"]
+        MCP["Oreag MCP server<br/>memory + docs tools"]
     end
 
     subgraph edge["PRESENTATION TIER · Vercel"]
@@ -62,12 +70,13 @@ flowchart TB
 
     subgraph appt["APPLICATION TIER · Render · FastAPI"]
         API["Dashboard API<br/>/api/*"]
-        PublicAPI["Public RAG API<br/>/v1/*"]
+        PublicAPI["Public API<br/>/v1/* — query · retrieve · memory"]
         subgraph services["Domain Services"]
             direction LR
             Ingest["Ingestion<br/>background tasks"]
             Retrieve["Retrieval"]
             Generate["Generation"]
+            Memory["Memory<br/>save · search · recent"]
             MemGraph["Memory Graph"]
         end
         Resolver["BYOK Key Resolver<br/>Fernet decrypt"]
@@ -77,7 +86,7 @@ flowchart TB
     subgraph datat["DATA TIER · Supabase"]
         direction LR
         Auth["Auth<br/>JWT / JWKS"]
-        PG[("Postgres + pgvector<br/>projects · files · chunks<br/>provider_keys · api_keys · query_logs")]
+        PG[("Postgres + pgvector<br/>projects · files · chunks · memories<br/>provider_keys · api_keys · query_logs")]
         Store[["Storage<br/>project-files bucket"]]
     end
 
@@ -86,6 +95,7 @@ flowchart TB
         OpenAI["OpenAI"]
         Gemini["Google Gemini"]
         Anthropic["Anthropic Claude"]
+        Sarvam["Sarvam AI"]
         Ollama["Ollama · local"]
     end
 
@@ -93,6 +103,8 @@ flowchart TB
     Browser ==>|HTTPS| Next
     Next ==>|"Bearer JWT"| API
     ExtApp ==>|"Bearer oreag_sk_…"| PublicAPI
+    Agent ==> MCP
+    MCP ==>|"Bearer oreag_sk_…"| PublicAPI
 
     %% --- authentication (dotted) ---
     Browser -.->|"sign in / sign up"| Auth
@@ -100,33 +112,36 @@ flowchart TB
     API     -.->|"validate JWT · JWKS"| Auth
 
     %% --- application fan-out ---
-    API --> Ingest & Retrieve & Generate & MemGraph
-    PublicAPI --> Retrieve & Generate & MemGraph
+    API --> Ingest & Retrieve & Generate & Memory & MemGraph
+    PublicAPI --> Retrieve & Generate & Memory & MemGraph
 
     %% --- BYOK resolution & provider calls ---
-    Ingest & Retrieve & Generate --> Resolver
+    Ingest & Retrieve & Generate & Memory --> Resolver
     Resolver -->|"decrypt keys"| PG
     Resolver --> Registry
-    Registry --> OpenAI & Gemini & Anthropic & Ollama
+    Registry --> OpenAI & Gemini & Anthropic & Sarvam & Ollama
 
     %% --- data reads / writes ---
     Ingest   -->|"raw + markdown"| Store
     Ingest   -->|"chunks + vectors"| PG
     Retrieve -->|"cosine search"| PG
     Generate --> PG
+    Memory   -->|"embed-on-save · search"| PG
     MemGraph --> PG
 
     classDef tClient fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef tAgent  fill:#fce7f3,stroke:#db2777,color:#831843
     classDef tEdge   fill:#f4f4f5,stroke:#18181b,color:#18181b
     classDef tApp    fill:#d1fae5,stroke:#059669,color:#064e3b
     classDef tData   fill:#dcfce7,stroke:#16a34a,color:#14532d
     classDef tAI     fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
 
     class Browser,ExtApp tClient
+    class Agent,MCP tAgent
     class Next,AuthRt tEdge
-    class API,PublicAPI,Ingest,Retrieve,Generate,MemGraph,Resolver,Registry tApp
+    class API,PublicAPI,Ingest,Retrieve,Generate,Memory,MemGraph,Resolver,Registry tApp
     class Auth,PG,Store tData
-    class OpenAI,Gemini,Anthropic,Ollama tAI
+    class OpenAI,Gemini,Anthropic,Sarvam,Ollama tAI
 ```
 
 ---
@@ -288,6 +303,51 @@ sequenceDiagram
     deactivate SB
     deactivate FE
 ```
+
+---
+
+## 6. Agent Memory & Docs Recall (MCP)
+
+A coding-agent session connects to one project through the MCP server (project
+`oreag_sk_` key) and persists / recalls memory and pulls document context across
+sessions. Bootstrap at start, then save & recall during work.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor A as Coding Agent
+    participant MCP as Oreag MCP server
+    participant API as FastAPI · /v1
+    participant M as Memory service
+    participant DB as pgvector
+
+    Note over A,DB: Session start — bootstrap
+    A->>MCP: list_recent_memory()
+    MCP->>API: GET /memory/recent (Bearer oreag_sk_…)
+    API->>M: recent_memories (pinned first)
+    M->>DB: SELECT ORDER BY pinned, created_at
+    DB-->>M: entries
+    M-->>MCP: entries
+    MCP-->>A: context to orient the session
+
+    Note over A,DB: During work — save & recall
+    A->>MCP: save_memory("decision: …")
+    MCP->>API: POST /memory
+    API->>M: embed-on-save (resolved key)
+    M->>DB: INSERT memory + embedding
+    A->>MCP: search_memory("how does auth work?")
+    MCP->>API: POST /memory/search
+    API->>M: embed query → cosine search
+    M->>DB: ORDER BY embedding <=> qvec
+    DB-->>M: relevant entries
+    M-->>A: recalled memories
+    A->>MCP: search_docs("payment flow")
+    MCP->>API: POST /retrieve
+    API-->>A: relevant document chunks
+```
+
+MCP tools: `save_memory`, `search_memory`, `list_recent_memory`, `delete_memory`,
+`search_docs`, `ask_docs`. Connect an agent via `mcp-server/README.md`.
 
 ---
 

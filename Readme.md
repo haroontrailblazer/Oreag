@@ -340,7 +340,7 @@ Oreag/
 │   ├── migrations/           # 0001…0007 (tables, RLS, pgvector, provider_keys, memories)
 │   └── templates/            # branded auth email templates
 ├── render.yaml               # backend blueprint
-├── flow.md                   # architecture + flow diagrams
+├── FLOW.md                   # architecture + flow diagrams
 └── DEPLOY.md                 # production deploy guide
 ```
 
