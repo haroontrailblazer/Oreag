@@ -1,0 +1,294 @@
+# Oreag — System & Flow Diagrams
+
+> A structured redesign of the system architecture and the four core flows.
+> **Same logic as the source diagrams** — every node, branch, and path is preserved —
+> reorganised into a consistent visual grammar with colour-coded tiers, typed
+> connectors, and inline endpoint annotations.
+
+All diagrams are [Mermaid](https://mermaid.js.org/) and render directly on GitHub,
+GitLab, VS Code, Obsidian, and most Markdown viewers.
+
+---
+
+## Legend
+
+| Connector | Meaning |
+|---|---|
+| `A ==> B` (thick) | Primary request path |
+| `A --> B` (solid) | Data read / write · internal call |
+| `A -.-> B` (dotted) | Authentication |
+
+| Tier | Colour |
+|---|---|
+| Client | 🟦 sky |
+| Presentation · Vercel | ⬜ zinc |
+| Application · Render · FastAPI | 🟩 emerald |
+| Data · Supabase | 🟢 green |
+| AI providers · BYOK / local | 🟪 violet |
+
+**Shapes** — `([stadium])` start/end · `[process]` · `{decision}` · `{{task}}` · `[(datastore)]` · `[[storage]]`
+
+### Contents
+
+| # | Diagram | Type |
+|---|---|---|
+| 1 | [System Architecture](#1-system-architecture) | layered flowchart |
+| 2 | [Document Ingestion](#2-document-ingestion--write-path) | write path |
+| 3 | [Query / RAG](#3-query--rag--read-path) | sequence |
+| 4 | [BYOK Key Resolution](#4-byok-key-resolution) | decision tree |
+| 5 | [Authentication & Email Confirmation](#5-authentication--email-confirmation) | sequence |
+
+---
+
+## 1. System Architecture
+
+Five colour-coded tiers from browser to AI provider. Thick arrows are primary
+request paths; solid arrows are data/internal calls; dotted arrows are
+authentication.
+
+```mermaid
+flowchart TB
+    subgraph client["CLIENT TIER"]
+        direction LR
+        Browser["Web Browser<br/>Dashboard UI"]
+        ExtApp["External App / Agent<br/>your code"]
+    end
+
+    subgraph edge["PRESENTATION TIER · Vercel"]
+        direction LR
+        Next["Next.js 16 · App Router<br/>React 19 · Tailwind · shadcn/ui · SWR"]
+        AuthRt["Route Handlers<br/>/auth/confirm · /auth/callback"]
+    end
+
+    subgraph appt["APPLICATION TIER · Render · FastAPI"]
+        API["Dashboard API<br/>/api/*"]
+        PublicAPI["Public RAG API<br/>/v1/*"]
+        subgraph services["Domain Services"]
+            direction LR
+            Ingest["Ingestion<br/>background tasks"]
+            Retrieve["Retrieval"]
+            Generate["Generation"]
+            MemGraph["Memory Graph"]
+        end
+        Resolver["BYOK Key Resolver<br/>Fernet decrypt"]
+        Registry["Provider Registry"]
+    end
+
+    subgraph datat["DATA TIER · Supabase"]
+        direction LR
+        Auth["Auth<br/>JWT / JWKS"]
+        PG[("Postgres + pgvector<br/>projects · files · chunks<br/>provider_keys · api_keys · query_logs")]
+        Store[["Storage<br/>project-files bucket"]]
+    end
+
+    subgraph ai["AI PROVIDERS · BYOK / local"]
+        direction LR
+        OpenAI["OpenAI"]
+        Gemini["Google Gemini"]
+        Anthropic["Anthropic Claude"]
+        Ollama["Ollama · local"]
+    end
+
+    %% --- primary request paths ---
+    Browser ==>|HTTPS| Next
+    Next ==>|"Bearer JWT"| API
+    ExtApp ==>|"Bearer oreag_sk_…"| PublicAPI
+
+    %% --- authentication (dotted) ---
+    Browser -.->|"sign in / sign up"| Auth
+    AuthRt  -.->|verifyOtp| Auth
+    API     -.->|"validate JWT · JWKS"| Auth
+
+    %% --- application fan-out ---
+    API --> Ingest & Retrieve & Generate & MemGraph
+    PublicAPI --> Retrieve & Generate & MemGraph
+
+    %% --- BYOK resolution & provider calls ---
+    Ingest & Retrieve & Generate --> Resolver
+    Resolver -->|"decrypt keys"| PG
+    Resolver --> Registry
+    Registry --> OpenAI & Gemini & Anthropic & Ollama
+
+    %% --- data reads / writes ---
+    Ingest   -->|"raw + markdown"| Store
+    Ingest   -->|"chunks + vectors"| PG
+    Retrieve -->|"cosine search"| PG
+    Generate --> PG
+    MemGraph --> PG
+
+    classDef tClient fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef tEdge   fill:#f4f4f5,stroke:#18181b,color:#18181b
+    classDef tApp    fill:#d1fae5,stroke:#059669,color:#064e3b
+    classDef tData   fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef tAI     fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+
+    class Browser,ExtApp tClient
+    class Next,AuthRt tEdge
+    class API,PublicAPI,Ingest,Retrieve,Generate,MemGraph,Resolver,Registry tApp
+    class Auth,PG,Store tData
+    class OpenAI,Gemini,Anthropic,Ollama tAI
+```
+
+---
+
+## 2. Document Ingestion · write path
+
+An uploaded file is stored, a row is created, then a background task
+**converts → chunks → embeds → writes vectors**. Any exception during embedding
+flips the file to `failed`.
+
+```mermaid
+flowchart LR
+    A(["Upload<br/>PDF · DOCX · …"]) -->|"raw file"| B["Supabase Storage<br/>raw file"]
+    A --> C["File row created<br/>status: pending"]
+    C --> D{{"Background task<br/>ingest_file()"}}
+    D --> E["Convert to Markdown<br/>PyMuPDF · MarkItDown"]
+    E --> F["Chunk<br/>RecursiveCharacterTextSplitter"]
+    F --> G["Embed in batches<br/>resolved BYOK key"]
+    G --> H[("pgvector chunks<br/>content + embedding")]
+    H --> I(["status: indexed<br/>project status recomputed"])
+    G -.->|exception| J(["status: failed<br/>error shown in Files tab"])
+
+    classDef start fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef proc  fill:#f1f5f9,stroke:#475569,color:#0f172a
+    classDef task  fill:#fef9c3,stroke:#ca8a04,color:#713f12
+    classDef store fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef ok    fill:#d1fae5,stroke:#059669,color:#064e3b
+    classDef bad   fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+
+    class A start
+    class B,H store
+    class C,E,F,G proc
+    class D task
+    class I ok
+    class J bad
+```
+
+---
+
+## 3. Query / RAG · read path
+
+A caller hits the public endpoint; the API validates the key, retrieval resolves
+an embedding key and runs a vector search, generation grounds an answer, and the
+query is logged.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Caller
+    participant API as FastAPI · /v1
+    participant R as Retrieval
+    participant RV as Key Resolver
+    participant E as Embedder
+    participant DB as pgvector
+    participant L as LLM
+
+    C->>+API: POST /v1/projects/{id}/query
+    Note over API,DB: validate API key (SHA-256) · check indexed content
+    opt invalid key or no chunks
+        API-->>C: 401 / 409
+    end
+
+    API->>+R: retrieve(question, top_k)
+    R->>RV: resolve embedding key
+    alt per-project override
+        RV-->>R: decrypt project key
+    else account-level key
+        RV-->>R: decrypt account key
+    else none and key required
+        RV-->>R: 503 — no key configured
+    end
+    R->>E: embed_query(question)
+    E-->>R: query vector
+    R->>DB: nearest-neighbour search (top_k)
+    Note right of DB: ORDER BY embedding <=> qvec
+    DB-->>R: top-k chunks
+    R-->>-API: sources
+
+    API->>+L: generate(context + question)
+    L-->>-API: grounded answer
+    API->>DB: write query_logs
+    API-->>-C: 200 — answer + sources + latency
+```
+
+---
+
+## 4. BYOK Key Resolution
+
+When an embedding or LLM call needs a provider key, the resolver checks in order:
+**local provider** (no key) → **per-project override** → **account-level key** →
+otherwise **503**.
+
+```mermaid
+flowchart TD
+    S(["Need a provider key<br/>for embedding or LLM"]) --> Q1{"Provider needs a key?<br/>Ollama / ST are local"}
+    Q1 -->|"No · local"| Local(["Use local provider<br/>no key required"])
+    Q1 -->|Yes| Q2{"Per-project<br/>override set?"}
+    Q2 -->|Yes| D1["Decrypt project key<br/>Fernet · projects table"]
+    Q2 -->|No| Q3{"Account-level key<br/>for this provider?"}
+    Q3 -->|Yes| D2["Decrypt account key<br/>Fernet · provider_keys"]
+    Q3 -->|No| Err(["HTTP 503<br/>add a key in Settings → API keys"])
+    D1 --> Use(["Call provider with key"])
+    D2 --> Use
+    Local --> Use
+
+    classDef start    fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef decision fill:#fef9c3,stroke:#ca8a04,color:#713f12
+    classDef action   fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef ok       fill:#d1fae5,stroke:#059669,color:#064e3b
+    classDef bad      fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+
+    class S start
+    class Q1,Q2,Q3 decision
+    class D1,D2 action
+    class Use,Local ok
+    class Err bad
+```
+
+---
+
+## 5. Authentication & Email Confirmation
+
+Sign-up branches on whether email confirmation is required; confirmation branches
+on whether the OTP token is still valid.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant FE as Next.js · Vercel
+    participant SB as Supabase Auth
+    participant M as Email
+
+    Note over U,SB: Sign up
+    U->>+FE: submit email + password
+    FE->>+SB: auth.signUp()
+    alt email confirmation required
+        SB->>M: send branded confirm email
+        SB-->>FE: session = null
+        FE-->>U: "Check your inbox"
+    else confirmations disabled
+        SB-->>FE: active session
+        FE-->>U: redirect → /dashboard
+    end
+    deactivate SB
+    deactivate FE
+
+    Note over U,SB: Confirm
+    M-->>U: click link → /auth/confirm?token_hash
+    U->>+FE: GET /auth/confirm
+    FE->>+SB: verifyOtp(token_hash, type)
+    alt token valid
+        SB-->>FE: session (Set-Cookie)
+        FE-->>U: 302 → /dashboard
+    else expired or invalid
+        SB-->>FE: error
+        FE-->>U: 302 → /login?error
+    end
+    deactivate SB
+    deactivate FE
+```
+
+---
+
+<sub>Oreag architecture — structured diagram set · logic preserved from source.</sub>
