@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
+import { UserAvatar } from "@/components/user-avatar"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,36 +14,34 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { gravatarUrl } from "@/lib/avatar"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
-
-/** Gravatar URL for an email (SHA-256, identicon fallback for unknown emails). */
-async function gravatarUrl(email: string): Promise<string> {
-  const normalized = email.trim().toLowerCase()
-  const buf = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(normalized)
-  )
-  const hash = Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-  return `https://www.gravatar.com/avatar/${hash}?d=identicon&s=80`
-}
 
 export function UserMenu({ compact = false }: { compact?: boolean }) {
   const router = useRouter()
   const [email, setEmail] = useState<string | null>(null)
-  const [avatar, setAvatar] = useState<string | null>(null)
-  const [imgOk, setImgOk] = useState(true)
+  const [name, setName] = useState<string | null>(null)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [gravatar, setGravatar] = useState<string | null>(null)
 
   useEffect(() => {
-    createClient()
-      .auth.getSession()
-      .then(({ data }) => {
-        const e = data.session?.user?.email ?? null
+    const supabase = createClient()
+    const load = () => {
+      supabase.auth.getSession().then(({ data }) => {
+        const u = data.session?.user
+        const e = u?.email ?? null
         setEmail(e)
-        if (e) gravatarUrl(e).then(setAvatar)
+        setName((u?.user_metadata?.username as string | undefined) ?? null)
+        const a = (u?.user_metadata?.avatar_url as string | undefined) ?? null
+        setAvatarUrl(a)
+        if (!a && e) gravatarUrl(e, 80).then(setGravatar)
       })
+    }
+    load()
+    // re-read on sign-in / profile (USER_UPDATED) changes so the sidebar stays live
+    const { data: sub } = supabase.auth.onAuthStateChange(() => load())
+    return () => sub.subscription.unsubscribe()
   }, [])
 
   async function handleSignOut() {
@@ -51,7 +50,8 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
     router.refresh()
   }
 
-  const initial = email ? email[0]!.toUpperCase() : "?"
+  const displayName = name || email?.split("@")[0] || "Account"
+  const src = avatarUrl || gravatar
 
   return (
     <DropdownMenu>
@@ -64,29 +64,25 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
               : "w-full p-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           )}
         >
-          <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-sidebar-accent text-xs font-semibold ring-1 ring-border">
-            {avatar && imgOk ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={avatar}
-                alt=""
-                className="size-full object-cover"
-                onError={() => setImgOk(false)}
-              />
-            ) : (
-              initial
-            )}
-          </span>
+          <UserAvatar
+            key={src ?? "none"}
+            src={src}
+            name={displayName}
+            className="size-8 text-xs"
+          />
           {!compact && (
             <span className="min-w-0 flex-1 truncate text-sm font-medium">
-              {email ?? "Account"}
+              {displayName}
             </span>
           )}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
-          {email ?? "Signed in"}
+        <DropdownMenuLabel className="font-normal">
+          <div className="truncate font-medium">{displayName}</div>
+          {email && (
+            <div className="truncate text-xs text-muted-foreground">{email}</div>
+          )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
