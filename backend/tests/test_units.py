@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app import crypto
 from app.auth.api_keys import KEY_PREFIX, generate_api_key, hash_key
 from app.main import app
-from app.models import Project, ProviderKey
+from app.models import Memory, Project, ProviderKey
 from app.providers import resolver
 from app.providers.registry import (
     CATALOG,
@@ -21,6 +21,23 @@ from app.services.conversion import is_supported_upload, markdown_path_for
 from app.services.generation import build_user_prompt
 from app.services.ingestion import parse_pdf
 from app.services.memory_graph import _sections
+
+
+class TestMemoryModel:
+    def test_table_and_columns(self):
+        assert Memory.__tablename__ == "memories"
+        cols = set(Memory.__table__.columns.keys())
+        assert {
+            "id",
+            "project_id",
+            "content",
+            "tags",
+            "pinned",
+            "source",
+            "embedding",
+            "created_at",
+            "updated_at",
+        } <= cols
 
 
 class TestRegistry:
