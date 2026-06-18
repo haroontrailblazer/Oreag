@@ -107,6 +107,15 @@ export default function NewProjectPage() {
     },
   })
 
+  // Project names are unique per account — flag duplicates live.
+  const { data: projects } = useSWR<Project[]>("/api/projects", fetcher)
+  const trimmedName = name.trim()
+  const nameTaken =
+    trimmedName.length > 0 &&
+    (projects ?? []).some(
+      (p) => p.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    )
+
   function addFiles(list: FileList | null) {
     if (!list) return
     const next = [...files]
@@ -184,7 +193,14 @@ export default function NewProjectPage() {
                 placeholder="e.g. Product handbook"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                aria-invalid={nameTaken}
               />
+              {nameTaken && (
+                <p className="text-xs text-destructive">
+                  A project named &ldquo;{trimmedName}&rdquo; already exists —
+                  choose another name.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="description">Description (optional)</Label>
@@ -240,8 +256,14 @@ export default function NewProjectPage() {
                 </ul>
               )}
             </div>
-            <div className="flex justify-end">
-              <Button onClick={() => setStep(2)} disabled={!name.trim()}>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => router.push("/dashboard")}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => setStep(2)}
+                disabled={!name.trim() || nameTaken}
+              >
                 Configure
               </Button>
             </div>
@@ -388,7 +410,7 @@ export default function NewProjectPage() {
               <Button variant="outline" onClick={() => setStep(1)}>
                 Back
               </Button>
-              <Button onClick={handleCreate} disabled={submitting}>
+              <Button onClick={handleCreate} disabled={submitting || nameTaken}>
                 {submitting
                   ? "Creating…"
                   : files.length > 0

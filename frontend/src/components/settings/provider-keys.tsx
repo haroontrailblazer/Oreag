@@ -38,6 +38,7 @@ const PROVIDERS: { id: ProviderId; label: string; hint: string }[] = [
   { id: "openai", label: "OpenAI", hint: "Embeddings + chat (sk-…)" },
   { id: "gemini", label: "Google Gemini", hint: "Embeddings + chat" },
   { id: "anthropic", label: "Anthropic (Claude)", hint: "Chat only" },
+  { id: "sarvam", label: "Sarvam AI", hint: "Chat only (Indic LLMs)" },
 ]
 
 export function ProviderKeys() {

@@ -21,7 +21,7 @@ export interface Project {
   llm_key_last4: string | null
 }
 
-export type ProviderId = "openai" | "gemini" | "anthropic"
+export type ProviderId = "openai" | "gemini" | "anthropic" | "sarvam"
 
 export interface ProviderKey {
   id: string

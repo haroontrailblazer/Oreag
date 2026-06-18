@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  ChevronRight,
   Circle,
   FileText,
   FolderKanban,
@@ -87,6 +88,14 @@ function ProjectLink({
   )
 }
 
+/** Group label from a file's extension (the panel groups files by this). */
+function fileType(file: FileRecord): string {
+  const ext = (file.source_extension || file.filename.split(".").pop() || "")
+    .toLowerCase()
+    .replace(/^\./, "")
+  return ext ? ext.toUpperCase() : "OTHER"
+}
+
 function FileItem({
   file,
   projectId,
@@ -109,6 +118,7 @@ function FileItem({
 export function DashboardSidebar() {
   const pathname = usePathname()
   const [query, setQuery] = useState("")
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
 
   // Inside a single project, the panel switches to that project's files.
   const projectMatch = pathname.match(/^\/projects\/([^/]+)$/)
@@ -153,6 +163,31 @@ export function DashboardSidebar() {
     if (!term) return list
     return list.filter((file) => file.filename.toLowerCase().includes(term))
   }, [files, query])
+
+  // Group the project's files by type (PDF, DOCX, …) for collapsible sections.
+  const fileGroups = useMemo(() => {
+    const map = new Map<string, FileRecord[]>()
+    for (const file of filteredFiles) {
+      const type = fileType(file)
+      const group = map.get(type)
+      if (group) group.push(file)
+      else map.set(type, [file])
+    }
+    return [...map.entries()]
+      .map(([type, items]) => ({ type, items }))
+      .sort((a, b) => a.type.localeCompare(b.type))
+  }, [filteredFiles])
+
+  const searching = query.trim().length > 0
+
+  function toggleGroup(type: string) {
+    setOpenGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }
 
   return (
     <aside className="border-sidebar-border bg-sidebar text-sidebar-foreground md:min-h-dvh md:border-r">
@@ -245,13 +280,45 @@ export function DashboardSidebar() {
                     No matching files
                   </div>
                 )}
-                {filteredFiles.map((file) => (
-                  <FileItem
-                    key={file.id}
-                    file={file}
-                    projectId={projectId as string}
-                  />
-                ))}
+                {fileGroups.map((group) => {
+                  const open = searching || openGroups.has(group.type)
+                  return (
+                    <div key={group.type}>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group.type)}
+                        className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      >
+                        <ChevronRight
+                          className={cn(
+                            "size-3.5 shrink-0 transition-transform",
+                            open && "rotate-90"
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-left">
+                          {group.type}
+                        </span>
+                        <Badge
+                          variant="secondary"
+                          className="h-5 rounded-md px-1.5 text-[10px]"
+                        >
+                          {group.items.length}
+                        </Badge>
+                      </button>
+                      {open && (
+                        <div className="mt-1 ml-4 grid gap-1 border-l border-sidebar-border pl-2">
+                          {group.items.map((file) => (
+                            <FileItem
+                              key={file.id}
+                              file={file}
+                              projectId={projectId as string}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </>
             ) : (
               <>

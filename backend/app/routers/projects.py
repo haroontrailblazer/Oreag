@@ -27,6 +27,20 @@ def _set_key_override(project: Project, slot: str, value: str | None) -> None:
     setattr(project, f"{slot}_key_last4", masked)
 
 
+def _name_taken(
+    db: Session, owner_id: uuid.UUID, name: str, exclude_id: uuid.UUID | None = None
+) -> bool:
+    """True if this account already has a project with the same name
+    (case-insensitive). Project names are unique per account."""
+    stmt = select(Project.id).where(
+        Project.owner_id == owner_id,
+        func.lower(Project.name) == name.strip().lower(),
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Project.id != exclude_id)
+    return db.scalar(stmt) is not None
+
+
 def _counts(
     db: Session, project_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, tuple[int, int, int]]:
@@ -90,6 +104,11 @@ def create_project(
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
+    if _name_taken(db, user_id, body.name):
+        raise HTTPException(
+            409, f'A project named "{body.name.strip()}" already exists.'
+        )
+
     project = Project(
         owner_id=user_id,
         name=body.name,
@@ -131,7 +150,11 @@ def update_project(
         except ValueError as exc:
             raise HTTPException(422, str(exc))
         project.llm_provider, project.llm_model = provider, model
-    if body.name is not None:
+    if body.name is not None and body.name != project.name:
+        if _name_taken(db, project.owner_id, body.name, exclude_id=project.id):
+            raise HTTPException(
+                409, f'A project named "{body.name.strip()}" already exists.'
+            )
         project.name = body.name
     if body.description is not None:
         project.description = body.description

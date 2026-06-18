@@ -31,6 +31,7 @@ def list_models(
             "openai": "openai" in user_providers,
             "gemini": "gemini" in user_providers,
             "anthropic": "anthropic" in user_providers,
+            "sarvam": "sarvam" in user_providers,
             "ollama": ollama_provider.is_available(),
             "sentence_transformers": st_provider.is_available(),
         },

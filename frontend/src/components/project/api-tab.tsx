@@ -38,6 +38,13 @@ export function ApiTab({ project }: { project: Project }) {
     `/api/projects/${project.id}/keys`,
     fetcher
   )
+  // Active keys (newest first) on top; revoked keys sink to the bottom.
+  const sortedKeys = [...(keys ?? [])].sort((a, b) => {
+    const aRevoked = a.revoked_at ? 1 : 0
+    const bRevoked = b.revoked_at ? 1 : 0
+    if (aRevoked !== bRevoked) return aRevoked - bRevoked
+    return a.created_at < b.created_at ? 1 : -1
+  })
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null)
   const [creating, setCreating] = useState(false)
 
@@ -162,7 +169,7 @@ const { answer, sources } = await res.json();`
                   </TableCell>
                 </TableRow>
               ) : (
-                keys.map((key) => (
+                sortedKeys.map((key) => (
                   <TableRow key={key.id}>
                     <TableCell className="pl-6 font-mono text-xs">
                       {key.key_prefix}…

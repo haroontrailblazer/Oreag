@@ -108,7 +108,7 @@ class ApiKeyCreate(BaseModel):
 
 
 class ProviderKeyCreate(BaseModel):
-    provider: Literal["openai", "gemini", "anthropic"]
+    provider: Literal["openai", "gemini", "anthropic", "sarvam"]
     key: str = Field(min_length=8, max_length=500)
     label: str = Field(default="default", min_length=1, max_length=100)
 

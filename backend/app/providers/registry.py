@@ -23,6 +23,7 @@ CATALOG: dict = {
         "openai": ["gpt-4o-mini", "gpt-4o"],
         "gemini": ["gemini-2.0-flash", "gemini-1.5-pro"],
         "anthropic": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"],
+        "sarvam": ["sarvam-30b", "sarvam-105b"],
         "ollama": ["llama3.1", "mistral", "qwen2.5"],
     },
 }
@@ -78,6 +79,10 @@ def get_llm(provider: str, model: str, api_key: str | None = None) -> LLMProvide
         from .anthropic_provider import AnthropicLLM
 
         return AnthropicLLM(model, api_key)
+    if provider == "sarvam":
+        from .sarvam_provider import SarvamLLM
+
+        return SarvamLLM(model, api_key)
     if provider == "ollama":
         from .ollama_provider import OllamaLLM
 

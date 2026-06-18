@@ -139,65 +139,66 @@ export default function ProfilePage() {
         <p className="text-sm text-muted-foreground">Manage your account.</p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Profile</CardTitle>
-          <CardDescription>
-            Your display name and picture appear across the dashboard.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="flex items-center gap-4">
-            <UserAvatar
-              key={previewSrc ?? "none"}
-              src={previewSrc}
-              name={name || email}
-              className="size-16 text-xl"
-            />
-            <div className="space-y-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={uploading}
-                onClick={() => fileRef.current?.click()}
-              >
-                {uploading ? "Uploading…" : "Change picture"}
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                JPG, PNG or GIF, up to 3&nbsp;MB.
-              </p>
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={handleAvatarChange}
-            />
-          </div>
+      <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-stretch">
+        {/* Left: standalone round avatar (no card), centered to the card height */}
+        <div className="flex shrink-0 flex-col items-center justify-center gap-3">
+          <UserAvatar
+            key={previewSrc ?? "none"}
+            src={previewSrc}
+            name={name || email}
+            className="size-44 text-4xl"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+          >
+            {uploading ? "Uploading…" : "Change picture"}
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            JPG, PNG or GIF · up to 3&nbsp;MB
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={handleAvatarChange}
+          />
+        </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="display-name">Display name</Label>
-            <div className="flex gap-2">
-              <Input
-                id="display-name"
-                value={name}
-                placeholder="Your name"
-                maxLength={50}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <Button onClick={handleSaveName} disabled={savingName}>
-                {savingName ? "Saving…" : "Save"}
-              </Button>
+        {/* Right: separate details card */}
+        <Card className="w-full flex-1">
+          <CardHeader>
+            <CardTitle>Profile</CardTitle>
+            <CardDescription>
+              Your display name appears across the dashboard.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="display-name">Display name</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="display-name"
+                  value={name}
+                  placeholder="Your name"
+                  maxLength={50}
+                  onChange={(e) => setName(e.target.value)}
+                />
+                <Button onClick={handleSaveName} disabled={savingName}>
+                  {savingName ? "Saving…" : "Save"}
+                </Button>
+              </div>
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="profile-email">Email</Label>
-            <Input id="profile-email" value={email ?? ""} readOnly disabled />
-          </div>
-        </CardContent>
-      </Card>
+            <div className="space-y-2">
+              <Label htmlFor="profile-email">Email</Label>
+              <Input id="profile-email" value={email ?? ""} readOnly disabled />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>
