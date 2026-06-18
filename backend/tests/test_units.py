@@ -346,3 +346,20 @@ class TestApiSurface:
         project_id = "00000000-0000-0000-0000-000000000000"
         assert client.get(f"/api/projects/{project_id}/memory-graph").status_code == 401
         assert client.get(f"/v1/projects/{project_id}/memory-graph").status_code == 401
+
+    def test_memory_routes_require_api_key(self):
+        client = TestClient(app)
+        pid = "00000000-0000-0000-0000-000000000000"
+        assert client.post(f"/v1/projects/{pid}/memory", json={"content": "x"}).status_code == 401
+        assert client.post(f"/v1/projects/{pid}/memory/search", json={"query": "x"}).status_code == 401
+        assert client.get(f"/v1/projects/{pid}/memory/recent").status_code == 401
+
+    def test_retrieve_requires_api_key(self):
+        client = TestClient(app)
+        pid = "00000000-0000-0000-0000-000000000000"
+        assert client.post(f"/v1/projects/{pid}/retrieve", json={"query": "x"}).status_code == 401
+
+    def test_owner_memory_requires_auth(self):
+        client = TestClient(app)
+        pid = "00000000-0000-0000-0000-000000000000"
+        assert client.get(f"/api/projects/{pid}/memory").status_code == 401
