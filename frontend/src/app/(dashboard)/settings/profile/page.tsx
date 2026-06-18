@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { SetPasswordForm } from "@/components/set-password-form"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { UserAvatar } from "@/components/user-avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -195,6 +196,16 @@ export default function ProfilePage() {
             <Label htmlFor="profile-email">Email</Label>
             <Input id="profile-email" value={email ?? ""} readOnly disabled />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <CardDescription>Choose how Oreag looks on this device.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ThemeToggle />
         </CardContent>
       </Card>
 

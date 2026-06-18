@@ -17,7 +17,6 @@ import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
 
 import { UserMenu } from "@/components/user-menu"
-import { ThemeToggle } from "@/components/theme-toggle"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -291,7 +290,6 @@ export function DashboardSidebar() {
               Create knowledge base
             </Link>
           </Button>
-          <ThemeToggle />
           <div className="hidden md:block">
             <UserMenu />
           </div>
