@@ -143,11 +143,11 @@ const { answer, sources } = await res.json();`
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Key</TableHead>
+                <TableHead className="pl-6">Key</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead>Last used</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-20" />
+                <TableHead className="w-20 pr-6" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -164,7 +164,7 @@ const { answer, sources } = await res.json();`
               ) : (
                 keys.map((key) => (
                   <TableRow key={key.id}>
-                    <TableCell className="font-mono text-xs">
+                    <TableCell className="pl-6 font-mono text-xs">
                       {key.key_prefix}…
                     </TableCell>
                     <TableCell>
@@ -184,7 +184,7 @@ const { answer, sources } = await res.json();`
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="pr-6">
                       {!key.revoked_at && (
                         <Button
                           variant="ghost"

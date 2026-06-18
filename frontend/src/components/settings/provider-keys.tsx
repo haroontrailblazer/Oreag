@@ -105,9 +105,9 @@ export function ProviderKeys() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Provider</TableHead>
+              <TableHead className="pl-6">Provider</TableHead>
               <TableHead>Key</TableHead>
-              <TableHead className="w-40" />
+              <TableHead className="w-40 pr-6" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -115,7 +115,7 @@ export function ProviderKeys() {
               const existing = byProvider.get(provider.id)
               return (
                 <TableRow key={provider.id}>
-                  <TableCell>
+                  <TableCell className="pl-6">
                     <div className="font-medium">{provider.label}</div>
                     <div className="text-xs text-muted-foreground">
                       {provider.hint}
@@ -128,7 +128,7 @@ export function ProviderKeys() {
                       <span className="text-muted-foreground">Not set</span>
                     )}
                   </TableCell>
-                  <TableCell className="space-x-2 text-right">
+                  <TableCell className="space-x-2 pr-6 text-right">
                     <Button
                       variant="outline"
                       size="sm"
