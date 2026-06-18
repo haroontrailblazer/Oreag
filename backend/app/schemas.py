@@ -175,3 +175,39 @@ class MemoryGraphResponse(BaseModel):
     project: ProjectInfo
     nodes: list[MemoryGraphNode]
     edges: list[MemoryGraphEdge]
+
+
+# --- Agent memory (MCP) ---------------------------------------------------
+
+
+class MemoryCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+    tags: list[str] = Field(default_factory=list)
+    pinned: bool = False
+    source: str = Field(default="mcp", max_length=50)
+
+
+class MemoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    content: str
+    tags: list[str]
+    pinned: bool
+    source: str
+    created_at: datetime
+    warning: str | None = None  # set when stored without an embedding
+
+
+class MemorySearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=4000)
+    top_k: int | None = Field(default=None, ge=1, le=20)
+
+
+class MemorySearchResult(MemoryOut):
+    similarity: float
+
+
+class RetrieveRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=4000)
+    top_k: int | None = Field(default=None, ge=1, le=20)

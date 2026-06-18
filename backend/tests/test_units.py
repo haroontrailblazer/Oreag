@@ -40,6 +40,23 @@ class TestMemoryModel:
         } <= cols
 
 
+class TestMemorySchemas:
+    def test_content_bounds(self):
+        from app.schemas import MemoryCreate
+
+        MemoryCreate(content="x")
+        with pytest.raises(ValueError):
+            MemoryCreate(content="")
+        with pytest.raises(ValueError):
+            MemoryCreate(content="x" * 8001)
+
+    def test_defaults(self):
+        from app.schemas import MemoryCreate
+
+        m = MemoryCreate(content="hi")
+        assert m.tags == [] and m.pinned is False and m.source == "mcp"
+
+
 class TestRegistry:
     def test_known_embedding_dimensions(self):
         assert embedding_dimensions("openai", "text-embedding-3-small") == 1536
