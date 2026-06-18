@@ -2,7 +2,6 @@
 
 import {
   Circle,
-  Database,
   FileText,
   FolderKanban,
   Home,
@@ -18,7 +17,6 @@ import useSWR from "swr"
 
 import { UserMenu } from "@/components/user-menu"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -284,12 +282,6 @@ export function DashboardSidebar() {
         <Separator />
 
         <div className="space-y-3">
-          <Button asChild variant="outline" className="w-full justify-start bg-background">
-            <Link href="/projects/new">
-              <Database className="size-4" />
-              Create knowledge base
-            </Link>
-          </Button>
           <div className="hidden md:block">
             <UserMenu />
           </div>
