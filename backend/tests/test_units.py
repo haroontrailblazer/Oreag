@@ -57,6 +57,55 @@ class TestMemorySchemas:
         assert m.tags == [] and m.pinned is False and m.source == "mcp"
 
 
+class TestMemoryService:
+    def _project(self):
+        return Project(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+        )
+
+    class _FakeDB:
+        def __init__(self):
+            self.added = []
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        def commit(self):
+            pass
+
+        def refresh(self, obj):
+            pass
+
+    def test_save_embeds_and_stores(self, monkeypatch):
+        from app.schemas import MemoryCreate
+        from app.services import memory
+
+        class StubEmbedder:
+            def embed_texts(self, texts):
+                return [[0.1, 0.2, 0.3]]
+
+        monkeypatch.setattr(memory.resolver, "resolve_embedding_key", lambda db, p: "k")
+        monkeypatch.setattr(memory, "get_embedder", lambda *a, **k: StubEmbedder())
+
+        db = self._FakeDB()
+        m = memory.save_memory(db, self._project(), MemoryCreate(content="hello"))
+        assert m.content == "hello"
+        assert m.embedding == [0.1, 0.2, 0.3]
+        assert m in db.added
+
+    def test_save_without_key_stores_null_embedding(self, monkeypatch):
+        from app.schemas import MemoryCreate
+        from app.services import memory
+
+        monkeypatch.setattr(memory.resolver, "resolve_embedding_key", lambda db, p: None)
+        db = self._FakeDB()
+        m = memory.save_memory(db, self._project(), MemoryCreate(content="hi"))
+        assert m.embedding is None
+
+
 class TestRegistry:
     def test_known_embedding_dimensions(self):
         assert embedding_dimensions("openai", "text-embedding-3-small") == 1536
