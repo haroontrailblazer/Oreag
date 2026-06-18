@@ -30,7 +30,8 @@ Anthropic credentials (or runs a local Ollama model), stored encrypted at rest.
 - **Any document to an API** — upload, auto-convert to Markdown, chunk, embed, and serve.
 - **Per-project RAG endpoint** — `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
 - **Agent memory graph** — a queryable graph of sections and entities derived from indexed content.
-- **BYOK, multi-provider** — OpenAI, Google Gemini, Anthropic, Ollama (local), sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
+- **Agent memory (MCP)** — coding agents (Claude Code, Codex, Claude) save & recall per-project memory and pull document context through the Oreag MCP server.
+- **BYOK, multi-provider** — OpenAI, Google Gemini, Anthropic, Sarvam AI, Ollama (local), sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
 - **Secure by design** — Supabase Auth (JWT/JWKS), Row-Level Security, SHA-256-hashed API keys, Fernet-encrypted provider keys.
 - **Tunable** — chunk size/overlap (global or per-file), embedding model, LLM, top-K — with one-click re-index.
 
@@ -44,7 +45,12 @@ Anthropic credentials (or runs a local Ollama model), stored encrypted at rest.
 flowchart TB
     subgraph client["CLIENT TIER"]
         Browser["Web Browser<br/>Dashboard UI"]
-        ExtApp["External App / Agent<br/>your code"]
+        ExtApp["External App<br/>your code"]
+    end
+
+    subgraph agents["CODING AGENTS"]
+        Agent["Claude Code · Codex · Claude"]
+        MCP["Oreag MCP server<br/>memory + docs tools"]
     end
 
     subgraph edge["PRESENTATION TIER — Vercel"]
@@ -54,11 +60,12 @@ flowchart TB
 
     subgraph appt["APPLICATION TIER — Render · FastAPI"]
         API["Dashboard API<br/>/api/*"]
-        PublicAPI["Public RAG API<br/>/v1/*"]
+        PublicAPI["Public API<br/>/v1/* — query · retrieve · memory"]
         subgraph services["Domain Services"]
             Ingest["Ingestion<br/>background tasks"]
             Retrieve["Retrieval"]
             Generate["Generation"]
+            Memory["Memory<br/>save · search · recent"]
             MemGraph["Memory Graph"]
         end
         Resolver["BYOK Key Resolver<br/>Fernet decrypt"]
@@ -67,7 +74,7 @@ flowchart TB
 
     subgraph datat["DATA TIER — Supabase"]
         Auth["Auth<br/>JWT / JWKS"]
-        PG[("Postgres + pgvector<br/>projects · files · chunks<br/>provider_keys · api_keys · query_logs")]
+        PG[("Postgres + pgvector<br/>projects · files · chunks · memories<br/>provider_keys · api_keys · query_logs")]
         Store[["Storage<br/>project-files bucket"]]
     end
 
@@ -75,6 +82,7 @@ flowchart TB
         OpenAI["OpenAI"]
         Gemini["Google Gemini"]
         Anthropic["Anthropic Claude"]
+        Sarvam["Sarvam AI"]
         Ollama["Ollama · local"]
     end
 
@@ -83,33 +91,38 @@ flowchart TB
     AuthRt -.->|verifyOtp| Auth
     Next ==>|"Bearer JWT"| API
     ExtApp ==>|"Bearer oreag_sk_…"| PublicAPI
+    Agent ==> MCP
+    MCP ==>|"Bearer oreag_sk_…"| PublicAPI
 
     API -.->|validate JWT · JWKS| Auth
-    API --> Ingest & Retrieve & Generate & MemGraph
-    PublicAPI --> Retrieve & Generate & MemGraph
+    API --> Ingest & Retrieve & Generate & Memory & MemGraph
+    PublicAPI --> Retrieve & Generate & Memory & MemGraph
 
-    Ingest & Retrieve & Generate --> Resolver
+    Ingest & Retrieve & Generate & Memory --> Resolver
     Resolver -->|decrypt keys| PG
     Resolver --> Registry
-    Registry --> OpenAI & Gemini & Anthropic & Ollama
+    Registry --> OpenAI & Gemini & Anthropic & Sarvam & Ollama
 
     Ingest -->|raw + markdown| Store
     Ingest -->|chunks + vectors| PG
     Retrieve -->|cosine search| PG
     Generate --> PG
+    Memory -->|embed-on-save · search| PG
     MemGraph --> PG
 
     classDef tClient fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef tAgent fill:#fce7f3,stroke:#db2777,color:#831843
     classDef tEdge fill:#f4f4f5,stroke:#18181b,color:#18181b
     classDef tApp fill:#d1fae5,stroke:#059669,color:#064e3b
     classDef tData fill:#dcfce7,stroke:#16a34a,color:#14532d
     classDef tAI fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
 
     class Browser,ExtApp tClient
+    class Agent,MCP tAgent
     class Next,AuthRt tEdge
-    class API,PublicAPI,Ingest,Retrieve,Generate,MemGraph,Resolver,Registry tApp
+    class API,PublicAPI,Ingest,Retrieve,Generate,Memory,MemGraph,Resolver,Registry tApp
     class Auth,PG,Store tData
-    class OpenAI,Gemini,Anthropic,Ollama tAI
+    class OpenAI,Gemini,Anthropic,Sarvam,Ollama tAI
 ```
 
 ---
@@ -253,6 +266,42 @@ sequenceDiagram
     deactivate FE
 ```
 
+### 5. Agent Memory & Docs Recall (MCP)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor A as Coding Agent
+    participant MCP as Oreag MCP server
+    participant API as FastAPI · /v1
+    participant M as Memory service
+    participant DB as pgvector
+
+    Note over A,DB: Session start — bootstrap
+    A->>MCP: list_recent_memory()
+    MCP->>API: GET /memory/recent (Bearer oreag_sk_…)
+    API->>M: recent_memories (pinned first)
+    M->>DB: SELECT ORDER BY pinned, created_at
+    DB-->>M: entries
+    M-->>MCP: entries
+    MCP-->>A: context to orient the session
+
+    Note over A,DB: During work — save & recall
+    A->>MCP: save_memory("decision: …")
+    MCP->>API: POST /memory
+    API->>M: embed-on-save (resolved key)
+    M->>DB: INSERT memory + embedding
+    A->>MCP: search_memory("how does auth work?")
+    MCP->>API: POST /memory/search
+    API->>M: embed query → cosine search
+    M->>DB: ORDER BY embedding <=> qvec
+    DB-->>M: relevant entries
+    M-->>A: recalled memories
+    A->>MCP: search_docs("payment flow")
+    MCP->>API: POST /retrieve
+    API-->>A: relevant document chunks
+```
+
 ---
 
 ## Tech Stack
@@ -264,9 +313,10 @@ sequenceDiagram
 | **Database** | Supabase Postgres + `pgvector` |
 | **Auth** | Supabase Auth (JWT / JWKS) |
 | **Storage** | Supabase Storage (private bucket) |
-| **AI providers** | OpenAI · Google Gemini · Anthropic · Ollama · sentence-transformers |
+| **AI providers** | OpenAI · Google Gemini · Anthropic · Sarvam AI · Ollama · sentence-transformers |
 | **Ingestion** | PyMuPDF, MarkItDown, LangChain text splitters |
 | **Crypto** | `cryptography` (Fernet) for BYOK keys |
+| **Agent integration** | MCP server (Python, FastMCP) — `mcp-server/` |
 | **Hosting** | Vercel (frontend) · Render (backend) · Supabase (data) |
 
 ## Repository Structure
@@ -280,15 +330,17 @@ Oreag/
 │       └── lib/              # api client, supabase client/server, types
 ├── backend/                  # FastAPI service (Render)
 │   └── app/
-│       ├── routers/          # projects, files, keys, provider_keys, meta, playground, rag_v1, memory_graph
-│       ├── providers/        # registry, resolver, openai/gemini/anthropic/ollama/st
-│       ├── services/         # ingestion, retrieval, generation, query, memory_graph, conversion, storage
+│       ├── routers/          # projects, files, keys, provider_keys, account, memory, meta, playground, rag_v1, memory_graph
+│       ├── providers/        # registry, resolver, openai/gemini/anthropic/sarvam/ollama/st
+│       ├── services/         # ingestion, retrieval, generation, query, memory, memory_graph, conversion, storage
 │       ├── crypto.py         # Fernet encrypt/decrypt for BYOK keys
 │       └── models.py, schemas.py, config.py, db.py, main.py
+├── mcp-server/               # Oreag MCP server (FastMCP) — agent memory + docs tools
 ├── supabase/
-│   ├── migrations/           # 0001…0005 (tables, RLS, pgvector, provider_keys)
+│   ├── migrations/           # 0001…0007 (tables, RLS, pgvector, provider_keys, memories)
 │   └── templates/            # branded auth email templates
 ├── render.yaml               # backend blueprint
+├── flow.md                   # architecture + flow diagrams
 └── DEPLOY.md                 # production deploy guide
 ```
 
