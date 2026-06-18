@@ -32,6 +32,15 @@ export interface ProviderKey {
   updated_at: string
 }
 
+export interface Memory {
+  id: number
+  content: string
+  tags: string[]
+  pinned: boolean
+  source: string
+  created_at: string
+}
+
 export interface FileRecord {
   id: string
   project_id: string

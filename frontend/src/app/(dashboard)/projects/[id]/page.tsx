@@ -7,6 +7,7 @@ import useSWR from "swr"
 
 import { ApiTab } from "@/components/project/api-tab"
 import { FilesTab } from "@/components/project/files-tab"
+import { MemoryTab } from "@/components/project/memory-tab"
 import { PlaygroundTab } from "@/components/project/playground-tab"
 import { SettingsTab } from "@/components/project/settings-tab"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -71,6 +72,7 @@ export default function ProjectPage({
           <TabsTrigger value="files">Files</TabsTrigger>
           <TabsTrigger value="playground">Playground</TabsTrigger>
           <TabsTrigger value="api">API</TabsTrigger>
+          <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="files" className="mt-4">
@@ -85,6 +87,9 @@ export default function ProjectPage({
         </TabsContent>
         <TabsContent value="api" className="mt-4">
           <ApiTab project={project} />
+        </TabsContent>
+        <TabsContent value="memory" className="mt-4">
+          <MemoryTab project={project} />
         </TabsContent>
         <TabsContent value="settings" className="mt-4">
           <SettingsTab project={project} onChanged={() => mutate()} />
