@@ -129,7 +129,7 @@ export function AddFilesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button>
-          <FileUp className="size-4" />
+          <FileUp weight="duotone" className="size-4" />
           Add files
         </Button>
       </DialogTrigger>
@@ -153,7 +153,7 @@ export function AddFilesDialog({
               }}
               className="flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed p-6 text-sm text-muted-foreground hover:bg-muted/40"
             >
-              <FileUp className="size-5" />
+              <FileUp weight="duotone" className="size-5" />
               Drag &amp; drop or click to choose (max {MAX_FILE_MB} MB each)
             </button>
             <input
@@ -176,7 +176,7 @@ export function AddFilesDialog({
                       type="button"
                       onClick={() => setFiles(files.filter((f) => f !== file))}
                     >
-                      <X className="size-4 text-muted-foreground" />
+                      <X weight="duotone" className="size-4 text-muted-foreground" />
                     </button>
                   </li>
                 ))}

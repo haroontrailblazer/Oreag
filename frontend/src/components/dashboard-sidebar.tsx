@@ -46,7 +46,7 @@ function SidebarLink({
 }: {
   href: string
   label: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: React.ComponentType<{ className?: string; weight?: "duotone" }>
   active: boolean
 }) {
   return (
@@ -57,7 +57,7 @@ function SidebarLink({
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
-      <Icon className="size-4" />
+      <Icon weight="duotone" className="size-4" />
       <span className="truncate">{label}</span>
     </Link>
   )
@@ -78,7 +78,7 @@ function ProjectLink({
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
-      <FolderKanban className="size-4 shrink-0" />
+      <FolderKanban weight="duotone" className="size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{project.name}</span>
       <Circle
         weight="fill"
@@ -110,7 +110,7 @@ function FileItem({
       title={file.filename}
       className="flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
-      <FileText className="size-4 shrink-0 text-sidebar-foreground/55" />
+      <FileText weight="duotone" className="size-4 shrink-0 text-sidebar-foreground/55" />
       <span className="min-w-0 flex-1 truncate">{file.filename}</span>
     </Link>
   )
@@ -251,7 +251,7 @@ export function DashboardSidebar() {
           </div>
 
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-foreground/45" />
+            <Search weight="duotone" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-foreground/45" />
             <Input
               type="search"
               placeholder={inProject ? "Search files" : "Search projects"}
@@ -291,6 +291,7 @@ export function DashboardSidebar() {
                         className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                       >
                         <ChevronRight
+                          weight="duotone"
                           className={cn(
                             "size-3.5 shrink-0 transition-transform",
                             open && "rotate-90"

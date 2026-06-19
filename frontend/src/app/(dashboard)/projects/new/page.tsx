@@ -226,7 +226,7 @@ export default function NewProjectPage() {
                 }}
                 className="flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 text-sm text-muted-foreground hover:bg-muted/40"
               >
-                <FileUp className="size-6" />
+                <FileUp weight="duotone" className="size-6" />
                 Drag and drop files here, or click to browse (max {MAX_FILE_MB}{" "}
                 MB each)
               </button>
@@ -252,7 +252,7 @@ export default function NewProjectPage() {
                           setFiles(files.filter((f) => f !== file))
                         }
                       >
-                        <X className="size-4 text-muted-foreground" />
+                        <X weight="duotone" className="size-4 text-muted-foreground" />
                       </button>
                     </li>
                   ))}

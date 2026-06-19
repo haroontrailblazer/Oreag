@@ -113,7 +113,7 @@ export default function SignupPage() {
                         key={r.label}
                         className="flex items-center gap-1.5 text-xs text-destructive"
                       >
-                        <X className="size-3.5 shrink-0" />
+                        <X weight="duotone" className="size-3.5 shrink-0" />
                         {r.label}
                       </li>
                     ))}

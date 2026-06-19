@@ -142,7 +142,7 @@ const { answer, sources } = await res.json();`
               </CardDescription>
             </div>
             <Button onClick={handleCreate} disabled={creating}>
-              <Plus className="size-4" /> Create key
+              <Plus weight="duotone" className="size-4" /> Create key
             </Button>
           </div>
         </CardHeader>
@@ -164,7 +164,7 @@ const { answer, sources } = await res.json();`
                     colSpan={5}
                     className="py-10 text-center text-muted-foreground"
                   >
-                    <KeyRound className="mx-auto mb-2 size-6" />
+                    <KeyRound weight="duotone" className="mx-auto mb-2 size-6" />
                     No keys yet — create one to call your RAG API.
                   </TableCell>
                 </TableRow>

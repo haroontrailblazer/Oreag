@@ -51,7 +51,7 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-semibold">Projects</h1>
         <Button asChild>
           <Link href="/projects/new">
-            <Plus className="size-4" /> New project
+            <Plus weight="duotone" className="size-4" /> New project
           </Link>
         </Button>
       </div>
@@ -73,7 +73,7 @@ export default function DashboardPage() {
       {projects && projects.length === 0 && (
         <Card className="py-16 text-center">
           <CardContent className="space-y-3">
-            <FileText className="mx-auto size-10 text-muted-foreground" />
+            <FileText weight="duotone" className="mx-auto size-10 text-muted-foreground" />
             <p className="text-muted-foreground">
               No projects yet. Create one to turn your PDFs into an API.
             </p>

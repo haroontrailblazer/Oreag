@@ -87,11 +87,11 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/settings/profile">
-            <UserIcon className="size-4" /> Profile
+            <UserIcon weight="duotone" className="size-4" /> Profile
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem variant="destructive" onClick={handleSignOut}>
-          <LogOut className="size-4" /> Sign out
+          <LogOut weight="duotone" className="size-4" /> Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

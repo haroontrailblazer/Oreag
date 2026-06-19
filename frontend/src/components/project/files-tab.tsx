@@ -62,7 +62,7 @@ const FILE_STATUS = {
   FileRecord["status"],
   {
     label: string
-    icon: React.ComponentType<{ className?: string }>
+    icon: React.ComponentType<{ className?: string; weight?: "duotone" }>
     className: string
   }
 >
@@ -81,6 +81,7 @@ function FileStatus({ status }: { status: FileRecord["status"] }) {
       )}
     >
       <Icon
+        weight="duotone"
         className={cn("size-3.5", status === "processing" && "animate-spin")}
       />
     </span>
@@ -209,16 +210,16 @@ export function FilesTab({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" aria-label="File actions">
-                <MoreHorizontal className="size-4" />
+                <MoreHorizontal weight="duotone" className="size-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={handleRetryFailed}>
-                <RotateCcw className="size-4" />
+                <RotateCcw weight="duotone" className="size-4" />
                 Retry failed files
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={handleReindexAll}>
-                <RotateCcw className="size-4" />
+                <RotateCcw weight="duotone" className="size-4" />
                 Re-index all files
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -229,7 +230,7 @@ export function FilesTab({
       {fileCount === 0 ? (
         <div className="px-6 py-16 text-center">
           <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-            <FileText className="size-5" />
+            <FileText weight="duotone" className="size-5" />
           </div>
           <p className="text-sm font-medium">No files yet</p>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -260,7 +261,7 @@ export function FilesTab({
                 )}
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <FileText className="size-4" />
+                  <FileText weight="duotone" className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">
@@ -289,7 +290,7 @@ export function FilesTab({
                       size="icon-sm"
                       aria-label={`${file.filename} actions`}
                     >
-                      <MoreHorizontal className="size-4" />
+                      <MoreHorizontal weight="duotone" className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -297,7 +298,7 @@ export function FilesTab({
                       disabled={file.status === "processing"}
                       onSelect={() => handleRetry(file)}
                     >
-                      <RotateCcw className="size-4" />
+                      <RotateCcw weight="duotone" className="size-4" />
                       {file.status === "failed" ? "Retry indexing" : "Re-index file"}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
@@ -305,7 +306,7 @@ export function FilesTab({
                       variant="destructive"
                       onSelect={() => handleDelete(file)}
                     >
-                      <Trash2 className="size-4" />
+                      <Trash2 weight="duotone" className="size-4" />
                       Delete file
                     </DropdownMenuItem>
                   </DropdownMenuContent>

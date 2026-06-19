@@ -158,7 +158,7 @@ export function ProviderKeys() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              <KeyRound className="mr-1 inline size-4" />
+              <KeyRound weight="duotone" className="mr-1 inline size-4" />
               {editingProvider?.label} API key
             </DialogTitle>
             <DialogDescription>
