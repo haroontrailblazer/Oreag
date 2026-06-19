@@ -210,7 +210,7 @@ export function FilesTab({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" aria-label="File actions">
-                <MoreHorizontal weight="duotone" className="size-4" />
+                <MoreHorizontal className="size-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -290,7 +290,7 @@ export function FilesTab({
                       size="icon-sm"
                       aria-label={`${file.filename} actions`}
                     >
-                      <MoreHorizontal weight="duotone" className="size-4" />
+                      <MoreHorizontal className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">

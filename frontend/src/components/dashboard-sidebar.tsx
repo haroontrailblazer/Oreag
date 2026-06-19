@@ -26,7 +26,7 @@ import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const mainNav = [
-  { href: "/dashboard", label: "Overview", icon: Home },
+  { href: "/dashboard", label: "Overview", icon: Home, weight: "duotone" as const },
   { href: "/projects/new", label: "New project", icon: Plus },
   { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
 ]
@@ -42,11 +42,13 @@ function SidebarLink({
   href,
   label,
   icon: Icon,
+  weight,
   active,
 }: {
   href: string
   label: string
   icon: React.ComponentType<{ className?: string; weight?: "duotone" }>
+  weight?: "duotone"
   active: boolean
 }) {
   return (
@@ -57,7 +59,7 @@ function SidebarLink({
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
-      <Icon weight="duotone" className="size-4" />
+      <Icon weight={weight} className="size-4" />
       <span className="truncate">{label}</span>
     </Link>
   )

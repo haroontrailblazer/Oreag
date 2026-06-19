@@ -239,7 +239,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 disabled={uploading}
                 onClick={() => fileInput.current?.click()}
               >
-                <Plus weight="duotone" className="size-4" />
+                <Plus className="size-4" />
               </Button>
               <input
                 ref={fileInput}

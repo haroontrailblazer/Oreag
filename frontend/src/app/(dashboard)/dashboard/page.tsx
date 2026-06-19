@@ -51,7 +51,7 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-semibold">Projects</h1>
         <Button asChild>
           <Link href="/projects/new">
-            <Plus weight="duotone" className="size-4" /> New project
+            <Plus className="size-4" /> New project
           </Link>
         </Button>
       </div>
