@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { api, fetcher } from "@/lib/api"
-import { providerNeedsKey, providerOf } from "@/lib/models"
+import { providerOf, providerUsable } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 export function SettingsTab({
@@ -277,12 +277,12 @@ export function SettingsTab({
         <CardHeader>
           <CardTitle>Answer model (LLM)</CardTitle>
           <CardDescription>
-            Pick the chat model used to write answers. Choose any provider — if
-            it has no{" "}
+            The chat model used to write answers. Only providers you have a key
+            for appear — add more in{" "}
             <a href="/settings/api-keys" className="underline">
-              account key
+              Settings → API keys
             </a>
-            , paste a key for this project and its models unlock here.
+            .
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -295,16 +295,20 @@ export function SettingsTab({
               <SelectContent>
                 {models ? (
                   Object.entries(models.catalog.llm).flatMap(([provider, names]) =>
-                    names.map((model) => (
-                      <SelectItem
-                        key={`${provider}/${model}`}
-                        value={`${provider}/${model}`}
-                      >
-                        {provider} / {model}
-                        {providerNeedsKey(provider, "llm", availability, project) &&
-                          " — needs a key"}
-                      </SelectItem>
-                    ))
+                    names
+                      .filter(
+                        (model) =>
+                          providerUsable(provider, "llm", availability, project) ||
+                          `${provider}/${model}` === llm
+                      )
+                      .map((model) => (
+                        <SelectItem
+                          key={`${provider}/${model}`}
+                          value={`${provider}/${model}`}
+                        >
+                          {provider} / {model}
+                        </SelectItem>
+                      ))
                   )
                 ) : (
                   <SelectItem value={llm}>{llm}</SelectItem>
@@ -371,20 +375,24 @@ export function SettingsTab({
                 {models ? (
                   Object.entries(models.catalog.embedding).flatMap(
                     ([provider, entries]) =>
-                      entries.map((entry) => (
-                        <SelectItem
-                          key={`${provider}/${entry.model}`}
-                          value={`${provider}/${entry.model}`}
-                        >
-                          {provider} / {entry.model} ({entry.dimensions}d)
-                          {providerNeedsKey(
-                            provider,
-                            "embedding",
-                            availability,
-                            project
-                          ) && " — needs a key"}
-                        </SelectItem>
-                      ))
+                      entries
+                        .filter(
+                          (entry) =>
+                            providerUsable(
+                              provider,
+                              "embedding",
+                              availability,
+                              project
+                            ) || `${provider}/${entry.model}` === embedding
+                        )
+                        .map((entry) => (
+                          <SelectItem
+                            key={`${provider}/${entry.model}`}
+                            value={`${provider}/${entry.model}`}
+                          >
+                            {provider} / {entry.model} ({entry.dimensions}d)
+                          </SelectItem>
+                        ))
                   )
                 ) : (
                   <SelectItem value={embedding}>{embedding}</SelectItem>

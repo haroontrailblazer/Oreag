@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher } from "@/lib/api"
-import { needsKey, providerOf } from "@/lib/models"
+import { providerOf } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 const MAX_FILE_MB = 50
@@ -88,8 +88,6 @@ export default function NewProjectPage() {
   const [embedding, setEmbedding] = useState("openai/text-embedding-3-small")
   const [llm, setLlm] = useState("openai/gpt-4o-mini")
   const [topK, setTopK] = useState(5)
-  const [embKey, setEmbKey] = useState("")
-  const [llmKey, setLlmKey] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher, {
@@ -153,10 +151,8 @@ export default function NewProjectPage() {
           chunk_overlap: chunkOverlap,
           embedding_provider: embeddingProvider,
           embedding_model: embeddingModel,
-          embedding_api_key: embKey.trim() || undefined,
           llm_provider: llmProvider,
           llm_model: llmModel,
-          llm_api_key: llmKey.trim() || undefined,
           top_k: topK,
         }),
       })
@@ -177,10 +173,8 @@ export default function NewProjectPage() {
   }
 
   const availability = models?.availability ?? { openai: true }
-  const selectedEmbProvider = providerOf(embedding)
-  const selectedLlmProvider = providerOf(llm)
-  const needEmbKey = needsKey(selectedEmbProvider, availability) && !embKey.trim()
-  const needLlmKey = needsKey(selectedLlmProvider, availability) && !llmKey.trim()
+  const embAvailable = Boolean(availability[providerOf(embedding)])
+  const llmAvailable = Boolean(availability[providerOf(llm)])
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -289,21 +283,15 @@ export default function NewProjectPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {models &&
-              (needsKey(selectedEmbProvider, availability) ||
-                needsKey(selectedLlmProvider, availability)) && (
-                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-                  A selected provider has no account key. Paste a key below to use
-                  it for this project, add one in{" "}
-                  <Link
-                    href="/settings/api-keys"
-                    className="font-medium underline"
-                  >
-                    Settings → API keys
-                  </Link>
-                  , or pick a local Ollama model.
-                </div>
-              )}
+            {models && (!embAvailable || !llmAvailable) && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                You don&apos;t have a key for a selected model yet. Add one in{" "}
+                <Link href="/settings/api-keys" className="font-medium underline">
+                  Settings → API keys
+                </Link>{" "}
+                — or run a local Ollama model — then pick a model here.
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="chunk-size">Chunk size</Label>
@@ -346,15 +334,20 @@ export default function NewProjectPage() {
                   {models
                     ? Object.entries(models.catalog.embedding).flatMap(
                         ([provider, entries]) =>
-                          entries.map((entry) => (
-                            <SelectItem
-                              key={`${provider}/${entry.model}`}
-                              value={`${provider}/${entry.model}`}
-                            >
-                              {provider} / {entry.model} ({entry.dimensions}d)
-                              {needsKey(provider, availability) && " — needs a key"}
-                            </SelectItem>
-                          ))
+                          entries
+                            .filter(
+                              (entry) =>
+                                availability[provider] ||
+                                `${provider}/${entry.model}` === embedding
+                            )
+                            .map((entry) => (
+                              <SelectItem
+                                key={`${provider}/${entry.model}`}
+                                value={`${provider}/${entry.model}`}
+                              >
+                                {provider} / {entry.model} ({entry.dimensions}d)
+                              </SelectItem>
+                            ))
                       )
                     : (
                       <SelectItem value="openai/text-embedding-3-small">
@@ -363,15 +356,6 @@ export default function NewProjectPage() {
                     )}
                 </SelectContent>
               </Select>
-              {needsKey(selectedEmbProvider, availability) && (
-                <Input
-                  type="password"
-                  autoComplete="off"
-                  placeholder={`Paste your ${selectedEmbProvider} key for this project`}
-                  value={embKey}
-                  onChange={(e) => setEmbKey(e.target.value)}
-                />
-              )}
               <p className="text-xs text-muted-foreground">
                 How your text is turned into vectors. Cannot be changed later
                 without re-indexing.
@@ -388,15 +372,20 @@ export default function NewProjectPage() {
                   {models
                     ? Object.entries(models.catalog.llm).flatMap(
                         ([provider, names]) =>
-                          names.map((model) => (
-                            <SelectItem
-                              key={`${provider}/${model}`}
-                              value={`${provider}/${model}`}
-                            >
-                              {provider} / {model}
-                              {needsKey(provider, availability) && " — needs a key"}
-                            </SelectItem>
-                          ))
+                          names
+                            .filter(
+                              (model) =>
+                                availability[provider] ||
+                                `${provider}/${model}` === llm
+                            )
+                            .map((model) => (
+                              <SelectItem
+                                key={`${provider}/${model}`}
+                                value={`${provider}/${model}`}
+                              >
+                                {provider} / {model}
+                              </SelectItem>
+                            ))
                       )
                     : (
                       <SelectItem value="openai/gpt-4o-mini">
@@ -405,15 +394,6 @@ export default function NewProjectPage() {
                     )}
                 </SelectContent>
               </Select>
-              {needsKey(selectedLlmProvider, availability) && (
-                <Input
-                  type="password"
-                  autoComplete="off"
-                  placeholder={`Paste your ${selectedLlmProvider} key for this project`}
-                  value={llmKey}
-                  onChange={(e) => setLlmKey(e.target.value)}
-                />
-              )}
             </div>
 
             <div className="space-y-2">
@@ -437,7 +417,9 @@ export default function NewProjectPage() {
               </Button>
               <Button
                 onClick={handleCreate}
-                disabled={submitting || nameTaken || needEmbKey || needLlmKey}
+                disabled={
+                  submitting || nameTaken || !embAvailable || !llmAvailable
+                }
               >
                 {submitting
                   ? "Creating…"

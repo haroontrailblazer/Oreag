@@ -260,15 +260,20 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 <SelectContent>
                   {models ? (
                     Object.entries(models.catalog.llm).flatMap(([provider, names]) =>
-                      names.map((name) => (
-                        <SelectItem
-                          key={`${provider}/${name}`}
-                          value={`${provider}/${name}`}
-                          disabled={!providerUsable(provider, "llm", availability, project)}
-                        >
-                          {provider} / {name}
-                        </SelectItem>
-                      ))
+                      names
+                        .filter(
+                          (name) =>
+                            providerUsable(provider, "llm", availability, project) ||
+                            `${provider}/${name}` === model
+                        )
+                        .map((name) => (
+                          <SelectItem
+                            key={`${provider}/${name}`}
+                            value={`${provider}/${name}`}
+                          >
+                            {provider} / {name}
+                          </SelectItem>
+                        ))
                     )
                   ) : (
                     <SelectItem value={model}>{model}</SelectItem>

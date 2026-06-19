@@ -224,17 +224,24 @@ export function AddFilesDialog({
                 {models ? (
                   Object.entries(models.catalog.embedding).flatMap(
                     ([provider, entries]) =>
-                      entries.map((entry) => (
-                        <SelectItem
-                          key={`${provider}/${entry.model}`}
-                          value={`${provider}/${entry.model}`}
-                          disabled={
-                            !providerUsable(provider, "embedding", availability, project)
-                          }
-                        >
-                          {provider} / {entry.model} ({entry.dimensions}d)
-                        </SelectItem>
-                      ))
+                      entries
+                        .filter(
+                          (entry) =>
+                            providerUsable(
+                              provider,
+                              "embedding",
+                              availability,
+                              project
+                            ) || `${provider}/${entry.model}` === embedding
+                        )
+                        .map((entry) => (
+                          <SelectItem
+                            key={`${provider}/${entry.model}`}
+                            value={`${provider}/${entry.model}`}
+                          >
+                            {provider} / {entry.model} ({entry.dimensions}d)
+                          </SelectItem>
+                        ))
                   )
                 ) : (
                   <SelectItem value={embedding}>{embedding}</SelectItem>
