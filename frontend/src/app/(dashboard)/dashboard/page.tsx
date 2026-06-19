@@ -1,6 +1,6 @@
 "use client"
 
-import { FileText, Plus } from "lucide-react"
+import { FileText, Plus } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import useSWR from "swr"
 

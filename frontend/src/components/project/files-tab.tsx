@@ -1,15 +1,15 @@
 "use client"
 
 import {
-  AlertCircle,
-  CheckCircle2,
-  Clock3,
+  WarningCircle as AlertCircle,
+  CheckCircle as CheckCircle2,
+  Clock as Clock3,
   FileText,
-  Loader2,
-  MoreHorizontal,
-  RotateCcw,
-  Trash2,
-} from "lucide-react"
+  CircleNotch as Loader2,
+  DotsThree as MoreHorizontal,
+  ArrowCounterClockwise as RotateCcw,
+  Trash as Trash2,
+} from "@phosphor-icons/react/dist/ssr"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"

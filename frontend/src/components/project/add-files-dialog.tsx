@@ -1,6 +1,6 @@
 "use client"
 
-import { FileUp, X } from "lucide-react"
+import { FileArrowUp as FileUp, X } from "@phosphor-icons/react/dist/ssr"
 import { useRef, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { api, fetcher } from "@/lib/api"
+import { providerUsable } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 const ACCEPTED_FILE_TYPES = [
@@ -227,7 +228,9 @@ export function AddFilesDialog({
                         <SelectItem
                           key={`${provider}/${entry.model}`}
                           value={`${provider}/${entry.model}`}
-                          disabled={!availability[provider]}
+                          disabled={
+                            !providerUsable(provider, "embedding", availability, project)
+                          }
                         >
                           {provider} / {entry.model} ({entry.dimensions}d)
                         </SelectItem>

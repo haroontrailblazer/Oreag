@@ -1,15 +1,15 @@
 "use client"
 
 import {
-  ChevronRight,
+  CaretRight as ChevronRight,
   Circle,
   FileText,
-  FolderKanban,
-  Home,
-  KeyRound,
+  Kanban as FolderKanban,
+  House as Home,
+  Key as KeyRound,
   Plus,
-  Search,
-} from "lucide-react"
+  MagnifyingGlass as Search,
+} from "@phosphor-icons/react/dist/ssr"
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -81,6 +81,7 @@ function ProjectLink({
       <FolderKanban className="size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{project.name}</span>
       <Circle
+        weight="fill"
         className={cn("size-2.5 shrink-0", statusTone[project.status])}
         aria-label={project.status}
       />

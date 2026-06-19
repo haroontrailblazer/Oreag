@@ -1,6 +1,6 @@
 "use client"
 
-import { X } from "lucide-react"
+import { X } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"

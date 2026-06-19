@@ -1,6 +1,6 @@
 "use client"
 
-import { FileUp, X } from "lucide-react"
+import { FileArrowUp as FileUp, X } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useRef, useState } from "react"
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher } from "@/lib/api"
+import { needsKey, providerOf } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 const MAX_FILE_MB = 50
@@ -87,6 +88,8 @@ export default function NewProjectPage() {
   const [embedding, setEmbedding] = useState("openai/text-embedding-3-small")
   const [llm, setLlm] = useState("openai/gpt-4o-mini")
   const [topK, setTopK] = useState(5)
+  const [embKey, setEmbKey] = useState("")
+  const [llmKey, setLlmKey] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher, {
@@ -150,8 +153,10 @@ export default function NewProjectPage() {
           chunk_overlap: chunkOverlap,
           embedding_provider: embeddingProvider,
           embedding_model: embeddingModel,
+          embedding_api_key: embKey.trim() || undefined,
           llm_provider: llmProvider,
           llm_model: llmModel,
+          llm_api_key: llmKey.trim() || undefined,
           top_k: topK,
         }),
       })
@@ -172,6 +177,10 @@ export default function NewProjectPage() {
   }
 
   const availability = models?.availability ?? { openai: true }
+  const selectedEmbProvider = providerOf(embedding)
+  const selectedLlmProvider = providerOf(llm)
+  const needEmbKey = needsKey(selectedEmbProvider, availability) && !embKey.trim()
+  const needLlmKey = needsKey(selectedLlmProvider, availability) && !llmKey.trim()
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -281,18 +290,18 @@ export default function NewProjectPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {models &&
-              (!availability[embedding.split("/")[0]] ||
-                !availability[llm.split("/")[0]]) && (
+              (needsKey(selectedEmbProvider, availability) ||
+                needsKey(selectedLlmProvider, availability)) && (
                 <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-                  A selected provider has no key yet. Add your own key in{" "}
+                  A selected provider has no account key. Paste a key below to use
+                  it for this project, add one in{" "}
                   <Link
                     href="/settings/api-keys"
                     className="font-medium underline"
                   >
                     Settings → API keys
-                  </Link>{" "}
-                  — or pick a local Ollama model. You can also set a per-project
-                  key in the project&apos;s settings after creating it.
+                  </Link>
+                  , or pick a local Ollama model.
                 </div>
               )}
             <div className="grid grid-cols-2 gap-4">
@@ -341,10 +350,9 @@ export default function NewProjectPage() {
                             <SelectItem
                               key={`${provider}/${entry.model}`}
                               value={`${provider}/${entry.model}`}
-                              disabled={!availability[provider]}
                             >
                               {provider} / {entry.model} ({entry.dimensions}d)
-                              {!availability[provider] && " — unavailable"}
+                              {needsKey(provider, availability) && " — needs a key"}
                             </SelectItem>
                           ))
                       )
@@ -355,6 +363,15 @@ export default function NewProjectPage() {
                     )}
                 </SelectContent>
               </Select>
+              {needsKey(selectedEmbProvider, availability) && (
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  placeholder={`Paste your ${selectedEmbProvider} key for this project`}
+                  value={embKey}
+                  onChange={(e) => setEmbKey(e.target.value)}
+                />
+              )}
               <p className="text-xs text-muted-foreground">
                 How your text is turned into vectors. Cannot be changed later
                 without re-indexing.
@@ -375,10 +392,9 @@ export default function NewProjectPage() {
                             <SelectItem
                               key={`${provider}/${model}`}
                               value={`${provider}/${model}`}
-                              disabled={!availability[provider]}
                             >
                               {provider} / {model}
-                              {!availability[provider] && " — unavailable"}
+                              {needsKey(provider, availability) && " — needs a key"}
                             </SelectItem>
                           ))
                       )
@@ -389,6 +405,15 @@ export default function NewProjectPage() {
                     )}
                 </SelectContent>
               </Select>
+              {needsKey(selectedLlmProvider, availability) && (
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  placeholder={`Paste your ${selectedLlmProvider} key for this project`}
+                  value={llmKey}
+                  onChange={(e) => setLlmKey(e.target.value)}
+                />
+              )}
             </div>
 
             <div className="space-y-2">
@@ -410,7 +435,10 @@ export default function NewProjectPage() {
               <Button variant="outline" onClick={() => setStep(1)}>
                 Back
               </Button>
-              <Button onClick={handleCreate} disabled={submitting || nameTaken}>
+              <Button
+                onClick={handleCreate}
+                disabled={submitting || nameTaken || needEmbKey || needLlmKey}
+              >
                 {submitting
                   ? "Creating…"
                   : files.length > 0

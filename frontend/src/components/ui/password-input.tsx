@@ -1,6 +1,6 @@
 "use client"
 
-import { Eye, EyeOff } from "lucide-react"
+import { Eye, EyeSlash as EyeOff } from "@phosphor-icons/react/dist/ssr"
 import * as React from "react"
 
 import { Input } from "@/components/ui/input"

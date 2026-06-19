@@ -1,6 +1,6 @@
 "use client"
 
-import { Loader2 } from "lucide-react"
+import { CircleNotch as Loader2 } from "@phosphor-icons/react/dist/ssr"
 import { useSearchParams } from "next/navigation"
 import { use, useEffect, useState } from "react"
 import useSWR from "swr"

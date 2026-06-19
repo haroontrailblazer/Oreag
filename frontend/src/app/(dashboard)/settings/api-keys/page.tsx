@@ -1,3 +1,4 @@
+import { ProjectKeys } from "@/components/settings/project-keys"
 import { ProviderKeys } from "@/components/settings/provider-keys"
 
 export default function ApiKeysPage() {
@@ -11,6 +12,7 @@ export default function ApiKeysPage() {
         </p>
       </div>
       <ProviderKeys />
+      <ProjectKeys />
     </div>
   )
 }

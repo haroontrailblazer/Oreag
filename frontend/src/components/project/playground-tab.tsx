@@ -1,6 +1,6 @@
 "use client"
 
-import { ArrowUp, Plus, Square } from "lucide-react"
+import { ArrowUp, Plus, Square } from "@phosphor-icons/react/dist/ssr"
 import { useRef, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher } from "@/lib/api"
+import { providerUsable } from "@/lib/models"
 import type { ModelsResponse, Project, QueryResponse } from "@/lib/types"
 
 const ACCEPTED_FILE_TYPES = [
@@ -263,7 +264,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                         <SelectItem
                           key={`${provider}/${name}`}
                           value={`${provider}/${name}`}
-                          disabled={!availability[provider]}
+                          disabled={!providerUsable(provider, "llm", availability, project)}
                         >
                           {provider} / {name}
                         </SelectItem>

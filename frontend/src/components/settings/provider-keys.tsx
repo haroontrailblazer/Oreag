@@ -1,6 +1,6 @@
 "use client"
 
-import { KeyRound } from "lucide-react"
+import { Key as KeyRound } from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
 import { toast } from "sonner"
 import useSWR, { mutate as globalMutate } from "swr"

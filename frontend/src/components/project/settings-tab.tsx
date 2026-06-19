@@ -5,6 +5,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
 
+import { ProviderKeyField } from "@/components/project/provider-key-field"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -31,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { api, fetcher } from "@/lib/api"
+import { providerNeedsKey, providerOf } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 export function SettingsTab({
@@ -44,46 +46,76 @@ export function SettingsTab({
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher)
   const availability = models?.availability ?? { openai: true }
 
-  // instant edits
+  // General
   const [name, setName] = useState(project.name)
   const [topK, setTopK] = useState(project.top_k)
-  const [llm, setLlm] = useState(`${project.llm_provider}/${project.llm_model}`)
   const [saving, setSaving] = useState(false)
 
-  // reindex-required edits
+  // Answer model (LLM) — instant save
+  const [llm, setLlm] = useState(`${project.llm_provider}/${project.llm_model}`)
+  const [llmKeyInput, setLlmKeyInput] = useState("")
+  const [llmEditingKey, setLlmEditingKey] = useState(false)
+  const [savingLlm, setSavingLlm] = useState(false)
+
+  // Indexing + embedding — key-only change is instant; model/chunk change re-indexes
   const [chunkSize, setChunkSize] = useState(project.chunk_size)
   const [chunkOverlap, setChunkOverlap] = useState(project.chunk_overlap)
   const [embedding, setEmbedding] = useState(
     `${project.embedding_provider}/${project.embedding_model}`
   )
+  const [embKeyInput, setEmbKeyInput] = useState("")
+  const [embEditingKey, setEmbEditingKey] = useState(false)
+  const [savingEmbKey, setSavingEmbKey] = useState(false)
   const [confirmReindex, setConfirmReindex] = useState(false)
   const [reindexing, setReindexing] = useState(false)
-
-  // per-project key overrides
-  const [llmKeyInput, setLlmKeyInput] = useState("")
-  const [embKeyInput, setEmbKeyInput] = useState("")
-  const [savingKey, setSavingKey] = useState<"llm" | "embedding" | null>(null)
 
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  const reindexNeeded =
-    chunkSize !== project.chunk_size ||
-    chunkOverlap !== project.chunk_overlap ||
+  // --- LLM derived state -----------------------------------------------------
+  const llmProvider = providerOf(llm)
+  const llmAccountHasKey = Boolean(availability[llmProvider])
+  const llmOverrideLast4 =
+    project.llm_provider === llmProvider ? project.llm_key_last4 : null
+  const llmUsable =
+    llmAccountHasKey || Boolean(llmOverrideLast4) || Boolean(llmKeyInput.trim())
+  const llmChanged = llm !== `${project.llm_provider}/${project.llm_model}`
+  const canSaveLlm = (llmChanged || Boolean(llmKeyInput.trim())) && llmUsable
+
+  // --- Embedding derived state ----------------------------------------------
+  const embProvider = providerOf(embedding)
+  const embAccountHasKey = Boolean(availability[embProvider])
+  const embOverrideLast4 =
+    project.embedding_provider === embProvider
+      ? project.embedding_key_last4
+      : null
+  const embUsable =
+    embAccountHasKey || Boolean(embOverrideLast4) || Boolean(embKeyInput.trim())
+  const embModelChanged =
     embedding !== `${project.embedding_provider}/${project.embedding_model}`
+  const chunkChanged =
+    chunkSize !== project.chunk_size || chunkOverlap !== project.chunk_overlap
+  const reindexNeeded = embModelChanged || chunkChanged
+  const embKeyOnly = !reindexNeeded && Boolean(embKeyInput.trim())
+
+  function changeLlm(value: string) {
+    setLlm(value)
+    setLlmKeyInput("")
+    setLlmEditingKey(false)
+  }
+
+  function changeEmbedding(value: string) {
+    setEmbedding(value)
+    setEmbKeyInput("")
+    setEmbEditingKey(false)
+  }
 
   async function handleSave() {
-    const [llmProvider, llmModel] = llm.split("/", 2)
     setSaving(true)
     try {
       await api(`/api/projects/${project.id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          name,
-          top_k: topK,
-          llm_provider: llmProvider,
-          llm_model: llmModel,
-        }),
+        body: JSON.stringify({ name, top_k: topK }),
       })
       toast.success("Settings saved")
       onChanged()
@@ -94,42 +126,100 @@ export function SettingsTab({
     }
   }
 
-  async function saveKeyOverride(
-    field: "llm_api_key" | "embedding_api_key",
-    value: string
-  ) {
-    setSavingKey(field === "llm_api_key" ? "llm" : "embedding")
+  async function handleSaveLlm() {
+    const [provider, model] = llm.split("/", 2)
+    const body: Record<string, unknown> = {
+      llm_provider: provider,
+      llm_model: model,
+    }
+    if (llmKeyInput.trim()) {
+      body.llm_api_key = llmKeyInput.trim()
+    } else if (provider !== project.llm_provider && project.llm_key_last4) {
+      // Switching providers without a new key: the stored override belonged to
+      // the old provider, so drop it and fall back to the account key.
+      body.llm_api_key = ""
+    }
+    setSavingLlm(true)
     try {
       await api(`/api/projects/${project.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ [field]: value }),
+        body: JSON.stringify(body),
+      })
+      toast.success("Answer model saved")
+      setLlmKeyInput("")
+      setLlmEditingKey(false)
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed")
+    } finally {
+      setSavingLlm(false)
+    }
+  }
+
+  async function patchLlmKey(value: string) {
+    setSavingLlm(true)
+    try {
+      await api(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ llm_api_key: value }),
       })
       toast.success(value === "" ? "Reverted to account key" : "Project key saved")
       setLlmKeyInput("")
-      setEmbKeyInput("")
+      setLlmEditingKey(false)
       onChanged()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save key")
+      toast.error(err instanceof Error ? err.message : "Failed to update key")
     } finally {
-      setSavingKey(null)
+      setSavingLlm(false)
+    }
+  }
+
+  async function patchEmbeddingKey(value: string) {
+    setSavingEmbKey(true)
+    try {
+      await api(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ embedding_api_key: value }),
+      })
+      toast.success(value === "" ? "Reverted to account key" : "Project key saved")
+      setEmbKeyInput("")
+      setEmbEditingKey(false)
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update key")
+    } finally {
+      setSavingEmbKey(false)
     }
   }
 
   async function handleReindex() {
     const [embeddingProvider, embeddingModel] = embedding.split("/", 2)
+    const body: Record<string, unknown> = {
+      chunk_size: chunkSize,
+      chunk_overlap: chunkOverlap,
+      embedding_provider: embeddingProvider,
+      embedding_model: embeddingModel,
+    }
+    if (embKeyInput.trim()) {
+      body.embedding_api_key = embKeyInput.trim()
+    } else if (
+      embeddingProvider !== project.embedding_provider &&
+      project.embedding_key_last4
+    ) {
+      // Switching embedding providers without a new key: drop the stale
+      // override so resolution falls back to the account key.
+      body.embedding_api_key = ""
+    }
     setReindexing(true)
     try {
       await api(`/api/projects/${project.id}/reindex`, {
         method: "POST",
-        body: JSON.stringify({
-          chunk_size: chunkSize,
-          chunk_overlap: chunkOverlap,
-          embedding_provider: embeddingProvider,
-          embedding_model: embeddingModel,
-        }),
+        body: JSON.stringify(body),
       })
       toast.success("Re-indexing started — all files will be processed again")
       setConfirmReindex(false)
+      setEmbKeyInput("")
+      setEmbEditingKey(false)
       onChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Re-index failed")
@@ -166,44 +256,16 @@ export function SettingsTab({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Answer model (LLM)</Label>
-              <Select value={llm} onValueChange={setLlm}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {models ? (
-                    Object.entries(models.catalog.llm).flatMap(
-                      ([provider, names]) =>
-                        names.map((model) => (
-                          <SelectItem
-                            key={`${provider}/${model}`}
-                            value={`${provider}/${model}`}
-                            disabled={!availability[provider]}
-                          >
-                            {provider} / {model}
-                          </SelectItem>
-                        ))
-                    )
-                  ) : (
-                    <SelectItem value={llm}>{llm}</SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="settings-topk">Top-K results</Label>
-              <Input
-                id="settings-topk"
-                type="number"
-                min={1}
-                max={20}
-                value={topK}
-                onChange={(e) => setTopK(Number(e.target.value))}
-              />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-topk">Top-K results</Label>
+            <Input
+              id="settings-topk"
+              type="number"
+              min={1}
+              max={20}
+              value={topK}
+              onChange={(e) => setTopK(Number(e.target.value))}
+            />
           </div>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? "Saving…" : "Save"}
@@ -213,100 +275,66 @@ export function SettingsTab({
 
       <Card>
         <CardHeader>
-          <CardTitle>Provider key overrides</CardTitle>
+          <CardTitle>Answer model (LLM)</CardTitle>
           <CardDescription>
-            This project uses your{" "}
+            Pick the chat model used to write answers. Choose any provider — if
+            it has no{" "}
             <a href="/settings/api-keys" className="underline">
-              account API keys
-            </a>{" "}
-            by default. Set a key here to use a different one just for this
-            project. Local providers (Ollama) need no key.
+              account key
+            </a>
+            , paste a key for this project and its models unlock here.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>
-              Answer model (LLM) key —{" "}
-              {project.llm_key_last4 ? (
-                <span className="font-mono">project key ••••{project.llm_key_last4}</span>
-              ) : (
-                "using account key"
-              )}
-            </Label>
-            <div className="flex gap-2">
-              <Input
-                type="password"
-                autoComplete="off"
-                placeholder="Paste a key for this project"
-                value={llmKeyInput}
-                onChange={(e) => setLlmKeyInput(e.target.value)}
-              />
-              <Button
-                variant="outline"
-                disabled={!llmKeyInput.trim() || savingKey === "llm"}
-                onClick={() => saveKeyOverride("llm_api_key", llmKeyInput.trim())}
-              >
-                Save
-              </Button>
-              {project.llm_key_last4 && (
-                <Button
-                  variant="ghost"
-                  disabled={savingKey === "llm"}
-                  onClick={() => saveKeyOverride("llm_api_key", "")}
-                >
-                  Use account key
-                </Button>
-              )}
-            </div>
+            <Label>Model</Label>
+            <Select value={llm} onValueChange={changeLlm}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {models ? (
+                  Object.entries(models.catalog.llm).flatMap(([provider, names]) =>
+                    names.map((model) => (
+                      <SelectItem
+                        key={`${provider}/${model}`}
+                        value={`${provider}/${model}`}
+                      >
+                        {provider} / {model}
+                        {providerNeedsKey(provider, "llm", availability, project) &&
+                          " — needs a key"}
+                      </SelectItem>
+                    ))
+                  )
+                ) : (
+                  <SelectItem value={llm}>{llm}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="space-y-2">
-            <Label>
-              Embedding key —{" "}
-              {project.embedding_key_last4 ? (
-                <span className="font-mono">
-                  project key ••••{project.embedding_key_last4}
-                </span>
-              ) : (
-                "using account key"
-              )}
-            </Label>
-            <div className="flex gap-2">
-              <Input
-                type="password"
-                autoComplete="off"
-                placeholder="Paste a key for this project"
-                value={embKeyInput}
-                onChange={(e) => setEmbKeyInput(e.target.value)}
-              />
-              <Button
-                variant="outline"
-                disabled={!embKeyInput.trim() || savingKey === "embedding"}
-                onClick={() =>
-                  saveKeyOverride("embedding_api_key", embKeyInput.trim())
-                }
-              >
-                Save
-              </Button>
-              {project.embedding_key_last4 && (
-                <Button
-                  variant="ghost"
-                  disabled={savingKey === "embedding"}
-                  onClick={() => saveKeyOverride("embedding_api_key", "")}
-                >
-                  Use account key
-                </Button>
-              )}
-            </div>
-          </div>
+          <ProviderKeyField
+            provider={llmProvider}
+            last4={llmOverrideLast4}
+            accountHasKey={llmAccountHasKey}
+            value={llmKeyInput}
+            onChange={setLlmKeyInput}
+            editing={llmEditingKey}
+            onEditingChange={setLlmEditingKey}
+            onRemove={() => patchLlmKey("")}
+            busy={savingLlm}
+          />
+          <Button onClick={handleSaveLlm} disabled={!canSaveLlm || savingLlm}>
+            {savingLlm ? "Saving…" : "Save"}
+          </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Indexing configuration</CardTitle>
+          <CardTitle>Indexing &amp; embedding</CardTitle>
           <CardDescription>
-            Changing these requires re-processing every file (&quot;update
-            memory&quot;). Existing chunks are replaced.
+            The embedding model turns text into vectors. Changing the model or
+            chunking re-processes every file; changing only the key is instant.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -335,7 +363,7 @@ export function SettingsTab({
           </div>
           <div className="space-y-2">
             <Label>Embedding model</Label>
-            <Select value={embedding} onValueChange={setEmbedding}>
+            <Select value={embedding} onValueChange={changeEmbedding}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -347,9 +375,14 @@ export function SettingsTab({
                         <SelectItem
                           key={`${provider}/${entry.model}`}
                           value={`${provider}/${entry.model}`}
-                          disabled={!availability[provider]}
                         >
                           {provider} / {entry.model} ({entry.dimensions}d)
+                          {providerNeedsKey(
+                            provider,
+                            "embedding",
+                            availability,
+                            project
+                          ) && " — needs a key"}
                         </SelectItem>
                       ))
                   )
@@ -359,13 +392,33 @@ export function SettingsTab({
               </SelectContent>
             </Select>
           </div>
-          <Button
-            variant={reindexNeeded ? "default" : "outline"}
-            disabled={!reindexNeeded && project.status !== "error"}
-            onClick={() => setConfirmReindex(true)}
-          >
-            Change &amp; re-index
-          </Button>
+          <ProviderKeyField
+            provider={embProvider}
+            last4={embOverrideLast4}
+            accountHasKey={embAccountHasKey}
+            value={embKeyInput}
+            onChange={setEmbKeyInput}
+            editing={embEditingKey}
+            onEditingChange={setEmbEditingKey}
+            onRemove={() => patchEmbeddingKey("")}
+            busy={savingEmbKey}
+          />
+          {reindexNeeded ? (
+            <Button
+              onClick={() => setConfirmReindex(true)}
+              disabled={!embUsable || reindexing}
+            >
+              Change &amp; re-index
+            </Button>
+          ) : (
+            <Button
+              variant={embKeyOnly ? "default" : "outline"}
+              onClick={() => patchEmbeddingKey(embKeyInput.trim())}
+              disabled={!embKeyOnly || savingEmbKey}
+            >
+              {savingEmbKey ? "Saving…" : "Save key"}
+            </Button>
+          )}
         </CardContent>
       </Card>
 

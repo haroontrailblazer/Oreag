@@ -1,6 +1,6 @@
 "use client"
 
-import { LogOut, User as UserIcon } from "lucide-react"
+import { SignOut as LogOut, User as UserIcon } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"

@@ -1,6 +1,6 @@
 "use client"
 
-import { X } from "lucide-react"
+import { X } from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
 import { toast } from "sonner"
 
