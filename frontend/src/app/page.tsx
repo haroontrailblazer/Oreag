@@ -1,23 +1,74 @@
+import { ArrowRight } from "@phosphor-icons/react/dist/ssr"
+import Image from "next/image"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 text-center">
-      <h1 className="text-5xl font-bold tracking-tight">Oreag</h1>
-      <p className="max-w-md text-lg text-muted-foreground">
-        Turn your PDFs into a queryable RAG API. Upload documents, tune
-        chunking and embeddings, and get an endpoint your apps can call.
-      </p>
-      <div className="flex gap-3">
-        <Button asChild size="lg">
-          <Link href="/signup">Get started</Link>
-        </Button>
-        <Button asChild size="lg" variant="outline">
-          <Link href="/login">Sign in</Link>
-        </Button>
+    <main className="grid min-h-dvh bg-background lg:grid-cols-2">
+      {/* Left — content */}
+      <div className="flex flex-col gap-10 p-8 sm:p-12 lg:p-14">
+        <header className="flex items-center gap-2.5">
+          <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-black/10 dark:bg-black dark:ring-white/15">
+            <Image
+              src="/logo.png"
+              alt=""
+              width={72}
+              height={72}
+              priority
+              className="size-full scale-150 object-contain dark:invert"
+            />
+          </span>
+          <span className="text-lg font-semibold tracking-tight">Oreag</span>
+        </header>
+
+        <div className="flex flex-1 flex-col justify-center gap-6">
+          <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl">
+            Turn your <span className="text-amber-500">documents</span> into a
+            queryable <span className="text-sky-500">RAG API</span>
+          </h1>
+          <p className="max-w-md text-muted-foreground">
+            Upload documents, tune chunking and embeddings, bring your own keys
+            — and ship a grounded endpoint your apps and agents can call.
+          </p>
+          <div className="flex items-center gap-5">
+            <Button asChild size="lg" className="rounded-full px-6">
+              <Link href="/signup">Get started</Link>
+            </Button>
+            <Link
+              href="/login"
+              className="group inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-foreground/70"
+            >
+              Sign in
+              <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+            </Link>
+          </div>
+        </div>
+
+        <footer className="space-y-3">
+          <div className="text-xs font-medium tracking-wide text-muted-foreground">
+            OpenAI · Gemini · Anthropic · Sarvam · Ollama
+          </div>
+          <p className="max-w-sm text-[11px] leading-relaxed text-muted-foreground/70">
+            Bring your own keys or run local models. Documents are embedded into
+            pgvector and served as a grounded /v1 API for your apps and coding
+            agents.
+          </p>
+        </footer>
       </div>
-    </div>
+
+      {/* Right — retro painting, full bleed */}
+      <div className="relative hidden overflow-hidden bg-muted lg:block">
+        <Image
+          src="/hero.jpg"
+          alt="Van Gogh Starry Night style painting of a man working through documents at a desk"
+          fill
+          priority
+          sizes="(min-width: 1024px) 50vw, 100vw"
+          className="object-cover"
+        />
+      </div>
+    </main>
   )
 }

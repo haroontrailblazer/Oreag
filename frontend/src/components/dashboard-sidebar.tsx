@@ -152,7 +152,7 @@ function FileItem({
     <Link
       href={`/projects/${projectId}?file=${file.id}`}
       title={file.filename}
-      onClick={onSelect}
+      onPointerDown={onSelect}
       className="flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
       <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
@@ -161,7 +161,7 @@ function FileItem({
         {ext && <span className="shrink-0">{ext}</span>}
       </span>
       <span className="flex size-4 shrink-0 items-center justify-center">
-        {loading && <Spinner size={14} className="text-sidebar-foreground/70" />}
+        {loading && <Spinner size={14} className="text-sidebar-foreground" />}
       </span>
     </Link>
   )
