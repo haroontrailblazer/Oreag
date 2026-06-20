@@ -15,6 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher } from "@/lib/api"
 import type { Project } from "@/lib/types"
 
+const TAB_VALUES = ["files", "playground", "api", "memory", "settings"]
+
 export default function ProjectPage({
   params,
 }: {
@@ -23,12 +25,20 @@ export default function ProjectPage({
   const { id } = use(params)
   const searchParams = useSearchParams()
   const selectedFileId = searchParams.get("file")
-  const [tab, setTab] = useState("files")
+  const tabParam = searchParams.get("tab")
 
-  // A ?file=<id> link (from the sidebar) opens the Files tab on that file.
+  // ?file=<id> opens Files on that file; ?tab=<name> deep-links to a tab (e.g.
+  // the "Manage" button in Settings → API keys opens this project's Settings).
+  const [tab, setTab] = useState(
+    !selectedFileId && tabParam && TAB_VALUES.includes(tabParam)
+      ? tabParam
+      : "files"
+  )
+
   useEffect(() => {
     if (selectedFileId) setTab("files")
-  }, [selectedFileId])
+    else if (tabParam && TAB_VALUES.includes(tabParam)) setTab(tabParam)
+  }, [selectedFileId, tabParam])
 
   const {
     data: project,

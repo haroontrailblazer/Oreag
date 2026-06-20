@@ -115,7 +115,10 @@ export function ProjectKeys() {
                   </TableCell>
                   <TableCell className="pr-6 text-right">
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`/projects/${project.id}`} prefetch={false}>
+                      <Link
+                        href={`/projects/${project.id}?tab=settings`}
+                        prefetch={false}
+                      >
                         <ManageButtonLabel />
                       </Link>
                     </Button>
