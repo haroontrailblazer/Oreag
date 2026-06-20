@@ -135,9 +135,13 @@ function fileType(file: FileRecord): string {
 function FileItem({
   file,
   projectId,
+  loading,
+  onSelect,
 }: {
   file: FileRecord
   projectId: string
+  loading: boolean
+  onSelect: () => void
 }) {
   // Split off the extension so a long name elides in the middle
   // ("long-report-name….pdf") and the file type always stays visible.
@@ -148,12 +152,16 @@ function FileItem({
     <Link
       href={`/projects/${projectId}?file=${file.id}`}
       title={file.filename}
+      onClick={onSelect}
       className="flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
       <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
       <span className="flex min-w-0 flex-1 items-center">
         <span className="truncate">{base}</span>
         {ext && <span className="shrink-0">{ext}</span>}
+      </span>
+      <span className="flex size-3.5 shrink-0 items-center justify-center">
+        {loading && <Spinner size={12} className="text-sidebar-foreground/55" />}
       </span>
     </Link>
   )
@@ -164,6 +172,7 @@ function SidebarBody() {
   const pathname = usePathname()
   const [query, setQuery] = useState("")
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
+  const [loadingFileId, setLoadingFileId] = useState<string | null>(null)
 
   // Inside a single project, the panel switches to that project's files.
   const projectMatch = pathname.match(/^\/projects\/([^/]+)$/)
@@ -187,6 +196,13 @@ function SidebarBody() {
   useEffect(() => {
     setQuery("")
   }, [projectId])
+
+  // Briefly spin a file row while the Files tab scrolls to / highlights it.
+  useEffect(() => {
+    if (!loadingFileId) return
+    const timer = setTimeout(() => setLoadingFileId(null), 700)
+    return () => clearTimeout(timer)
+  }, [loadingFileId])
 
   const filteredProjects = useMemo(() => {
     const term = query.trim().toLowerCase()
@@ -351,6 +367,8 @@ function SidebarBody() {
                             key={file.id}
                             file={file}
                             projectId={projectId as string}
+                            loading={loadingFileId === file.id}
+                            onSelect={() => setLoadingFileId(file.id)}
                           />
                         ))}
                       </div>

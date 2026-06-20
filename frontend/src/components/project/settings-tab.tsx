@@ -258,7 +258,17 @@ export function SettingsTab({
               id="settings-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              maxLength={20}
             />
+            <div
+              className={`text-right text-xs tabular-nums ${
+                name.length >= 20
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {name.length}/20
+            </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="settings-topk">Top-K results</Label>

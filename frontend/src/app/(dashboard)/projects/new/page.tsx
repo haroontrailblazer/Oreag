@@ -197,14 +197,28 @@ export default function NewProjectPage() {
                 placeholder="e.g. Product handbook"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                maxLength={20}
                 aria-invalid={nameTaken}
               />
-              {nameTaken && (
-                <p className="text-xs text-destructive">
-                  A project named &ldquo;{trimmedName}&rdquo; already exists —
-                  choose another name.
-                </p>
-              )}
+              <div className="flex items-start justify-between gap-2">
+                {nameTaken ? (
+                  <p className="text-xs text-destructive">
+                    A project named &ldquo;{trimmedName}&rdquo; already exists —
+                    choose another name.
+                  </p>
+                ) : (
+                  <span />
+                )}
+                <span
+                  className={`shrink-0 text-xs tabular-nums ${
+                    name.length >= 20
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {name.length}/20
+                </span>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="description">Description (optional)</Label>
