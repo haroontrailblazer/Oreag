@@ -177,3 +177,13 @@
     transform: translateX(100%);
   }
 }
+
+/* 12-bar fade spinner — see components/ui/spinner.tsx */
+@keyframes spinner-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.25;
+  }
+}

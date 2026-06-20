@@ -1,7 +1,7 @@
 "use client"
 
 import { FileText, Plus } from "@phosphor-icons/react/dist/ssr"
-import Link from "next/link"
+import Link, { useLinkStatus } from "next/link"
 import useSWR from "swr"
 
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { fetcher } from "@/lib/api"
 import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -36,6 +37,21 @@ function StatusPill({ status }: { status: Project["status"] }) {
     >
       {status}
     </span>
+  )
+}
+
+/**
+ * Shows the spinner in the card corner while the clicked card's navigation is
+ * in flight. Must be rendered inside its <Link> for useLinkStatus to read it.
+ */
+function CardNavSpinner() {
+  const { pending } = useLinkStatus()
+  if (!pending) return null
+  return (
+    <Spinner
+      size={22}
+      className="absolute bottom-3 right-3 text-muted-foreground"
+    />
   )
 }
 
@@ -87,8 +103,12 @@ export default function DashboardPage() {
       {projects && projects.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
-            <Link key={project.id} href={`/projects/${project.id}`}>
-              <Card className="h-full transition-shadow hover:shadow-md">
+            <Link
+              key={project.id}
+              href={`/projects/${project.id}`}
+              prefetch={false}
+            >
+              <Card className="relative h-full transition-shadow hover:shadow-md">
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="truncate">{project.name}</CardTitle>
@@ -106,6 +126,7 @@ export default function DashboardPage() {
                   {project.query_count === 1 ? "y" : "ies"} ·{" "}
                   {new Date(project.created_at).toLocaleDateString()}
                 </CardContent>
+                <CardNavSpinner />
               </Card>
             </Link>
           ))}
