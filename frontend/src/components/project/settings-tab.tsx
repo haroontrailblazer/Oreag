@@ -81,6 +81,8 @@ export function SettingsTab({
     llmAccountHasKey || Boolean(llmOverrideLast4) || Boolean(llmKeyInput.trim())
   const llmChanged = llm !== `${project.llm_provider}/${project.llm_model}`
   const canSaveLlm = (llmChanged || Boolean(llmKeyInput.trim())) && llmUsable
+  // No account key and no override → the input is shown unconditionally.
+  const llmForcedInput = !llmAccountHasKey && !llmOverrideLast4
 
   // --- Embedding derived state ----------------------------------------------
   const embProvider = providerOf(embedding)
@@ -97,6 +99,7 @@ export function SettingsTab({
     chunkSize !== project.chunk_size || chunkOverlap !== project.chunk_overlap
   const reindexNeeded = embModelChanged || chunkChanged
   const embKeyOnly = !reindexNeeded && Boolean(embKeyInput.trim())
+  const embForcedInput = !embAccountHasKey && !embOverrideLast4
 
   function changeLlm(value: string) {
     setLlm(value)
@@ -327,9 +330,24 @@ export function SettingsTab({
             onRemove={() => patchLlmKey("")}
             busy={savingLlm}
           />
-          <Button onClick={handleSaveLlm} disabled={!canSaveLlm || savingLlm}>
-            {savingLlm ? "Saving…" : "Save"}
-          </Button>
+          {(llmEditingKey || llmForcedInput || llmChanged) && (
+            <div className="flex gap-2">
+              {llmEditingKey && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setLlmKeyInput("")
+                    setLlmEditingKey(false)
+                  }}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button onClick={handleSaveLlm} disabled={!canSaveLlm || savingLlm}>
+                {savingLlm ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -411,21 +429,35 @@ export function SettingsTab({
             onRemove={() => patchEmbeddingKey("")}
             busy={savingEmbKey}
           />
-          {reindexNeeded ? (
-            <Button
-              onClick={() => setConfirmReindex(true)}
-              disabled={!embUsable || reindexing}
-            >
-              Change &amp; re-index
-            </Button>
-          ) : (
-            <Button
-              variant={embKeyOnly ? "default" : "outline"}
-              onClick={() => patchEmbeddingKey(embKeyInput.trim())}
-              disabled={!embKeyOnly || savingEmbKey}
-            >
-              {savingEmbKey ? "Saving…" : "Save key"}
-            </Button>
+          {(reindexNeeded || embEditingKey || embForcedInput) && (
+            <div className="flex gap-2">
+              {embEditingKey && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEmbKeyInput("")
+                    setEmbEditingKey(false)
+                  }}
+                >
+                  Cancel
+                </Button>
+              )}
+              {reindexNeeded ? (
+                <Button
+                  onClick={() => setConfirmReindex(true)}
+                  disabled={!embUsable || reindexing}
+                >
+                  Change &amp; re-index
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => patchEmbeddingKey(embKeyInput.trim())}
+                  disabled={!embKeyOnly || savingEmbKey}
+                >
+                  {savingEmbKey ? "Saving…" : "Save key"}
+                </Button>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
