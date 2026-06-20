@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { LoaderOne } from "@/components/ui/loader"
 import { gravatarUrl } from "@/lib/avatar"
 import { api } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
@@ -154,7 +155,7 @@ export default function ProfilePage() {
             disabled={uploading}
             onClick={() => fileRef.current?.click()}
           >
-            {uploading ? "Uploading…" : "Change picture"}
+            {uploading ? <LoaderOne /> : "Change picture"}
           </Button>
           <p className="text-center text-xs text-muted-foreground">
             JPG, PNG or GIF · up to 3&nbsp;MB
@@ -188,7 +189,7 @@ export default function ProfilePage() {
                   onChange={(e) => setName(e.target.value)}
                 />
                 <Button onClick={handleSaveName} disabled={savingName}>
-                  {savingName ? "Saving…" : "Save"}
+                  {savingName ? <LoaderOne /> : "Save"}
                 </Button>
               </div>
             </div>
@@ -265,7 +266,7 @@ export default function ProfilePage() {
               disabled={confirmText !== "DELETE" || deleting}
               onClick={handleDelete}
             >
-              {deleting ? "Deleting…" : "Delete forever"}
+              {deleting ? <LoaderOne /> : "Delete forever"}
             </Button>
           </DialogFooter>
         </DialogContent>

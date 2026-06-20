@@ -9,6 +9,7 @@ import { AuthShell } from "@/components/auth-shell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { LoaderOne } from "@/components/ui/loader"
 import { PasswordInput } from "@/components/ui/password-input"
 import { createClient } from "@/lib/supabase/client"
 
@@ -81,7 +82,7 @@ export default function LoginPage() {
           />
         </div>
         <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? "Signing in…" : "Log In"}
+          {loading ? <LoaderOne /> : "Log In"}
         </Button>
       </form>
       <p className="text-center text-sm text-muted-foreground">

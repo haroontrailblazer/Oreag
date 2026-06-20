@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { LoaderOne } from "@/components/ui/loader"
 import {
   Table,
   TableBody,
@@ -190,7 +191,7 @@ export function ProviderKeys() {
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={saving || !value.trim()}>
-              {saving ? "Saving…" : "Save key"}
+              {saving ? <LoaderOne /> : "Save key"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -217,7 +218,7 @@ export function ProviderKeys() {
               onClick={confirmRemove}
               disabled={removing}
             >
-              {removing ? "Removing…" : "Remove key"}
+              {removing ? <LoaderOne /> : "Remove key"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -57,7 +57,20 @@ export default function ProjectPage({
     )
   }
   if (!project) {
-    return <Skeleton className="h-64" />
+    return (
+      <div className="space-y-6">
+        {/* header: title + meta line */}
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-80 max-w-full" />
+        </div>
+        {/* tabs bar + active tab content */}
+        <div className="space-y-4">
+          <Skeleton className="h-9 w-full max-w-sm rounded-lg" />
+          <Skeleton className="h-72 rounded-xl" />
+        </div>
+      </div>
+    )
   }
 
   return (

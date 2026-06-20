@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { LoaderOne } from "@/components/ui/loader"
 import { PasswordInput } from "@/components/ui/password-input"
 import { passwordFailures } from "@/lib/password"
 import { createClient } from "@/lib/supabase/client"
@@ -94,7 +95,7 @@ export function SetPasswordForm({
         </div>
       )}
       <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? "Updating…" : submitLabel}
+        {loading ? <LoaderOne /> : submitLabel}
       </Button>
     </form>
   )

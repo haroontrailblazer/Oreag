@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { LoaderOne } from "@/components/ui/loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -148,7 +149,13 @@ const { answer, sources } = await res.json();`
               </CardDescription>
             </div>
             <Button onClick={handleCreate} disabled={creating}>
-              <Plus className="size-4" /> {creating ? "Creating…" : "Create key"}
+              {creating ? (
+                <LoaderOne />
+              ) : (
+                <>
+                  <Plus className="size-4" /> Create key
+                </>
+              )}
             </Button>
           </div>
         </CardHeader>
@@ -269,7 +276,7 @@ const { answer, sources } = await res.json();`
               onClick={confirmRevoke}
               disabled={revoking}
             >
-              {revoking ? "Revoking…" : "Revoke key"}
+              {revoking ? <LoaderOne /> : "Revoke key"}
             </Button>
           </DialogFooter>
         </DialogContent>

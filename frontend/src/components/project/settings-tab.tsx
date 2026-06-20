@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { LoaderOne } from "@/components/ui/loader"
 import {
   Select,
   SelectContent,
@@ -271,7 +272,7 @@ export function SettingsTab({
             />
           </div>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? <LoaderOne /> : "Save"}
           </Button>
         </CardContent>
       </Card>
@@ -344,7 +345,7 @@ export function SettingsTab({
                 </Button>
               )}
               <Button onClick={handleSaveLlm} disabled={!canSaveLlm || savingLlm}>
-                {savingLlm ? "Saving…" : "Save"}
+                {savingLlm ? <LoaderOne /> : "Save"}
               </Button>
             </div>
           )}
@@ -454,7 +455,7 @@ export function SettingsTab({
                   onClick={() => patchEmbeddingKey(embKeyInput.trim())}
                   disabled={!embKeyOnly || savingEmbKey}
                 >
-                  {savingEmbKey ? "Saving…" : "Save key"}
+                  {savingEmbKey ? <LoaderOne /> : "Save key"}
                 </Button>
               )}
             </div>
@@ -492,7 +493,7 @@ export function SettingsTab({
               Cancel
             </Button>
             <Button onClick={handleReindex} disabled={reindexing}>
-              {reindexing ? "Starting…" : "Re-index"}
+              {reindexing ? <LoaderOne /> : "Re-index"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -516,7 +517,7 @@ export function SettingsTab({
               onClick={handleDelete}
               disabled={deleting}
             >
-              {deleting ? "Deleting…" : "Delete forever"}
+              {deleting ? <LoaderOne /> : "Delete forever"}
             </Button>
           </DialogFooter>
         </DialogContent>

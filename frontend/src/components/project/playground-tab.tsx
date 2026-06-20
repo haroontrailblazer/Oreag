@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { LoaderOne } from "@/components/ui/loader"
 import {
   Select,
   SelectContent,
@@ -162,11 +163,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 Answer
               </div>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="inline-flex gap-1">
-                  <span className="size-1.5 animate-pulse rounded-full bg-current" />
-                  <span className="size-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
-                  <span className="size-1.5 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
-                </span>
+                <LoaderOne />
                 Thinking
               </div>
             </div>
