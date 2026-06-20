@@ -19,9 +19,11 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -47,6 +49,8 @@ export function ApiTab({ project }: { project: Project }) {
   })
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null)
   const [creating, setCreating] = useState(false)
+  const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
+  const [revoking, setRevoking] = useState(false)
 
   // Resolve the public base URL on the client so the copyable endpoint reflects
   // the host the dashboard is actually open on (localhost or a LAN IP).
@@ -87,17 +91,19 @@ const { answer, sources } = await res.json();`
     }
   }
 
-  async function handleRevoke(key: ApiKey) {
-    if (!confirm(`Revoke key ${key.key_prefix}…? Apps using it will stop working.`)) {
-      return
-    }
+  async function confirmRevoke() {
+    if (!revokeTarget) return
+    setRevoking(true)
     try {
-      await api(`/api/projects/${project.id}/keys/${key.id}`, {
+      await api(`/api/projects/${project.id}/keys/${revokeTarget.id}`, {
         method: "DELETE",
       })
       mutate()
+      setRevokeTarget(null)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to revoke key")
+    } finally {
+      setRevoking(false)
     }
   }
 
@@ -142,7 +148,7 @@ const { answer, sources } = await res.json();`
               </CardDescription>
             </div>
             <Button onClick={handleCreate} disabled={creating}>
-              <Plus className="size-4" /> Create key
+              <Plus className="size-4" /> {creating ? "Creating…" : "Create key"}
             </Button>
           </div>
         </CardHeader>
@@ -158,7 +164,25 @@ const { answer, sources } = await res.json();`
               </TableRow>
             </TableHeader>
             <TableBody>
-              {!keys || keys.length === 0 ? (
+              {!keys ? (
+                [0, 1, 2].map((i) => (
+                  <TableRow key={i}>
+                    <TableCell className="pl-6">
+                      <Skeleton className="h-4 w-24" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-20" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-28" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-16 rounded-full" />
+                    </TableCell>
+                    <TableCell className="pr-6" />
+                  </TableRow>
+                ))
+              ) : keys.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={5}
@@ -186,7 +210,7 @@ const { answer, sources } = await res.json();`
                       {key.revoked_at ? (
                         <Badge variant="secondary">Revoked</Badge>
                       ) : (
-                        <Badge className="bg-emerald-100 text-emerald-800">
+                        <Badge className="border-transparent bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
                           Active
                         </Badge>
                       )}
@@ -196,7 +220,7 @@ const { answer, sources } = await res.json();`
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRevoke(key)}
+                          onClick={() => setRevokeTarget(key)}
                         >
                           Revoke
                         </Button>
@@ -219,6 +243,35 @@ const { answer, sources } = await res.json();`
             </DialogDescription>
           </DialogHeader>
           {newKey && <CopyField value={newKey.key} />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={revokeTarget !== null}
+        onOpenChange={(open) => !open && setRevokeTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revoke this API key?</DialogTitle>
+            <DialogDescription>
+              Key{" "}
+              <span className="font-mono">{revokeTarget?.key_prefix}…</span> will
+              stop working immediately. Any app or agent using it will start
+              getting 401 errors. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevokeTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmRevoke}
+              disabled={revoking}
+            >
+              {revoking ? "Revoking…" : "Revoke key"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

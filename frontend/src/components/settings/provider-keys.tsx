@@ -51,6 +51,8 @@ export function ProviderKeys() {
   const [editing, setEditing] = useState<ProviderId | null>(null)
   const [value, setValue] = useState("")
   const [saving, setSaving] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState<ProviderId | null>(null)
+  const [removing, setRemoving] = useState(false)
 
   function openEditor(provider: ProviderId) {
     setValue("")
@@ -77,20 +79,23 @@ export function ProviderKeys() {
     }
   }
 
-  async function handleRemove(provider: ProviderId) {
-    if (!confirm(`Remove your ${provider} key? Projects using it will stop working.`)) {
-      return
-    }
+  async function confirmRemove() {
+    if (!removeTarget) return
+    setRemoving(true)
     try {
-      await api(`/api/provider-keys/${provider}`, { method: "DELETE" })
+      await api(`/api/provider-keys/${removeTarget}`, { method: "DELETE" })
       mutate()
       globalMutate("/api/models")
+      setRemoveTarget(null)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to remove key")
+    } finally {
+      setRemoving(false)
     }
   }
 
   const editingProvider = PROVIDERS.find((p) => p.id === editing)
+  const removingProvider = PROVIDERS.find((p) => p.id === removeTarget)
 
   return (
     <Card>
@@ -141,7 +146,7 @@ export function ProviderKeys() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleRemove(provider.id)}
+                        onClick={() => setRemoveTarget(provider.id)}
                       >
                         Remove
                       </Button>
@@ -186,6 +191,33 @@ export function ProviderKeys() {
             </Button>
             <Button onClick={handleSave} disabled={saving || !value.trim()}>
               {saving ? "Saving…" : "Save key"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => !open && setRemoveTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove your {removingProvider?.label} key?</DialogTitle>
+            <DialogDescription>
+              Projects that rely on this account key — and have no key of their
+              own — will stop embedding and answering until you add a new one.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemoveTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmRemove}
+              disabled={removing}
+            >
+              {removing ? "Removing…" : "Remove key"}
             </Button>
           </DialogFooter>
         </DialogContent>

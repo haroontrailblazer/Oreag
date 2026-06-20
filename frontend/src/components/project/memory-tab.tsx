@@ -1,5 +1,6 @@
 "use client"
 
+import { Brain, MagnifyingGlass as Search } from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
@@ -14,18 +15,21 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { api, fetcher } from "@/lib/api"
 import type { Memory, Project } from "@/lib/types"
 
 export function MemoryTab({ project }: { project: Project }) {
-  const { data: memories, mutate } = useSWR<Memory[]>(
+  const { data: memories, error, mutate } = useSWR<Memory[]>(
     `/api/projects/${project.id}/memory`,
     fetcher
   )
   const [filter, setFilter] = useState("")
-  const shown = (memories ?? []).filter((m) =>
-    m.content.toLowerCase().includes(filter.trim().toLowerCase())
-  )
+
+  const loading = memories === undefined && !error
+  const all = memories ?? []
+  const term = filter.trim().toLowerCase()
+  const shown = all.filter((m) => m.content.toLowerCase().includes(term))
 
   async function handleDelete(id: number) {
     try {
@@ -46,13 +50,43 @@ export function MemoryTab({ project }: { project: Project }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Input
-          placeholder="Filter memories"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        {shown.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No memories yet.</p>
+        <div className="relative">
+          <Search
+            weight="duotone"
+            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            placeholder="Filter memories"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            disabled={all.length === 0 && !loading}
+            className="pl-8"
+          />
+        </div>
+        {error ? (
+          <p className="text-sm text-destructive">
+            Could not load memories: {error.message}
+          </p>
+        ) : loading ? (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-16 rounded-md" />
+            ))}
+          </div>
+        ) : all.length === 0 ? (
+          <div className="py-10 text-center">
+            <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+              <Brain weight="duotone" className="size-5" />
+            </div>
+            <p className="text-sm font-medium">No memories yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Notes your connected agents save will appear here.
+            </p>
+          </div>
+        ) : shown.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No memories match &ldquo;{filter.trim()}&rdquo;.
+          </p>
         ) : (
           shown.map((m) => (
             <div
