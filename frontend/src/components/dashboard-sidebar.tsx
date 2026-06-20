@@ -32,6 +32,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { fetcher } from "@/lib/api"
+import { useProjectNavPending } from "@/lib/nav-pending"
 import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -76,11 +77,18 @@ function SidebarLink({
 /** Right-side indicator: a spinner while this link's navigation is pending,
  *  otherwise the project's status dot. Fixed-size slot so the swap doesn't
  *  shift the truncated name. Must live inside the <Link> for useLinkStatus. */
-function ProjectNavIndicator({ status }: { status: Project["status"] }) {
+function ProjectNavIndicator({
+  projectId,
+  status,
+}: {
+  projectId: string
+  status: Project["status"]
+}) {
   const { pending } = useLinkStatus()
+  const navigating = useProjectNavPending(projectId, pending)
   return (
     <span className="flex size-3.5 shrink-0 items-center justify-center">
-      {pending ? (
+      {navigating ? (
         <Spinner size={14} className="text-sidebar-foreground/55" />
       ) : (
         <Circle
@@ -111,7 +119,7 @@ function ProjectLink({
     >
       <FolderKanban className="size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{project.name}</span>
-      <ProjectNavIndicator status={project.status} />
+      <ProjectNavIndicator projectId={project.id} status={project.status} />
     </Link>
   )
 }
@@ -131,14 +139,22 @@ function FileItem({
   file: FileRecord
   projectId: string
 }) {
+  // Split off the extension so a long name elides in the middle
+  // ("long-report-name….pdf") and the file type always stays visible.
+  const dot = file.filename.lastIndexOf(".")
+  const base = dot > 0 ? file.filename.slice(0, dot) : file.filename
+  const ext = dot > 0 ? file.filename.slice(dot) : ""
   return (
     <Link
       href={`/projects/${projectId}?file=${file.id}`}
       title={file.filename}
-      className="flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
-      <FileText className="size-4 shrink-0 text-sidebar-foreground/55" />
-      <span className="min-w-0 flex-1 truncate">{file.filename}</span>
+      <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
+      <span className="flex min-w-0 flex-1 items-center">
+        <span className="truncate">{base}</span>
+        {ext && <span className="shrink-0">{ext}</span>}
+      </span>
     </Link>
   )
 }
@@ -310,15 +326,15 @@ function SidebarBody() {
                     <button
                       type="button"
                       onClick={() => toggleGroup(group.type)}
-                      className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      className="flex h-8 w-full items-center gap-2 rounded-md px-3 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     >
                       <ChevronRight
                         className={cn(
-                          "size-3.5 shrink-0 transition-transform",
+                          "size-3 shrink-0 transition-transform",
                           open && "rotate-90"
                         )}
                       />
-                      <span className="min-w-0 flex-1 truncate text-left">
+                      <span className="min-w-0 flex-1 truncate text-left text-[11px] font-medium uppercase tracking-wide">
                         {group.type}
                       </span>
                       <Badge

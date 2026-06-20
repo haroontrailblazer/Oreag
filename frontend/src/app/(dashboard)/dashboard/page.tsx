@@ -15,6 +15,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { fetcher } from "@/lib/api"
+import { useProjectNavPending } from "@/lib/nav-pending"
 import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -44,9 +45,10 @@ function StatusPill({ status }: { status: Project["status"] }) {
  * Shows the spinner in the card corner while the clicked card's navigation is
  * in flight. Must be rendered inside its <Link> for useLinkStatus to read it.
  */
-function CardNavSpinner() {
+function CardNavSpinner({ projectId }: { projectId: string }) {
   const { pending } = useLinkStatus()
-  if (!pending) return null
+  const navigating = useProjectNavPending(projectId, pending)
+  if (!navigating) return null
   return (
     <Spinner
       size={22}
@@ -176,7 +178,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </CardContent>
-                <CardNavSpinner />
+                <CardNavSpinner projectId={project.id} />
               </Card>
             </Link>
           ))}
