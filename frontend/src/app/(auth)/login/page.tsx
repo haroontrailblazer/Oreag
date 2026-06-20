@@ -82,7 +82,14 @@ export default function LoginPage() {
           />
         </div>
         <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? <LoaderOne /> : "Log In"}
+          {loading ? (
+            <>
+              Signing in
+              <LoaderOne />
+            </>
+          ) : (
+            "Log In"
+          )}
         </Button>
       </form>
       <p className="text-center text-sm text-muted-foreground">

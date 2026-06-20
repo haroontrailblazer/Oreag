@@ -455,7 +455,7 @@ export function SettingsTab({
                   onClick={() => patchEmbeddingKey(embKeyInput.trim())}
                   disabled={!embKeyOnly || savingEmbKey}
                 >
-                  {savingEmbKey ? <LoaderOne /> : "Save key"}
+                  {savingEmbKey ? <LoaderOne /> : "Save"}
                 </Button>
               )}
             </div>
