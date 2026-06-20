@@ -127,7 +127,7 @@ export default function DashboardPage() {
       {projects && projects.length === 0 && (
         <Card className="py-16 text-center">
           <CardContent className="space-y-3">
-            <FileText weight="duotone" className="mx-auto size-10 text-muted-foreground" />
+            <FileText className="mx-auto size-10 text-muted-foreground" />
             <p className="text-muted-foreground">
               No projects yet. Create one to turn your PDFs into an API.
             </p>

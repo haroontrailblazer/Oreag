@@ -80,13 +80,13 @@ export function SetPasswordForm({
                 key={r.label}
                 className="flex items-center gap-1.5 text-xs text-destructive"
               >
-                <X weight="duotone" className="size-3.5 shrink-0" />
+                <X className="size-3.5 shrink-0" />
                 {r.label}
               </li>
             ))}
             {mismatch && (
               <li className="flex items-center gap-1.5 text-xs text-destructive">
-                <X weight="duotone" className="size-3.5 shrink-0" />
+                <X className="size-3.5 shrink-0" />
                 Passwords must match
               </li>
             )}

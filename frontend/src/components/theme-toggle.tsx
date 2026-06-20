@@ -43,7 +43,7 @@ export function ThemeToggle() {
             key={label}
             className="inline-flex h-7 items-center justify-center rounded-md px-2 text-muted-foreground"
           >
-            <Icon weight="duotone" className="size-3.5" />
+            <Icon className="size-3.5" />
             <span className="sr-only">{label}</span>
           </div>
         ))}
@@ -71,7 +71,7 @@ export function ThemeToggle() {
               selected && "bg-accent text-accent-foreground shadow-xs"
             )}
           >
-            <Icon weight="duotone" className="size-3.5" />
+            <Icon className="size-3.5" />
             <span className="sr-only">{label}</span>
           </Button>
         )

@@ -52,7 +52,6 @@ export function MemoryTab({ project }: { project: Project }) {
       <CardContent className="space-y-3">
         <div className="relative">
           <Search
-            weight="duotone"
             className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
           />
           <Input
@@ -76,7 +75,7 @@ export function MemoryTab({ project }: { project: Project }) {
         ) : all.length === 0 ? (
           <div className="py-10 text-center">
             <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-              <Brain weight="duotone" className="size-5" />
+              <Brain className="size-5" />
             </div>
             <p className="text-sm font-medium">No memories yet</p>
             <p className="mt-1 text-xs text-muted-foreground">

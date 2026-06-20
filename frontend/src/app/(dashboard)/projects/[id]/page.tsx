@@ -66,7 +66,6 @@ export default function ProjectPage({
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         {project.status === "indexing" && (
           <Loader2
-            weight="duotone"
             className="size-4 animate-spin text-muted-foreground"
             aria-label="Rendering"
           />

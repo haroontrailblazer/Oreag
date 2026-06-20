@@ -20,9 +20,9 @@ export function CopyField({ value }: { value: string }) {
       <Input readOnly value={value} className="font-mono text-xs" />
       <Button type="button" variant="outline" size="icon" onClick={copy}>
         {copied ? (
-          <Check weight="duotone" className="size-4" />
+          <Check className="size-4" />
         ) : (
-          <Copy weight="duotone" className="size-4" />
+          <Copy className="size-4" />
         )}
       </Button>
     </div>

@@ -291,7 +291,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
               {loading ? (
                 <Square className="size-3 fill-current" />
               ) : (
-                <ArrowUp weight="duotone" className="size-4" />
+                <ArrowUp className="size-4" />
               )}
             </Button>
           </div>
