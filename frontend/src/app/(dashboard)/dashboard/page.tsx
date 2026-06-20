@@ -102,34 +102,54 @@ export default function DashboardPage() {
 
       {projects && projects.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
-            <Link
-              key={project.id}
-              href={`/projects/${project.id}`}
-              prefetch={false}
-            >
-              <Card className="relative h-full transition-shadow hover:shadow-md">
-                <CardHeader>
-                  <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="truncate">{project.name}</CardTitle>
-                    <StatusPill status={project.status} />
-                  </div>
-                  {project.description && (
-                    <CardDescription className="line-clamp-2">
-                      {project.description}
-                    </CardDescription>
-                  )}
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
-                  {project.file_count} file{project.file_count === 1 ? "" : "s"}{" "}
-                  · {project.chunk_count} chunks · {project.query_count} quer
-                  {project.query_count === 1 ? "y" : "ies"} ·{" "}
-                  {new Date(project.created_at).toLocaleDateString()}
-                </CardContent>
-                <CardNavSpinner />
-              </Card>
-            </Link>
-          ))}
+          {projects.map((project) => {
+            const stats = `${project.file_count} file${
+              project.file_count === 1 ? "" : "s"
+            } · ${project.chunk_count} chunks · ${project.query_count} quer${
+              project.query_count === 1 ? "y" : "ies"
+            } · ${new Date(project.created_at).toLocaleDateString()}`
+            return (
+              <Link
+                key={project.id}
+                href={`/projects/${project.id}`}
+                prefetch={false}
+                className="group"
+              >
+                <Card className="relative h-full transition-shadow hover:shadow-md">
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="truncate">{project.name}</CardTitle>
+                      <StatusPill status={project.status} />
+                    </div>
+                    {project.description && (
+                      <CardDescription className="line-clamp-2">
+                        {project.description}
+                      </CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    {/* Ticker-tape stats. mr-8 keeps the scroll clear of the
+                        bottom-right nav spinner; single line preserves the
+                        original vertical spacing. Pauses on hover. */}
+                    <div className="mr-8 overflow-hidden">
+                      <div className="flex w-max animate-[marquee_15s_linear_infinite] group-hover:[animation-play-state:paused] motion-reduce:animate-none">
+                        <span className="shrink-0 whitespace-nowrap pr-6">
+                          {stats}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="shrink-0 whitespace-nowrap pr-6"
+                        >
+                          {stats}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                  <CardNavSpinner />
+                </Card>
+              </Link>
+            )
+          })}
         </div>
       )}
     </div>

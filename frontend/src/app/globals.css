@@ -187,3 +187,14 @@
     opacity: 0.25;
   }
 }
+
+/* Ticker-tape marquee — two copies translated -50% loop seamlessly (each copy
+   carries its own trailing gap via pr-*). Used on the dashboard project cards. */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
