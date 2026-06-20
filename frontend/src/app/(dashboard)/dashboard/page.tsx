@@ -159,11 +159,12 @@ export default function DashboardPage() {
                     </CardDescription>
                   )}
                 </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
-                  {/* Ticker-tape stats: mono tabular numbers pop against the
-                      uppercase units; edges fade (ticker-mask); mr-8 keeps the
-                      scroll clear of the nav spinner; single line keeps the
-                      original vertical spacing. Pauses on hover. */}
+                <CardContent className="mt-auto text-sm text-muted-foreground">
+                  {/* Ticker-tape stats, pinned to the card bottom (mt-auto) so
+                      the line aligns across cards regardless of description
+                      length. mono tabular numbers pop against the uppercase
+                      units; edges fade (ticker-mask); mr-8 keeps the scroll
+                      clear of the nav spinner. Pauses on hover. */}
                   <div className="ticker-mask mr-8 overflow-hidden">
                     <div className="flex w-max animate-[marquee_16s_linear_infinite] group-hover:[animation-play-state:paused] motion-reduce:animate-none">
                       <span className="shrink-0 pr-6">
