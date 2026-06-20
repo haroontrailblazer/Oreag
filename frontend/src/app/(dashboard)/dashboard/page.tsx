@@ -55,6 +55,44 @@ function CardNavSpinner() {
   )
 }
 
+function StatNum({ children }: { children: number }) {
+  return <span className="text-sm font-medium text-foreground">{children}</span>
+}
+
+function StatUnit({ children }: { children: string }) {
+  return (
+    <span className="ml-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+      {children}
+    </span>
+  )
+}
+
+function StatDot() {
+  return <span className="mx-2 text-muted-foreground/40">·</span>
+}
+
+/** One run of the ticker. Monospace + tabular-nums keeps digit columns from
+ *  jittering as it scrolls; leading-5 fixes the line box so the card's vertical
+ *  rhythm is unchanged. */
+function CardStats({ project }: { project: Project }) {
+  return (
+    <span className="whitespace-nowrap font-mono leading-5 tabular-nums">
+      <StatNum>{project.file_count}</StatNum>
+      <StatUnit>{`file${project.file_count === 1 ? "" : "s"}`}</StatUnit>
+      <StatDot />
+      <StatNum>{project.chunk_count}</StatNum>
+      <StatUnit>{`chunk${project.chunk_count === 1 ? "" : "s"}`}</StatUnit>
+      <StatDot />
+      <StatNum>{project.query_count}</StatNum>
+      <StatUnit>{`quer${project.query_count === 1 ? "y" : "ies"}`}</StatUnit>
+      <StatDot />
+      <span className="text-sm text-foreground/70">
+        {new Date(project.created_at).toLocaleDateString()}
+      </span>
+    </span>
+  )
+}
+
 export default function DashboardPage() {
   const { data: projects, error, isLoading } = useSWR<Project[]>(
     "/api/projects",
@@ -79,7 +117,7 @@ export default function DashboardPage() {
       )}
 
       {isLoading && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-36" />
           ))}
@@ -101,55 +139,46 @@ export default function DashboardPage() {
       )}
 
       {projects && projects.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => {
-            const stats = `${project.file_count} file${
-              project.file_count === 1 ? "" : "s"
-            } · ${project.chunk_count} chunks · ${project.query_count} quer${
-              project.query_count === 1 ? "y" : "ies"
-            } · ${new Date(project.created_at).toLocaleDateString()}`
-            return (
-              <Link
-                key={project.id}
-                href={`/projects/${project.id}`}
-                prefetch={false}
-                className="group"
-              >
-                <Card className="relative h-full transition-shadow hover:shadow-md">
-                  <CardHeader>
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="truncate">{project.name}</CardTitle>
-                      <StatusPill status={project.status} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {projects.map((project) => (
+            <Link
+              key={project.id}
+              href={`/projects/${project.id}`}
+              prefetch={false}
+              className="group"
+            >
+              <Card className="relative h-full transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="truncate">{project.name}</CardTitle>
+                    <StatusPill status={project.status} />
+                  </div>
+                  {project.description && (
+                    <CardDescription className="line-clamp-2">
+                      {project.description}
+                    </CardDescription>
+                  )}
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  {/* Ticker-tape stats: mono tabular numbers pop against the
+                      uppercase units; edges fade (ticker-mask); mr-8 keeps the
+                      scroll clear of the nav spinner; single line keeps the
+                      original vertical spacing. Pauses on hover. */}
+                  <div className="ticker-mask mr-8 overflow-hidden">
+                    <div className="flex w-max animate-[marquee_16s_linear_infinite] group-hover:[animation-play-state:paused] motion-reduce:animate-none">
+                      <span className="shrink-0 pr-6">
+                        <CardStats project={project} />
+                      </span>
+                      <span aria-hidden="true" className="shrink-0 pr-6">
+                        <CardStats project={project} />
+                      </span>
                     </div>
-                    {project.description && (
-                      <CardDescription className="line-clamp-2">
-                        {project.description}
-                      </CardDescription>
-                    )}
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    {/* Ticker-tape stats. mr-8 keeps the scroll clear of the
-                        bottom-right nav spinner; single line preserves the
-                        original vertical spacing. Pauses on hover. */}
-                    <div className="mr-8 overflow-hidden">
-                      <div className="flex w-max animate-[marquee_15s_linear_infinite] group-hover:[animation-play-state:paused] motion-reduce:animate-none">
-                        <span className="shrink-0 whitespace-nowrap pr-6">
-                          {stats}
-                        </span>
-                        <span
-                          aria-hidden="true"
-                          className="shrink-0 whitespace-nowrap pr-6"
-                        >
-                          {stats}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                  <CardNavSpinner />
-                </Card>
-              </Link>
-            )
-          })}
+                  </div>
+                </CardContent>
+                <CardNavSpinner />
+              </Card>
+            </Link>
+          ))}
         </div>
       )}
     </div>

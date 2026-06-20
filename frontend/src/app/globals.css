@@ -198,3 +198,22 @@
     transform: translateX(-50%);
   }
 }
+
+/* Soft fade at both edges so ticker text dissolves in/out instead of hard-
+   clipping. Pairs with the marquee above. */
+.ticker-mask {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 1.25rem,
+    #000 calc(100% - 1.25rem),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 1.25rem,
+    #000 calc(100% - 1.25rem),
+    transparent 100%
+  );
+}
