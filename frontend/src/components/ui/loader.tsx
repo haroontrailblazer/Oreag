@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
  */
 export function LoaderOne({
   className,
-  size = 6,
+  size = 4,
 }: {
   className?: string
   size?: number

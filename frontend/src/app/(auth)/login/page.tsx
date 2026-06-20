@@ -83,10 +83,10 @@ export default function LoginPage() {
         </div>
         <Button type="submit" className="w-full" disabled={loading}>
           {loading ? (
-            <>
+            <span className="inline-flex items-center gap-1">
               Signing in
               <LoaderOne />
-            </>
+            </span>
           ) : (
             "Log In"
           )}
