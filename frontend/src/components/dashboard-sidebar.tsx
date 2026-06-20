@@ -13,8 +13,9 @@ import {
 } from "@phosphor-icons/react/dist/ssr"
 import Image from "next/image"
 import Link, { useLinkStatus } from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
+import { flushSync } from "react-dom"
 import useSWR from "swr"
 
 import { UserMenu } from "@/components/user-menu"
@@ -143,16 +144,38 @@ function FileItem({
   loading: boolean
   onSelect: () => void
 }) {
+  const router = useRouter()
   // Split off the extension so a long name elides in the middle
   // ("long-report-name….pdf") and the file type always stays visible.
   const dot = file.filename.lastIndexOf(".")
   const base = dot > 0 ? file.filename.slice(0, dot) : file.filename
   const ext = dot > 0 ? file.filename.slice(dot) : ""
+  const href = `/projects/${projectId}?file=${file.id}`
+
+  function handleClick(event: React.MouseEvent) {
+    // Let modified / non-left clicks open in a new tab as usual.
+    if (
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      event.button !== 0
+    ) {
+      return
+    }
+    event.preventDefault()
+    // flushSync paints the spinner before the navigation transition can
+    // swallow the state update; replace() (not push) so Back leaves the page
+    // instead of just undoing the ?file= selection.
+    flushSync(onSelect)
+    router.replace(href, { scroll: false })
+  }
+
   return (
     <Link
-      href={`/projects/${projectId}?file=${file.id}`}
+      href={href}
       title={file.filename}
-      onPointerDown={onSelect}
+      onClick={handleClick}
       className="flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
       <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
