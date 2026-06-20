@@ -1,6 +1,6 @@
 "use client"
 
-import Link from "next/link"
+import Link, { useLinkStatus } from "next/link"
 import useSWR from "swr"
 
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Table,
   TableBody,
@@ -22,6 +23,20 @@ import {
 } from "@/components/ui/table"
 import { fetcher } from "@/lib/api"
 import type { Project } from "@/lib/types"
+
+/** "Manage" label that swaps to a spinner (overlaid, no width change) while the
+ *  link's navigation is pending. Must live inside the <Link>. */
+function ManageButtonLabel() {
+  const { pending } = useLinkStatus()
+  return (
+    <span className="relative inline-flex items-center justify-center">
+      <span className={pending ? "opacity-0" : undefined}>Manage</span>
+      {pending && (
+        <Spinner size={14} className="absolute text-muted-foreground" />
+      )}
+    </span>
+  )
+}
 
 export function ProjectKeys() {
   const { data: projects } = useSWR<Project[]>("/api/projects", fetcher)
@@ -100,7 +115,9 @@ export function ProjectKeys() {
                   </TableCell>
                   <TableCell className="pr-6 text-right">
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`/projects/${project.id}`}>Manage</Link>
+                      <Link href={`/projects/${project.id}`} prefetch={false}>
+                        <ManageButtonLabel />
+                      </Link>
                     </Button>
                   </TableCell>
                 </TableRow>

@@ -12,7 +12,7 @@ import {
   MagnifyingGlass as Search,
 } from "@phosphor-icons/react/dist/ssr"
 import Image from "next/image"
-import Link from "next/link"
+import Link, { useLinkStatus } from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import useSWR from "swr"
@@ -30,6 +30,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { fetcher } from "@/lib/api"
 import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -74,6 +75,26 @@ function SidebarLink({
   )
 }
 
+/** Right-side indicator: a spinner while this link's navigation is pending,
+ *  otherwise the project's status dot. Fixed-size slot so the swap doesn't
+ *  shift the truncated name. Must live inside the <Link> for useLinkStatus. */
+function ProjectNavIndicator({ status }: { status: Project["status"] }) {
+  const { pending } = useLinkStatus()
+  return (
+    <span className="flex size-3.5 shrink-0 items-center justify-center">
+      {pending ? (
+        <Spinner size={14} className="text-sidebar-foreground/55" />
+      ) : (
+        <Circle
+          weight="fill"
+          className={cn("size-2.5", statusTone[status])}
+          aria-label={status}
+        />
+      )}
+    </span>
+  )
+}
+
 function ProjectLink({
   project,
   active,
@@ -84,6 +105,7 @@ function ProjectLink({
   return (
     <Link
       href={`/projects/${project.id}`}
+      prefetch={false}
       className={cn(
         "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -91,11 +113,7 @@ function ProjectLink({
     >
       <FolderKanban weight="duotone" className="size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{project.name}</span>
-      <Circle
-        weight="fill"
-        className={cn("size-2.5 shrink-0", statusTone[project.status])}
-        aria-label={project.status}
-      />
+      <ProjectNavIndicator status={project.status} />
     </Link>
   )
 }

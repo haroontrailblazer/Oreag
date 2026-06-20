@@ -50,7 +50,7 @@ function CardNavSpinner() {
   return (
     <Spinner
       size={22}
-      className="absolute bottom-3 right-3 text-muted-foreground"
+      className="absolute bottom-6 right-6 text-muted-foreground"
     />
   )
 }

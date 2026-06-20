@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
@@ -24,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { api, fetcher } from "@/lib/api"
+import { fetcher, uploadWithProgress } from "@/lib/api"
 import { providerUsable } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
@@ -56,6 +57,8 @@ export function AddFilesDialog({
     `${project.embedding_provider}/${project.embedding_model}`
   )
   const [submitting, setSubmitting] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const abortRef = useRef<AbortController | null>(null)
 
   const projectEmbedding = `${project.embedding_provider}/${project.embedding_model}`
   const embeddingChanged = embedding !== projectEmbedding
@@ -64,9 +67,12 @@ export function AddFilesDialog({
   }
 
   function onOpenChange(next: boolean) {
+    // Closing mid-upload (overlay/Esc/X) cancels the in-flight request.
+    if (!next && submitting) abortRef.current?.abort()
     setOpen(next)
     if (next) {
       setFiles([])
+      setProgress(0)
       setChunkSize(project.chunk_size)
       setChunkOverlap(project.chunk_overlap)
       setTopK(project.top_k)
@@ -108,9 +114,15 @@ export function AddFilesDialog({
     form.append("top_k", String(topK))
     form.append("embedding_provider", embeddingProvider)
     form.append("embedding_model", embeddingModel)
+    const controller = new AbortController()
+    abortRef.current = controller
+    setProgress(0)
     setSubmitting(true)
     try {
-      await api(`/api/projects/${project.id}/files`, { method: "POST", body: form })
+      await uploadWithProgress(`/api/projects/${project.id}/files`, form, {
+        onProgress: setProgress,
+        signal: controller.signal,
+      })
       toast.success(
         embeddingChanged
           ? "Upload complete — re-indexing the whole project"
@@ -119,9 +131,15 @@ export function AddFilesDialog({
       setOpen(false)
       onUploaded()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Upload failed")
+      if (err instanceof DOMException && err.name === "AbortError") {
+        toast.info("Upload canceled")
+      } else {
+        toast.error(err instanceof Error ? err.message : "Upload failed")
+      }
     } finally {
+      abortRef.current = null
       setSubmitting(false)
+      setProgress(0)
     }
   }
 
@@ -271,10 +289,30 @@ export function AddFilesDialog({
               How many chunks are retrieved per question (project-wide).
             </p>
           </div>
+
+          {submitting && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  {progress < 100
+                    ? `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`
+                    : "Processing on the server…"}
+                </span>
+                <span className="tabular-nums">{progress}%</span>
+              </div>
+              <Progress value={progress} />
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (submitting) abortRef.current?.abort()
+              else setOpen(false)
+            }}
+          >
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={submitting || files.length === 0}>
