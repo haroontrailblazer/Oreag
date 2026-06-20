@@ -145,11 +145,11 @@ function FileItem({
   onSelect: () => void
 }) {
   const router = useRouter()
-  // Split off the extension so a long name elides in the middle
-  // ("long-report-name….pdf") and the file type always stays visible.
-  const dot = file.filename.lastIndexOf(".")
-  const base = dot > 0 ? file.filename.slice(0, dot) : file.filename
-  const ext = dot > 0 ? file.filename.slice(dot) : ""
+  // Hard cap the displayed name at 12 characters, then an ellipsis.
+  const display =
+    file.filename.length > 12
+      ? `${file.filename.slice(0, 12)}…`
+      : file.filename
   const href = `/projects/${projectId}?file=${file.id}`
 
   function handleClick(event: React.MouseEvent) {
@@ -179,12 +179,11 @@ function FileItem({
       className="flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
       <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
-      <span className="flex min-w-0 flex-1 items-center">
-        <span className="min-w-0 truncate">{base}</span>
-        {ext && <span className="shrink-0">{ext}</span>}
-      </span>
+      <span className="min-w-0 flex-1 truncate">{display}</span>
       <span className="flex size-4 shrink-0 items-center justify-center">
-        {loading && <Spinner size={14} className="text-sidebar-foreground" />}
+        {loading && (
+          <span className="size-3.5 animate-spin rounded-full border-2 border-sidebar-foreground/25 border-t-sidebar-foreground" />
+        )}
       </span>
     </Link>
   )
