@@ -157,11 +157,11 @@ function FileItem({
     >
       <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
       <span className="flex min-w-0 flex-1 items-center">
-        <span className="truncate">{base}</span>
+        <span className="min-w-0 truncate">{base}</span>
         {ext && <span className="shrink-0">{ext}</span>}
       </span>
-      <span className="flex size-3.5 shrink-0 items-center justify-center">
-        {loading && <Spinner size={12} className="text-sidebar-foreground/55" />}
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        {loading && <Spinner size={14} className="text-sidebar-foreground/70" />}
       </span>
     </Link>
   )
@@ -200,7 +200,7 @@ function SidebarBody() {
   // Briefly spin a file row while the Files tab scrolls to / highlights it.
   useEffect(() => {
     if (!loadingFileId) return
-    const timer = setTimeout(() => setLoadingFileId(null), 700)
+    const timer = setTimeout(() => setLoadingFileId(null), 1100)
     return () => clearTimeout(timer)
   }, [loadingFileId])
 
