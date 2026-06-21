@@ -766,3 +766,19 @@
     rgba(255, 255, 255, 0) 42%
   );
 }
+
+/* Landing hero "Starry Night in motion": a second copy of the painting flows
+   through the animated #starry-motion turbulence displacement filter, masked to
+   the sky so only the clouds swirl while the figure/desk stay on the static
+   base layer below. */
+.starry-sky {
+  filter: url(#starry-motion);
+  -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent 44%);
+  mask-image: linear-gradient(to bottom, #000 30%, transparent 44%);
+}
+/* Respect users who prefer less motion — drop the swirling layer entirely. */
+@media (prefers-reduced-motion: reduce) {
+  .starry-sky {
+    display: none;
+  }
+}
