@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
+import { CopyBlock } from "@/components/copy-block"
 import { CopyField } from "@/components/copy-field"
 import { Badge } from "@/components/ui/badge"
 import { BoxLoader } from "@/components/ui/box-loader"
@@ -202,28 +203,44 @@ const { answer, sources } = await res.json();`
         <CardHeader>
           <CardTitle>Your RAG endpoint</CardTitle>
           <CardDescription>
-            POST a question with an API key and get a grounded answer with
-            sources.
+            Call this project over HTTP with an API key — every snippet below is
+            copy-paste ready.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <CopyField value={endpoint} />
+        <CardContent className="space-y-5">
           <div className="space-y-2">
-            <h3 className="text-sm font-medium">Agent memory graph</h3>
-            <CopyField value={memoryGraphEndpoint} />
+            <h3 className="text-sm font-medium">Query endpoint</h3>
+            <p className="text-xs text-muted-foreground">
+              The main chat-style endpoint — POST a question and get an LLM
+              answer grounded in this project&apos;s documents, with the source
+              chunks it used.
+            </p>
+            <CopyField value={endpoint} />
           </div>
+
           <div className="space-y-2">
             <h3 className="text-sm font-medium">curl</h3>
-            <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">
-              {curlExample}
-            </pre>
+            <p className="text-xs text-muted-foreground">
+              A ready-to-run shell request to the query endpoint — swap in your
+              API key and question. Returns JSON with{" "}
+              <code className="rounded bg-muted px-1">answer</code> and a{" "}
+              <code className="rounded bg-muted px-1">sources</code> array.
+            </p>
+            <CopyBlock value={curlExample} />
           </div>
+
           <div className="space-y-2">
             <h3 className="text-sm font-medium">JavaScript</h3>
-            <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">
-              {fetchExample}
-            </pre>
+            <p className="text-xs text-muted-foreground">
+              The same call from JavaScript with{" "}
+              <code className="rounded bg-muted px-1">fetch</code> — destructure{" "}
+              <code className="rounded bg-muted px-1">answer</code> and{" "}
+              <code className="rounded bg-muted px-1">sources</code> from the
+              response.
+            </p>
+            <CopyBlock value={fetchExample} />
           </div>
+
           <div className="space-y-2">
             <h3 className="text-sm font-medium">Upload documents</h3>
             <p className="text-xs text-muted-foreground">
@@ -231,21 +248,29 @@ const { answer, sources } = await res.json();`
               <span className="font-medium">Allow uploads</span> enabled
               (read-only keys can&apos;t):
             </p>
-            <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">
-              {uploadCurl}
-            </pre>
+            <CopyBlock value={uploadCurl} />
           </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">Agent memory graph</h3>
+            <p className="text-xs text-muted-foreground">
+              GET this to fetch the project&apos;s full memory graph — every
+              saved memory node and the related-edges between them — for
+              visualizing or exploring what agents have stored.
+            </p>
+            <CopyField value={memoryGraphEndpoint} />
+          </div>
+
           <div className="space-y-2">
             <h3 className="text-sm font-medium">MCP connector (coding agents)</h3>
             <p className="text-xs text-muted-foreground">
-              Connect Claude / Codex to this project — it adds memory and
-              document search/answer tools. Add it as a remote MCP server,
-              authenticating with an API key as the bearer token:
+              Add this project to Claude or Codex as a remote MCP server
+              (authenticate with an API key as the bearer token). It exposes the
+              project&apos;s memory and document search/answer tools to the
+              agent.
             </p>
             <CopyField value={mcpConnectorUrl} />
-            <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">
-              {mcpAddCommand}
-            </pre>
+            <CopyBlock value={mcpAddCommand} />
             {!process.env.NEXT_PUBLIC_MCP_URL && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
                 Set{" "}
@@ -411,7 +436,15 @@ const { answer, sources } = await res.json();`
               Copy it now — this is the only time the full key is shown.
             </DialogDescription>
           </DialogHeader>
-          {newKey && <CopyField value={newKey.key} />}
+          {newKey && (
+            <div className="space-y-2">
+              <CopyField value={newKey.key} />
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                Copy this key now — for security it will{" "}
+                <span className="font-medium">never be shown again</span>.
+              </p>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
