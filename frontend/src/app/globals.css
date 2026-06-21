@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -884,5 +885,17 @@
   -ms-overflow-style: none; /* legacy Edge */
 }
 .no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chromium / Safari */
+}
+
+/* Hide scrollbars across the whole app while keeping scroll fully functional
+   (wheel, touch, keyboard, and programmatic scrolling all still work). */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
   display: none; /* Chromium / Safari */
 }

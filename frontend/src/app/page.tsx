@@ -1,4 +1,4 @@
-import { ArrowRight } from "@phosphor-icons/react/dist/ssr"
+import { ArrowRight, GithubLogo } from "@phosphor-icons/react/dist/ssr"
 import Image from "next/image"
 import Link from "next/link"
 
@@ -18,12 +18,34 @@ export default async function Home() {
     <main className="grid min-h-dvh bg-background lg:grid-cols-2">
       {/* Left — content */}
       <div className="flex flex-col gap-10 p-8 sm:p-12 lg:p-14">
-        <header className="flex items-center gap-2.5">
-          <BrandMark
-            className="size-9 shrink-0 rounded-lg"
-            imgClassName="scale-150"
-          />
-          <span className="text-lg font-semibold tracking-tight">Oreag</span>
+        <header className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <BrandMark
+              className="size-9 shrink-0 rounded-lg"
+              imgClassName="scale-150"
+            />
+            <span className="text-lg font-semibold tracking-tight">Oreag</span>
+          </div>
+          <nav className="flex items-center gap-4 text-sm font-medium text-muted-foreground sm:gap-5">
+            <Link href="/docs" className="transition-colors hover:text-foreground">
+              Docs
+            </Link>
+            <a
+              href="https://github.com/your-org/oreag"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+            >
+              <GithubLogo className="size-4" />
+              <span className="hidden sm:inline">GitHub</span>
+            </a>
+            <Link
+              href="/docs#reference"
+              className="hidden transition-colors hover:text-foreground sm:inline"
+            >
+              API
+            </Link>
+          </nav>
         </header>
 
         <div className="flex flex-1 flex-col justify-center gap-6">
