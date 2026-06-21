@@ -78,6 +78,22 @@ export function ApiTab({ project }: { project: Project }) {
 });
 const { answer, sources } = await res.json();`
 
+  // Ready-to-paste config for the bundled MCP server (mcp-server/, `oreag-mcp`).
+  // Gives coding agents this project's memory + doc search/answer tools.
+  const mcpConfig = `{
+  "mcpServers": {
+    "oreag": {
+      "command": "uvx",
+      "args": ["--from", "/path/to/oreag/mcp-server", "oreag-mcp"],
+      "env": {
+        "OREAG_API_BASE": "${apiBase}",
+        "OREAG_API_KEY": "YOUR_API_KEY",
+        "OREAG_PROJECT_ID": "${project.id}"
+      }
+    }
+  }
+}`
+
   async function handleCreate() {
     setCreating(true)
     try {
@@ -144,6 +160,18 @@ const { answer, sources } = await res.json();`
             <h3 className="text-sm font-medium">JavaScript</h3>
             <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">
               {fetchExample}
+            </pre>
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">MCP (coding agents)</h3>
+            <p className="text-xs text-muted-foreground">
+              Connect Claude Code / Desktop to this project — it adds memory and
+              document search/answer tools. Add to your MCP client config (point{" "}
+              <code className="rounded bg-background px-1">--from</code> at the
+              bundled <code className="rounded bg-background px-1">mcp-server/</code>):
+            </p>
+            <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">
+              {mcpConfig}
             </pre>
           </div>
         </CardContent>
