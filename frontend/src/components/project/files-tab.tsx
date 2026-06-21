@@ -15,7 +15,7 @@ import { toast } from "sonner"
 import useSWR from "swr"
 
 import { AddFilesDialog } from "@/components/project/add-files-dialog"
-import { BanterLoader } from "@/components/ui/banter-loader"
+import { SquaresLoader } from "@/components/ui/squares-loader"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -91,7 +91,7 @@ function FileStatus({ status }: { status: FileRecord["status"] }) {
       )}
     >
       {status === "processing" ? (
-        <BanterLoader size={14} />
+        <SquaresLoader size={4} />
       ) : (
         <Icon className="size-3.5" />
       )}

@@ -14,21 +14,31 @@ const SQUARES = [
 ]
 
 /**
- * A 3×3 grid of squares that fade in and out in sequence. Colour follows
- * currentColor; animation uses the `fade-in` keyframe in globals.css.
+ * A 3×3 grid of squares that fade in and out in sequence. Fully contained (no
+ * movement) — colour follows currentColor; `size` is the square edge in px, so
+ * the whole loader is `size * 3 + 2`px. Uses the `fade-in` keyframe.
  */
-export function SquaresLoader({ className }: { className?: string }) {
+export function SquaresLoader({
+  className,
+  size = 3,
+}: {
+  className?: string
+  size?: number
+}) {
   return (
     <span
       role="status"
       aria-label="Loading"
-      className={cn("grid grid-cols-3 gap-px", className)}
+      className={cn("grid grid-cols-3", className)}
+      style={{ gap: 1 }}
     >
       {SQUARES.map((square, i) => (
         <span
           key={i}
-          className="size-1 bg-current animate-[fade-in_675ms_ease-in-out_infinite]"
+          className="bg-current animate-[fade-in_675ms_ease-in-out_infinite]"
           style={{
+            width: size,
+            height: size,
             animationDelay: `${square.delay}ms`,
             animationDirection: square.alternate ? "alternate" : "normal",
           }}

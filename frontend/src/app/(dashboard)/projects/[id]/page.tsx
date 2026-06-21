@@ -9,7 +9,7 @@ import { FilesTab } from "@/components/project/files-tab"
 import { MemoryTab } from "@/components/project/memory-tab"
 import { PlaygroundTab } from "@/components/project/playground-tab"
 import { SettingsTab } from "@/components/project/settings-tab"
-import { BanterLoader } from "@/components/ui/banter-loader"
+import { SquaresLoader } from "@/components/ui/squares-loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher } from "@/lib/api"
@@ -78,7 +78,7 @@ export default function ProjectPage({
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         {project.status === "indexing" && (
-          <BanterLoader size={18} className="text-muted-foreground" />
+          <SquaresLoader size={4} className="text-muted-foreground" />
         )}
         <span className="text-sm text-muted-foreground">
           {project.file_count} files · {project.chunk_count} chunks ·{" "}
