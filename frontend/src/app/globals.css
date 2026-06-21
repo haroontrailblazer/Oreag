@@ -799,9 +799,12 @@
   max-width: calc(100vw - 2rem);
   min-height: 80px;
   padding: 10px 15px;
-  border-radius: 8px;
-  background-color: #ffffff;
-  box-shadow: rgba(149, 157, 165, 0.2) 0px 8px 24px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+  backdrop-filter: blur(14px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 10px 30px -6px rgba(0, 0, 0, 0.18);
   overflow: hidden;
 }
 .toast-card--success {
@@ -818,6 +821,21 @@
   --toast-accent: #d10d0d;
   --toast-wave: #fc0c0c3a;
   --toast-icon-bg: #fc0c0c48;
+}
+/* Dark theme: dark frosted glass + brighter accents for contrast. */
+.dark .toast-card {
+  background-color: rgba(24, 27, 30, 0.62);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px -6px rgba(0, 0, 0, 0.55);
+}
+.dark .toast-card--error {
+  --toast-accent: #ff6b6b;
+}
+.dark .toast-card--success {
+  --toast-accent: #4ade80;
+}
+.dark .toast-card--info {
+  --toast-accent: #7aa9ff;
 }
 .toast-wave {
   position: absolute;
@@ -888,4 +906,13 @@
 }
 .toast-cross:hover {
   color: #111111;
+}
+.dark .toast-sub {
+  color: #b4b9bf;
+}
+.dark .toast-cross {
+  color: #b4b9bf;
+}
+.dark .toast-cross:hover {
+  color: #ffffff;
 }
