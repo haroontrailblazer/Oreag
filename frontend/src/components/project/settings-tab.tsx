@@ -532,7 +532,7 @@ export function SettingsTab({
           if (!open && !deleting) setConfirmDelete(false)
         }}
       >
-        <DialogContent>
+        <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Delete {project.name}?</DialogTitle>
             {!deleting && (

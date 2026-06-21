@@ -351,7 +351,7 @@ export function FilesTab({
           if (!open && !deleting) setDeleteTarget(null)
         }}
       >
-        <DialogContent>
+        <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Delete this file?</DialogTitle>
             {!deleting && (

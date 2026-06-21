@@ -135,7 +135,7 @@ export default function DashboardPage() {
           <CardContent className="space-y-3">
             <FileText className="mx-auto size-10 text-muted-foreground" />
             <p className="text-muted-foreground">
-              No projects yet. Create one to turn your PDFs into an API.
+              No projects yet. Create one to turn your documents into an API.
             </p>
             <Button asChild>
               <Link href="/projects/new">Create your first project</Link>

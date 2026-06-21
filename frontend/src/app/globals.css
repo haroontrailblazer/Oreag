@@ -783,94 +783,71 @@
   }
 }
 
-/* Toast cards — custom sonner toasts (see lib/toast.tsx): a white pill with a
-   coloured wave, an icon disc, the message and a close button. Each variant
-   only changes three colour vars. */
+/* Toast cards — custom sonner toasts (see lib/toast.tsx): a card with a soft
+   coloured left glow, a solid accent icon disc (white glyph), a bold title and
+   a muted subtitle. No close button. Dark theme below matches the reference
+   design; each variant only changes the accent + glow colour vars. */
 .toast-card {
-  --toast-accent: #d10d0d;
-  --toast-wave: #fc0c0c3a;
-  --toast-icon-bg: #fc0c0c48;
+  --toast-accent: #ef4444;
+  --toast-glow: rgba(239, 68, 68, 0.16);
   position: relative;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 15px;
-  width: 330px;
+  gap: 12px;
+  width: 340px;
   max-width: calc(100vw - 2rem);
-  min-height: 80px;
-  padding: 10px 15px;
-  border-radius: 12px;
-  background-color: rgba(255, 255, 255, 0.72);
-  -webkit-backdrop-filter: blur(14px) saturate(170%);
-  backdrop-filter: blur(14px) saturate(170%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  box-shadow: 0 10px 30px -6px rgba(0, 0, 0, 0.18);
+  min-height: 60px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  background-color: rgba(255, 255, 255, 0.94);
+  background-image: linear-gradient(100deg, var(--toast-glow), transparent 42%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  backdrop-filter: blur(10px) saturate(150%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
 .toast-card--success {
-  --toast-accent: #0d9f44;
-  --toast-wave: #12bf4a3a;
-  --toast-icon-bg: #12bf4a48;
+  --toast-accent: #22c55e;
+  --toast-glow: rgba(34, 197, 94, 0.16);
 }
 .toast-card--info {
-  --toast-accent: #124fff;
-  --toast-wave: #4777ff3a;
-  --toast-icon-bg: #4777ff48;
+  --toast-accent: #f5b740;
+  --toast-glow: rgba(245, 183, 64, 0.16);
 }
 .toast-card--error {
-  --toast-accent: #d10d0d;
-  --toast-wave: #fc0c0c3a;
-  --toast-icon-bg: #fc0c0c48;
+  --toast-accent: #ef4444;
+  --toast-glow: rgba(239, 68, 68, 0.16);
 }
-/* Dark theme: dark frosted glass + brighter accents for contrast. */
+/* Dark theme — the dark notification card from the reference design. */
 .dark .toast-card {
-  background-color: rgba(24, 27, 30, 0.62);
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 30px -6px rgba(0, 0, 0, 0.55);
-}
-.dark .toast-card--error {
-  --toast-accent: #ff6b6b;
-}
-.dark .toast-card--success {
-  --toast-accent: #4ade80;
-}
-.dark .toast-card--info {
-  --toast-accent: #7aa9ff;
-}
-.toast-wave {
-  position: absolute;
-  left: -31px;
-  top: 32px;
-  width: 80px;
-  transform: rotate(90deg);
-  fill: var(--toast-wave);
-  pointer-events: none;
+  background-color: rgba(28, 31, 38, 0.94);
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.6);
 }
 .toast-icon-container {
-  z-index: 1;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 35px;
-  height: 35px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background-color: var(--toast-icon-bg);
+  background-color: var(--toast-accent);
+  box-shadow: 0 0 0 4px var(--toast-glow);
 }
 .toast-icon {
-  width: 17px;
-  height: 17px;
-  color: var(--toast-accent);
+  width: 15px;
+  height: 15px;
+  color: #ffffff;
 }
 .toast-text {
-  z-index: 1;
   flex-grow: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
-  gap: 2px;
+  gap: 1px;
 }
 .toast-title,
 .toast-sub {
@@ -879,40 +856,24 @@
   cursor: default;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
   overflow: hidden;
 }
 .toast-title {
-  color: var(--toast-accent);
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.25;
+  -webkit-line-clamp: 1;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #111827;
 }
 .toast-sub {
-  -webkit-line-clamp: 1;
-  font-size: 13px;
-  color: #555;
+  -webkit-line-clamp: 2;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: #6b7280;
 }
-.toast-cross {
-  z-index: 1;
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #555;
-  cursor: pointer;
-}
-.toast-cross:hover {
-  color: #111111;
+.dark .toast-title {
+  color: #f4f6f8;
 }
 .dark .toast-sub {
-  color: #b4b9bf;
-}
-.dark .toast-cross {
-  color: #b4b9bf;
-}
-.dark .toast-cross:hover {
-  color: #ffffff;
+  color: #9aa3af;
 }
