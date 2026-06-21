@@ -11,7 +11,6 @@ import {
   Plus,
   MagnifyingGlass as Search,
 } from "@phosphor-icons/react/dist/ssr"
-import Image from "next/image"
 import Link, { useLinkStatus } from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
@@ -20,6 +19,7 @@ import useSWR from "swr"
 
 import { UserMenu } from "@/components/user-menu"
 import { Badge } from "@/components/ui/badge"
+import { BrandMark } from "@/components/ui/brand-mark"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
@@ -277,16 +277,7 @@ function SidebarBody() {
         href="/dashboard"
         className="group flex min-w-0 items-center gap-3"
       >
-        <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/10 transition-transform group-hover:scale-[1.03] dark:bg-black dark:ring-white/15">
-          <Image
-            src="/logo.png"
-            alt="Oreag"
-            width={200}
-            height={200}
-            priority
-            className="size-full object-contain dark:invert"
-          />
-        </span>
+        <BrandMark className="size-14 shrink-0 rounded-xl transition-transform group-hover:scale-[1.03]" />
         <span className="min-w-0 leading-tight">
           <span className="block truncate text-lg font-semibold tracking-tight">
             Oreag
@@ -459,16 +450,7 @@ export function DashboardSidebar() {
           </SheetContent>
         </Sheet>
         <Link href="/dashboard" className="group flex min-w-0 items-center gap-2">
-          <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-black/10 dark:bg-black dark:ring-white/15">
-            <Image
-              src="/logo.png"
-              alt="Oreag"
-              width={64}
-              height={64}
-              priority
-              className="size-full object-contain dark:invert"
-            />
-          </span>
+          <BrandMark className="size-8 shrink-0 rounded-lg" />
           <span className="truncate text-base font-semibold tracking-tight">
             Oreag
           </span>

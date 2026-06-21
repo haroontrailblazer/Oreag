@@ -1,6 +1,6 @@
-import Image from "next/image"
 import Link from "next/link"
 
+import { BrandMark } from "@/components/ui/brand-mark"
 import {
   Card,
   CardContent,
@@ -26,16 +26,10 @@ export function AuthShell({
     <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-md py-8">
         <CardHeader className="justify-items-center gap-3 text-center">
-          <span className="flex size-14 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-black/10 dark:bg-black dark:ring-white/15">
-            <Image
-              src="/logo.png"
-              alt="Oreag"
-              width={160}
-              height={160}
-              priority
-              className="size-full scale-150 object-contain dark:invert"
-            />
-          </span>
+          <BrandMark
+            className="size-14 rounded-2xl"
+            imgClassName="scale-150"
+          />
           <CardDescription>
             Build and query RAG APIs over your documents
           </CardDescription>

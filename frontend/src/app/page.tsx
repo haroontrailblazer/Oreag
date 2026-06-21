@@ -2,6 +2,7 @@ import { ArrowRight } from "@phosphor-icons/react/dist/ssr"
 import Image from "next/image"
 import Link from "next/link"
 
+import { BrandMark } from "@/components/ui/brand-mark"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/server"
 
@@ -18,16 +19,10 @@ export default async function Home() {
       {/* Left — content */}
       <div className="flex flex-col gap-10 p-8 sm:p-12 lg:p-14">
         <header className="flex items-center gap-2.5">
-          <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-black/10 dark:bg-black dark:ring-white/15">
-            <Image
-              src="/logo.png"
-              alt=""
-              width={72}
-              height={72}
-              priority
-              className="size-full scale-150 object-contain dark:invert"
-            />
-          </span>
+          <BrandMark
+            className="size-9 shrink-0 rounded-lg"
+            imgClassName="scale-150"
+          />
           <span className="text-lg font-semibold tracking-tight">Oreag</span>
         </header>
 
@@ -85,8 +80,9 @@ export default async function Home() {
           alt="Van Gogh Starry Night style painting of a man working through documents at a desk"
           fill
           priority
+          draggable={false}
           sizes="(min-width: 1024px) 50vw, 100vw"
-          className="object-cover"
+          className="pointer-events-none select-none object-cover"
         />
       </div>
     </main>
