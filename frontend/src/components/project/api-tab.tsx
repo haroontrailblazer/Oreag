@@ -201,91 +201,6 @@ const { answer, sources } = await res.json();`
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Your RAG endpoint</CardTitle>
-          <CardDescription>
-            Call this project over HTTP with an API key — every snippet below is
-            copy-paste ready.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="divide-y p-0">
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">Query endpoint</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              The main chat-style endpoint — POST a question and get an LLM
-              answer grounded in this project&apos;s documents, with the source
-              chunks it used.
-            </p>
-            <CopyField value={endpoint} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">curl</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              A ready-to-run shell request to the query endpoint — swap in your
-              API key and question. Returns JSON with{" "}
-              <code className="rounded bg-muted px-1">answer</code> and a{" "}
-              <code className="rounded bg-muted px-1">sources</code> array.
-            </p>
-            <CopyBlock value={curlExample} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">JavaScript</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              The same call from JavaScript with{" "}
-              <code className="rounded bg-muted px-1">fetch</code> — destructure{" "}
-              <code className="rounded bg-muted px-1">answer</code> and{" "}
-              <code className="rounded bg-muted px-1">sources</code> from the
-              response.
-            </p>
-            <CopyBlock value={fetchExample} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">Upload documents</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Ingest files programmatically with a key that has{" "}
-              <span className="font-medium">Allow uploads</span> enabled
-              (read-only keys can&apos;t):
-            </p>
-            <CopyBlock value={uploadCurl} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">Agent memory graph</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              GET this to fetch the project&apos;s full memory graph — every
-              saved memory node and the related-edges between them — for
-              visualizing or exploring what agents have stored.
-            </p>
-            <CopyField value={memoryGraphEndpoint} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">MCP connector (coding agents)</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Add this project to Claude or Codex as a remote MCP server
-              (authenticate with an API key as the bearer token). It exposes the
-              project&apos;s memory and document search/answer tools to the
-              agent.
-            </p>
-            <CopyField value={mcpConnectorUrl} />
-            <CopyBlock value={mcpAddCommand} />
-            {!process.env.NEXT_PUBLIC_MCP_URL && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                Set{" "}
-                <code className="rounded bg-background px-1">
-                  NEXT_PUBLIC_MCP_URL
-                </code>{" "}
-                to your deployed MCP server URL to fill in the host above.
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <div className="flex items-center justify-between">
             <div>
               <CardTitle>API keys</CardTitle>
@@ -425,6 +340,91 @@ const { answer, sources } = await res.json();`
               )}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Your RAG endpoint</CardTitle>
+          <CardDescription>
+            Call this project over HTTP with an API key — every snippet below is
+            copy-paste ready.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="divide-y p-0">
+          <div className="space-y-2.5 px-6 py-5">
+            <h3 className="text-sm font-medium">Query endpoint</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              The main chat-style endpoint — POST a question and get an LLM
+              answer grounded in this project&apos;s documents, with the source
+              chunks it used.
+            </p>
+            <CopyField value={endpoint} />
+          </div>
+
+          <div className="space-y-2.5 px-6 py-5">
+            <h3 className="text-sm font-medium">curl</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              A ready-to-run shell request to the query endpoint — swap in your
+              API key and question. Returns JSON with{" "}
+              <code className="rounded bg-muted px-1">answer</code> and a{" "}
+              <code className="rounded bg-muted px-1">sources</code> array.
+            </p>
+            <CopyBlock value={curlExample} />
+          </div>
+
+          <div className="space-y-2.5 px-6 py-5">
+            <h3 className="text-sm font-medium">JavaScript</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              The same call from JavaScript with{" "}
+              <code className="rounded bg-muted px-1">fetch</code> — destructure{" "}
+              <code className="rounded bg-muted px-1">answer</code> and{" "}
+              <code className="rounded bg-muted px-1">sources</code> from the
+              response.
+            </p>
+            <CopyBlock value={fetchExample} />
+          </div>
+
+          <div className="space-y-2.5 px-6 py-5">
+            <h3 className="text-sm font-medium">Upload documents</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Ingest files programmatically with a key that has{" "}
+              <span className="font-medium">Allow uploads</span> enabled
+              (read-only keys can&apos;t):
+            </p>
+            <CopyBlock value={uploadCurl} />
+          </div>
+
+          <div className="space-y-2.5 px-6 py-5">
+            <h3 className="text-sm font-medium">Agent memory graph</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              GET this to fetch the project&apos;s full memory graph — every
+              saved memory node and the related-edges between them — for
+              visualizing or exploring what agents have stored.
+            </p>
+            <CopyField value={memoryGraphEndpoint} />
+          </div>
+
+          <div className="space-y-2.5 px-6 py-5">
+            <h3 className="text-sm font-medium">MCP connector (coding agents)</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Add this project to Claude or Codex as a remote MCP server
+              (authenticate with an API key as the bearer token). It exposes the
+              project&apos;s memory and document search/answer tools to the
+              agent.
+            </p>
+            <CopyField value={mcpConnectorUrl} />
+            <CopyBlock value={mcpAddCommand} />
+            {!process.env.NEXT_PUBLIC_MCP_URL && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Set{" "}
+                <code className="rounded bg-background px-1">
+                  NEXT_PUBLIC_MCP_URL
+                </code>{" "}
+                to your deployed MCP server URL to fill in the host above.
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
 
