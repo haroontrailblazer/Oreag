@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..auth.api_keys import generate_api_key
 from ..db import get_db
 from ..models import ApiKey, Project
-from ..schemas import ApiKeyCreate, ApiKeyCreated, ApiKeyOut
+from ..schemas import ApiKeyCreate, ApiKeyCreated, ApiKeyOut, ApiKeyUpdate
 from .deps import get_owned_project
 
 router = APIRouter(prefix="/api/projects/{project_id}/keys", tags=["api-keys"])
@@ -45,6 +45,22 @@ def create_key(
     return ApiKeyCreated(
         **ApiKeyOut.model_validate(api_key).model_dump(), key=full_key
     )
+
+
+@router.patch("/{key_id}", response_model=ApiKeyOut)
+def update_key(
+    key_id: uuid.UUID,
+    body: ApiKeyUpdate,
+    project: Project = Depends(get_owned_project),
+    db: Session = Depends(get_db),
+):
+    api_key = db.get(ApiKey, key_id)
+    if api_key is None or api_key.project_id != project.id:
+        raise HTTPException(404, "API key not found")
+    if body.can_upload is not None:
+        api_key.can_upload = body.can_upload
+    db.commit()
+    return api_key
 
 
 @router.delete("/{key_id}", response_model=ApiKeyOut)

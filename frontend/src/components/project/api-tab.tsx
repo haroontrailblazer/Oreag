@@ -52,6 +52,7 @@ export function ApiTab({ project }: { project: Project }) {
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null)
   const [creating, setCreating] = useState(false)
   const [newKeyCanUpload, setNewKeyCanUpload] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
   const [revoking, setRevoking] = useState(false)
   const revokeDone = useRef(false)
@@ -115,6 +116,27 @@ const { answer, sources } = await res.json();`
       toast.error(err instanceof Error ? err.message : "Failed to create key")
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function handleToggleUpload(key: ApiKey, value: boolean) {
+    setTogglingId(key.id)
+    // Optimistically flip the row, then PATCH; revert on failure.
+    mutate(
+      (current) =>
+        current?.map((k) => (k.id === key.id ? { ...k, can_upload: value } : k)),
+      { revalidate: false }
+    )
+    try {
+      await api(`/api/projects/${project.id}/keys/${key.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ can_upload: value }),
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update key")
+      mutate()
+    } finally {
+      setTogglingId(null)
     }
   }
 
@@ -241,6 +263,7 @@ const { answer, sources } = await res.json();`
             <TableHeader>
               <TableRow>
                 <TableHead className="pl-6">Key</TableHead>
+                <TableHead>Access</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead>Last used</TableHead>
                 <TableHead>Status</TableHead>
@@ -253,6 +276,9 @@ const { answer, sources } = await res.json();`
                   <TableRow key={i}>
                     <TableCell className="pl-6">
                       <Skeleton className="h-4 w-24" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-5 w-20 rounded-full" />
                     </TableCell>
                     <TableCell>
                       <Skeleton className="h-4 w-20" />
@@ -269,7 +295,7 @@ const { answer, sources } = await res.json();`
               ) : keys.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={6}
                     className="py-10 text-center text-muted-foreground"
                   >
                     <KeyRound className="mx-auto mb-2 size-6" />
@@ -281,11 +307,24 @@ const { answer, sources } = await res.json();`
                   <TableRow key={key.id}>
                     <TableCell className="pl-6 font-mono text-xs">
                       {key.key_prefix}…
-                      {key.can_upload && (
-                        <Badge variant="outline" className="ml-2 font-sans">
-                          upload
-                        </Badge>
-                      )}
+                    </TableCell>
+                    <TableCell>
+                      <label
+                        className={
+                          key.revoked_at
+                            ? "inline-flex items-center gap-1.5 text-xs opacity-50"
+                            : "inline-flex cursor-pointer items-center gap-1.5 text-xs"
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={key.can_upload}
+                          disabled={!!key.revoked_at || togglingId === key.id}
+                          onChange={(e) => handleToggleUpload(key, e.target.checked)}
+                          className="size-3.5 accent-foreground"
+                        />
+                        Uploads
+                      </label>
                     </TableCell>
                     <TableCell>
                       {new Date(key.created_at).toLocaleDateString()}

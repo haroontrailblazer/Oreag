@@ -109,6 +109,10 @@ class ApiKeyCreate(BaseModel):
     can_upload: bool = False
 
 
+class ApiKeyUpdate(BaseModel):
+    can_upload: bool | None = None
+
+
 class ProviderKeyCreate(BaseModel):
     provider: Literal["openai", "gemini", "anthropic", "sarvam"]
     key: str = Field(min_length=8, max_length=500)
