@@ -38,7 +38,9 @@ export async function proxy(request: NextRequest) {
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL("/login", request.url))
   }
-  if (user && (path === "/login" || path === "/signup")) {
+  // Already signed in (session cookie present) → skip the landing/auth pages and
+  // go straight to the dashboard.
+  if (user && (path === "/" || path === "/login" || path === "/signup")) {
     return NextResponse.redirect(new URL("/dashboard", request.url))
   }
   return response
