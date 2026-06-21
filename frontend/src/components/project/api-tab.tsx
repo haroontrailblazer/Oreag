@@ -1,6 +1,12 @@
 "use client"
 
-import { Key as KeyRound, Plus } from "@phosphor-icons/react/dist/ssr"
+import {
+  DotsThree as MoreHorizontal,
+  Key as KeyRound,
+  Plus,
+  Prohibit,
+  Trash,
+} from "@phosphor-icons/react/dist/ssr"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
@@ -24,6 +30,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { LoaderOne } from "@/components/ui/loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -51,11 +64,13 @@ export function ApiTab({ project }: { project: Project }) {
   })
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null)
   const [creating, setCreating] = useState(false)
-  const [newKeyCanUpload, setNewKeyCanUpload] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
   const [revoking, setRevoking] = useState(false)
   const revokeDone = useRef(false)
+  const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const deleteDone = useRef(false)
 
   // Resolve the public base URL on the client so the copyable endpoint reflects
   // the host the dashboard is actually open on (localhost or a LAN IP).
@@ -101,16 +116,9 @@ const { answer, sources } = await res.json();`
     try {
       const created = await api<ApiKeyCreated>(
         `/api/projects/${project.id}/keys`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            name: "default",
-            can_upload: newKeyCanUpload,
-          }),
-        }
+        { method: "POST", body: JSON.stringify({ name: "default" }) }
       )
       setNewKey(created)
-      setNewKeyCanUpload(false)
       mutate()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create key")
@@ -162,6 +170,30 @@ const { answer, sources } = await res.json();`
     revokeDone.current = false
     setRevokeTarget(null)
     setRevoking(false)
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    deleteDone.current = false
+    setDeleting(true)
+    try {
+      await api(`/api/projects/${project.id}/keys/${deleteTarget.id}/purge`, {
+        method: "DELETE",
+      })
+      mutate()
+      // Don't close yet — let the loader finish its current animation cycle.
+      deleteDone.current = true
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete key")
+      setDeleting(false)
+    }
+  }
+
+  function handleDeleteCycle() {
+    if (!deleteDone.current) return
+    deleteDone.current = false
+    setDeleteTarget(null)
+    setDeleting(false)
   }
 
   return (
@@ -236,26 +268,15 @@ const { answer, sources } = await res.json();`
                 Keys are shown once at creation — store them securely.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-3">
-              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={newKeyCanUpload}
-                  onChange={(e) => setNewKeyCanUpload(e.target.checked)}
-                  className="size-3.5 accent-foreground"
-                />
-                Allow uploads
-              </label>
-              <Button onClick={handleCreate} disabled={creating}>
-                {creating ? (
-                  <LoaderOne />
-                ) : (
-                  <>
-                    <Plus className="size-4" /> Create key
-                  </>
-                )}
-              </Button>
-            </div>
+            <Button onClick={handleCreate} disabled={creating}>
+              {creating ? (
+                <LoaderOne />
+              ) : (
+                <>
+                  <Plus className="size-4" /> Create key
+                </>
+              )}
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -344,15 +365,35 @@ const { answer, sources } = await res.json();`
                       )}
                     </TableCell>
                     <TableCell className="pr-6">
-                      {!key.revoked_at && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setRevokeTarget(key)}
-                        >
-                          Revoke
-                        </Button>
-                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`${key.key_prefix} actions`}
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {!key.revoked_at && (
+                            <>
+                              <DropdownMenuItem onSelect={() => setRevokeTarget(key)}>
+                                <Prohibit className="size-4" />
+                                Revoke
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                            </>
+                          )}
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setDeleteTarget(key)}
+                          >
+                            <Trash className="size-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))
@@ -404,6 +445,44 @@ const { answer, sources } = await res.json();`
               </Button>
               <Button variant="destructive" onClick={confirmRevoke}>
                 Revoke key
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null)
+        }}
+      >
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Delete this API key?</DialogTitle>
+            {!deleting && (
+              <DialogDescription>
+                Key{" "}
+                <span className="font-mono">{deleteTarget?.key_prefix}…</span>{" "}
+                will be permanently removed from the database. Any app or agent
+                using it stops working immediately — this cannot be undone.
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {deleting ? (
+            <div className="flex flex-col items-center gap-6 px-6 py-6">
+              <BoxLoader scale={0.5} onCycle={handleDeleteCycle} />
+              <p className="text-xs text-muted-foreground">
+                Permanently deleting…
+              </p>
+            </div>
+          ) : (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmDelete}>
+                Delete
               </Button>
             </DialogFooter>
           )}

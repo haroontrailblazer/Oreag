@@ -76,3 +76,17 @@ def revoke_key(
         api_key.revoked_at = datetime.now(timezone.utc)
         db.commit()
     return api_key
+
+
+@router.delete("/{key_id}/purge", status_code=204)
+def delete_key(
+    key_id: uuid.UUID,
+    project: Project = Depends(get_owned_project),
+    db: Session = Depends(get_db),
+):
+    """Permanently delete a key from the database (hard delete, not a revoke)."""
+    api_key = db.get(ApiKey, key_id)
+    if api_key is None or api_key.project_id != project.id:
+        raise HTTPException(404, "API key not found")
+    db.delete(api_key)
+    db.commit()
