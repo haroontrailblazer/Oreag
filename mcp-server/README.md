@@ -59,70 +59,79 @@ uv run pytest          # runs tests/
 uv run oreag-mcp       # start the server (needs the env vars above)
 ```
 
-## Run modes — local vs remote
+## Run modes
 
-The same code runs two ways, chosen by `MCP_TRANSPORT`:
+Chosen by `MCP_TRANSPORT`:
 
 | `MCP_TRANSPORT` | Transport | Use |
 |---|---|---|
 | `stdio` (default) | stdio | Local clients launch it as a subprocess (the configs above). |
-| `http` | streamable-HTTP | Deployed remote **connector**, served at `<host>/mcp`. |
+| `http` | streamable-HTTP | Deployed remote **connector**. |
 
-Extra env for HTTP mode:
+Over HTTP it serves **two URL shapes** — use whichever fits:
 
-| Var | Purpose |
-|---|---|
-| `PORT` / `HOST` | Bind address (most platforms inject `$PORT`). |
-| `MCP_AUTH_TOKEN` | If set, every request must send `Authorization: Bearer <token>`. **Set this for any public URL** — otherwise anyone with it can use (and `delete_memory` from) your project. |
+| URL | project + key come from | For |
+|---|---|---|
+| `<host>/projects/<project-id>/mcp` | the **URL path** + the caller's `Authorization: Bearer <project-key>` | **Multi-tenant** — every user connects to *their own* project. No secrets on the server. |
+| `<host>/mcp` | the server's `OREAG_PROJECT_ID` + `OREAG_API_KEY` env | **Single project** — one fixed project (optionally guard with `MCP_AUTH_TOKEN`). |
 
-`GET /health` always returns `200 ok` (unauthenticated) for platform health checks.
+`GET /health` → `200 ok` (unauthenticated) for platform health checks.
+
+### Environment
+
+| Var | Multi-tenant | Single-project |
+|---|---|---|
+| `MCP_TRANSPORT=http` | required | required |
+| `OREAG_API_BASE` | required (your backend URL) | required |
+| `OREAG_PROJECT_ID` | — (taken from the URL) | required |
+| `OREAG_API_KEY` | — (taken from the caller) | required |
+| `MCP_AUTH_TOKEN` | — | recommended (guards `/mcp`) |
+| `PORT` / `HOST` | injected by host | injected by host |
 
 ## Deploy anywhere
 
-Set as the platform's env/secrets: `OREAG_API_BASE`, `OREAG_API_KEY`,
-`OREAG_PROJECT_ID`, `MCP_TRANSPORT=http`, and a strong `MCP_AUTH_TOKEN`.
+For a **multi-tenant** connector the server holds **no project keys** — set only
+`MCP_TRANSPORT=http` and `OREAG_API_BASE` (your backend URL).
 
-**Docker (any host / Cloud Run / Fly / a VM):**
+**Docker (any host / Cloud Run / Fly / VM):**
 
 ```bash
 docker build -t oreag-mcp .
 docker run -p 8000:8000 \
   -e MCP_TRANSPORT=http \
-  -e OREAG_API_BASE=https://your-api-host \
-  -e OREAG_API_KEY=oreag_sk_xxx \
-  -e OREAG_PROJECT_ID=<project-uuid> \
-  -e MCP_AUTH_TOKEN=a-long-random-secret \
+  -e OREAG_API_BASE=https://your-backend.onrender.com \
   oreag-mcp
-# connector URL -> http://localhost:8000/mcp
+# multi-tenant connector URL -> http://localhost:8000/projects/<project-id>/mcp
 ```
 
-- **Render:** commit this folder; `render.yaml` builds the Dockerfile. Fill the
-  env vars in the dashboard. URL: `https://<service>.onrender.com/mcp`.
-- **Railway / Heroku-style:** the `Procfile` runs it; set the env as config vars
-  (`$PORT` is injected).
-- **Fly.io:** `fly launch` (detects the Dockerfile) → `fly secrets set OREAG_…`
-  → `fly deploy`.
+- **Render:** commit this folder; `render.yaml` builds the Dockerfile. Set
+  `OREAG_API_BASE` (+ `MCP_TRANSPORT=http`). Base URL: `https://<service>.onrender.com`.
+- **Railway / Heroku-style:** the `Procfile` runs it; set the config vars.
+- **Fly.io:** `fly launch` → `fly secrets set OREAG_API_BASE=…` → `fly deploy`.
 
-## Add the deployed server to a client (remote)
+## Connect a client (remote, multi-tenant)
 
-Use the `https://<host>/mcp` URL plus the bearer token:
+Each user uses **their own** project id (in the URL) and **their own** project
+API key (as the bearer token) — so accounts stay isolated, enforced by the
+backend:
 
-- **claude.ai / Claude Desktop → Connectors → Add custom connector:** paste the
-  `/mcp` URL (supply the token via the client's header/OAuth option, or deploy
-  on a private network without `MCP_AUTH_TOKEN`).
+- **claude.ai / Claude Desktop → Connectors → Add custom connector:** paste
+  `https://<host>/projects/<their-project-id>/mcp` and supply
+  `Authorization: Bearer <their-project-key>` via the client's header/OAuth field.
 - **Claude Code:**
 
   ```bash
-  claude mcp add --transport http oreag https://<host>/mcp \
-    --header "Authorization: Bearer <token>"
+  claude mcp add --transport http oreag \
+    https://<host>/projects/<their-project-id>/mcp \
+    --header "Authorization: Bearer <their-project-key>"
   ```
 
 - **Codex** (`~/.codex/config.toml`):
 
   ```toml
   [mcp_servers.oreag]
-  url = "https://<host>/mcp"
-  http_headers = { Authorization = "Bearer <token>" }
+  url = "https://<host>/projects/<their-project-id>/mcp"
+  http_headers = { Authorization = "Bearer <their-project-key>" }
   ```
 
-(Check each client's docs for the exact remote-server flag names — they shift.)
+(Check each client's docs for exact remote-server flag names — they shift.)

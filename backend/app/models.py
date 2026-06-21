@@ -90,6 +90,9 @@ class ApiKey(Base):
     name: Mapped[str] = mapped_column(Text, default="default")
     key_prefix: Mapped[str] = mapped_column(Text)
     key_hash: Mapped[str] = mapped_column(Text, unique=True)
+    # Read-only by default; only keys created with this true may ingest via
+    # POST /v1/projects/{id}/files.
+    can_upload: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

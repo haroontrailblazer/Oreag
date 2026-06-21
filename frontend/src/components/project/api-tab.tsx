@@ -51,6 +51,7 @@ export function ApiTab({ project }: { project: Project }) {
   })
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null)
   const [creating, setCreating] = useState(false)
+  const [newKeyCanUpload, setNewKeyCanUpload] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
   const [revoking, setRevoking] = useState(false)
   const revokeDone = useRef(false)
@@ -61,7 +62,12 @@ export function ApiTab({ project }: { project: Project }) {
   useEffect(() => setApiBase(getApiBase()), [])
 
   const endpoint = `${apiBase}/v1/projects/${project.id}/query`
+  const uploadEndpoint = `${apiBase}/v1/projects/${project.id}/files`
   const memoryGraphEndpoint = `${apiBase}/v1/projects/${project.id}/memory-graph`
+
+  const uploadCurl = `curl -X POST ${uploadEndpoint} \\
+  -H "Authorization: Bearer YOUR_UPLOAD_KEY" \\
+  -F "uploads=@document.pdf"`
 
   const curlExample = `curl -X POST ${endpoint} \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
@@ -78,30 +84,32 @@ export function ApiTab({ project }: { project: Project }) {
 });
 const { answer, sources } = await res.json();`
 
-  // Ready-to-paste config for the bundled MCP server (mcp-server/, `oreag-mcp`).
-  // Gives coding agents this project's memory + doc search/answer tools.
-  const mcpConfig = `{
-  "mcpServers": {
-    "oreag": {
-      "command": "uvx",
-      "args": ["--from", "/path/to/oreag/mcp-server", "oreag-mcp"],
-      "env": {
-        "OREAG_API_BASE": "${apiBase}",
-        "OREAG_API_KEY": "YOUR_API_KEY",
-        "OREAG_PROJECT_ID": "${project.id}"
-      }
-    }
-  }
-}`
+  // Per-project remote MCP connector (the multi-tenant mcp-server/). The host
+  // comes from NEXT_PUBLIC_MCP_URL; callers authenticate with an API key as the
+  // bearer token. Falls back to a placeholder host when the env isn't set.
+  const mcpBase = (
+    process.env.NEXT_PUBLIC_MCP_URL || "https://your-mcp-host"
+  ).replace(/\/+$/, "")
+  const mcpConnectorUrl = `${mcpBase}/projects/${project.id}/mcp`
+  const mcpAddCommand = `claude mcp add --transport http oreag \\
+  ${mcpConnectorUrl} \\
+  --header "Authorization: Bearer YOUR_API_KEY"`
 
   async function handleCreate() {
     setCreating(true)
     try {
       const created = await api<ApiKeyCreated>(
         `/api/projects/${project.id}/keys`,
-        { method: "POST", body: JSON.stringify({ name: "default" }) }
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: "default",
+            can_upload: newKeyCanUpload,
+          }),
+        }
       )
       setNewKey(created)
+      setNewKeyCanUpload(false)
       mutate()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create key")
@@ -163,16 +171,36 @@ const { answer, sources } = await res.json();`
             </pre>
           </div>
           <div className="space-y-2">
-            <h3 className="text-sm font-medium">MCP (coding agents)</h3>
+            <h3 className="text-sm font-medium">Upload documents</h3>
             <p className="text-xs text-muted-foreground">
-              Connect Claude Code / Desktop to this project — it adds memory and
-              document search/answer tools. Add to your MCP client config (point{" "}
-              <code className="rounded bg-background px-1">--from</code> at the
-              bundled <code className="rounded bg-background px-1">mcp-server/</code>):
+              Ingest files programmatically with a key that has{" "}
+              <span className="font-medium">Allow uploads</span> enabled
+              (read-only keys can&apos;t):
             </p>
             <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">
-              {mcpConfig}
+              {uploadCurl}
             </pre>
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">MCP connector (coding agents)</h3>
+            <p className="text-xs text-muted-foreground">
+              Connect Claude / Codex to this project — it adds memory and
+              document search/answer tools. Add it as a remote MCP server,
+              authenticating with an API key as the bearer token:
+            </p>
+            <CopyField value={mcpConnectorUrl} />
+            <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">
+              {mcpAddCommand}
+            </pre>
+            {!process.env.NEXT_PUBLIC_MCP_URL && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Set{" "}
+                <code className="rounded bg-background px-1">
+                  NEXT_PUBLIC_MCP_URL
+                </code>{" "}
+                to your deployed MCP server URL to fill in the host above.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -186,15 +214,26 @@ const { answer, sources } = await res.json();`
                 Keys are shown once at creation — store them securely.
               </CardDescription>
             </div>
-            <Button onClick={handleCreate} disabled={creating}>
-              {creating ? (
-                <LoaderOne />
-              ) : (
-                <>
-                  <Plus className="size-4" /> Create key
-                </>
-              )}
-            </Button>
+            <div className="flex items-center gap-3">
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={newKeyCanUpload}
+                  onChange={(e) => setNewKeyCanUpload(e.target.checked)}
+                  className="size-3.5 accent-foreground"
+                />
+                Allow uploads
+              </label>
+              <Button onClick={handleCreate} disabled={creating}>
+                {creating ? (
+                  <LoaderOne />
+                ) : (
+                  <>
+                    <Plus className="size-4" /> Create key
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -242,6 +281,11 @@ const { answer, sources } = await res.json();`
                   <TableRow key={key.id}>
                     <TableCell className="pl-6 font-mono text-xs">
                       {key.key_prefix}…
+                      {key.can_upload && (
+                        <Badge variant="outline" className="ml-2 font-sans">
+                          upload
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       {new Date(key.created_at).toLocaleDateString()}

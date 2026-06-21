@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from ..models import Chunk, File, Project
+from ..models import Chunk, File, Memory, Project
 from ..schemas import MemoryGraphEdge, MemoryGraphNode, MemoryGraphResponse, ProjectInfo
 from . import storage
 
@@ -15,6 +15,12 @@ RELATED_K = 5               # nearest cross-file neighbours considered per chunk
 RELATED_THRESHOLD = 0.6     # min cosine similarity for a "related" edge
 RELATED_MAX_EDGES = 600     # safety cap on emitted chunk pairs
 RELATED_CHUNK_CAP = 1500    # skip the heavy pass for very large projects
+
+# Memory linking knobs — connect memories to chunks and to each other.
+MEMORY_RELATED_K = 5
+MEMORY_RELATED_THRESHOLD = 0.6
+MEMORY_RELATED_MAX_EDGES = 400
+MEMORY_CAP = 1000           # skip the memory linking pass above this many memories
 
 # For every chunk, find its nearest chunks that live in a *different* file of the
 # same project (exact cosine scan — every project's chunks share one embedding
@@ -176,6 +182,91 @@ def _related_edges(
     return file_edges + chunk_edges
 
 
+# Memories share the project's embedding space with chunks, so the same cosine
+# operator links a memory to its nearest document chunks and to its nearest other
+# memories — weaving the saved session memory into the document graph.
+MEMORY_CHUNK_SQL = text(
+    """
+    SELECT m.id AS mem_id, c.id AS chunk_id,
+           1 - (m.embedding <=> c.embedding) AS similarity
+    FROM memories m
+    CROSS JOIN LATERAL (
+        SELECT id, embedding FROM chunks
+        WHERE project_id = m.project_id
+        ORDER BY embedding <=> m.embedding
+        LIMIT :k
+    ) c
+    WHERE m.project_id = :project_id AND m.embedding IS NOT NULL
+      AND (1 - (m.embedding <=> c.embedding)) >= :threshold
+    ORDER BY similarity DESC
+    LIMIT :max_edges
+    """
+)
+
+MEMORY_MEMORY_SQL = text(
+    """
+    SELECT a.id AS a_id, n.id AS b_id,
+           1 - (a.embedding <=> n.embedding) AS similarity
+    FROM memories a
+    CROSS JOIN LATERAL (
+        SELECT id, embedding FROM memories
+        WHERE project_id = a.project_id AND id <> a.id
+        ORDER BY embedding <=> a.embedding
+        LIMIT :k
+    ) n
+    WHERE a.project_id = :project_id AND a.embedding IS NOT NULL
+      AND (1 - (a.embedding <=> n.embedding)) >= :threshold
+    ORDER BY similarity DESC
+    LIMIT :max_edges
+    """
+)
+
+
+def _memory_related_edges(
+    db: Session, project: Project, memory_count: int, chunk_count: int
+) -> list[MemoryGraphEdge]:
+    if memory_count < 1 or memory_count > MEMORY_CAP:
+        return []
+
+    params = {
+        "project_id": str(project.id),
+        "k": MEMORY_RELATED_K,
+        "threshold": MEMORY_RELATED_THRESHOLD,
+        "max_edges": MEMORY_RELATED_MAX_EDGES,
+    }
+    edges: list[MemoryGraphEdge] = []
+
+    if chunk_count:
+        for row in db.execute(MEMORY_CHUNK_SQL, params).mappings().all():
+            edges.append(
+                MemoryGraphEdge(
+                    source=f"memory:{int(row['mem_id'])}",
+                    target=f"chunk:{int(row['chunk_id'])}",
+                    type="related",
+                    metadata={"similarity": round(float(row["similarity"]), 4)},
+                )
+            )
+
+    seen: set[tuple[int, int]] = set()
+    for row in db.execute(MEMORY_MEMORY_SQL, params).mappings().all():
+        a, b = int(row["a_id"]), int(row["b_id"])
+        if a == b:
+            continue
+        pair = (a, b) if a < b else (b, a)
+        if pair in seen:
+            continue
+        seen.add(pair)
+        edges.append(
+            MemoryGraphEdge(
+                source=f"memory:{pair[0]}",
+                target=f"memory:{pair[1]}",
+                type="related",
+                metadata={"similarity": round(float(row["similarity"]), 4)},
+            )
+        )
+    return edges
+
+
 def build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
     files = db.scalars(
         select(File).where(File.project_id == project.id).order_by(File.created_at)
@@ -295,6 +386,33 @@ def build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
 
     # cross-file topic links (auto-detected related nodes)
     edges.extend(_related_edges(db, project, chunk_count or 0))
+
+    # memories as nodes, woven into the same interlinked brain
+    memories = db.scalars(
+        select(Memory).where(Memory.project_id == project.id).order_by(Memory.created_at)
+    ).all()
+    for mem in memories:
+        label = " ".join((mem.content or "").split())
+        nodes.append(
+            MemoryGraphNode(
+                id=f"memory:{mem.id}",
+                type="memory",
+                label=(label[:60] + "…") if len(label) > 60 else (label or "(memory)"),
+                text=mem.content,
+                metadata={
+                    "memory_id": mem.id,
+                    "tags": list(mem.tags or []),
+                    "pinned": mem.pinned,
+                    "source": mem.source,
+                },
+            )
+        )
+        edges.append(
+            MemoryGraphEdge(
+                source=f"project:{project.id}", target=f"memory:{mem.id}", type="contains"
+            )
+        )
+    edges.extend(_memory_related_edges(db, project, len(memories), chunk_count or 0))
 
     project_info = ProjectInfo(
         id=project.id,

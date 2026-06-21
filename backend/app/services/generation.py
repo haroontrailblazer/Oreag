@@ -13,9 +13,12 @@ SYSTEM_PROMPT = (
 
 
 def build_user_prompt(question: str, sources: list[dict]) -> str:
+    def _label(s: dict) -> str:
+        page = s.get("page_number")
+        return s["filename"] + (f" (page {page})" if page is not None else "")
+
     context = "\n\n".join(
-        f"[{i + 1}] {s['filename']} (page {s['page_number']}):\n{s['content']}"
-        for i, s in enumerate(sources)
+        f"[{i + 1}] {_label(s)}:\n{s['content']}" for i, s in enumerate(sources)
     )
     return f"Context:\n{context}\n\nQuestion: {question}"
 

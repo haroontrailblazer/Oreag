@@ -152,7 +152,7 @@ export function AddFilesDialog({
           Add files
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto no-scrollbar sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add files</DialogTitle>
           <DialogDescription>
@@ -160,7 +160,7 @@ export function AddFilesDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="space-y-2">
             <button
               type="button"
@@ -184,7 +184,7 @@ export function AddFilesDialog({
               onChange={(e) => addFiles(e.target.files)}
             />
             {files.length > 0 && (
-              <ul className="max-h-48 space-y-1 overflow-y-auto pr-1">
+              <ul className="max-h-48 space-y-1 overflow-y-auto no-scrollbar">
                 {files.map((file) => (
                   <li
                     key={file.name + file.size}

@@ -64,6 +64,9 @@ export interface ApiKey {
   last_used_at: string | null
   created_at: string
   revoked_at: string | null
+  // When true the key may ingest documents (POST /v1/projects/{id}/files);
+  // read-only keys (default) can only query.
+  can_upload: boolean
 }
 
 export interface ApiKeyCreated extends ApiKey {

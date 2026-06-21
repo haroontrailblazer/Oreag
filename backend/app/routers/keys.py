@@ -37,6 +37,7 @@ def create_key(
         name=body.name,
         key_prefix=key_prefix,
         key_hash=key_hash,
+        can_upload=body.can_upload,
     )
     db.add(api_key)
     db.commit()

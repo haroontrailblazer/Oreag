@@ -17,8 +17,9 @@ ENV MCP_TRANSPORT=http \
     PORT=8000
 EXPOSE 8000
 
-# Required at runtime (set as platform env / secrets, not baked in):
-#   OREAG_API_BASE, OREAG_API_KEY, OREAG_PROJECT_ID
-# Recommended for a public URL:
-#   MCP_AUTH_TOKEN  (clients must then send Authorization: Bearer <token>)
+# Runtime env (set as platform env / secrets, not baked in):
+#   Multi-tenant (recommended): OREAG_API_BASE only — each caller connects to
+#     <host>/projects/<project-id>/mcp with their own `Authorization: Bearer <key>`.
+#   Single-project: also set OREAG_API_KEY + OREAG_PROJECT_ID (+ MCP_AUTH_TOKEN
+#     to guard the fixed /mcp URL).
 CMD ["oreag-mcp"]

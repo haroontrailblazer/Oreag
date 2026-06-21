@@ -1,5 +1,7 @@
-# One-click-ish Render deploy. Render builds the Dockerfile and serves the
-# streamable-HTTP connector at https://<service>.onrender.com/mcp
+# One-click-ish Render deploy. Render builds the Dockerfile and serves a
+# multi-tenant streamable-HTTP connector:
+#   https://<service>.onrender.com/projects/<project-id>/mcp
+# (callers pass their own project key as `Authorization: Bearer <key>`).
 services:
   - type: web
     name: oreag-mcp
@@ -9,12 +11,15 @@ services:
     envVars:
       - key: MCP_TRANSPORT
         value: http
-      # Set these in the Render dashboard (kept out of git):
+      # Your backend URL — the only secret the multi-tenant server needs.
+      # Set it in the Render dashboard (kept out of git).
       - key: OREAG_API_BASE
         sync: false
-      - key: OREAG_API_KEY
-        sync: false
-      - key: OREAG_PROJECT_ID
-        sync: false
-      - key: MCP_AUTH_TOKEN
-        sync: false
+      # Single-project mode only (serves a fixed /mcp). Leave unset for
+      # multi-tenant; if used, set MCP_AUTH_TOKEN too:
+      # - key: OREAG_API_KEY
+      #     sync: false
+      # - key: OREAG_PROJECT_ID
+      #     sync: false
+      # - key: MCP_AUTH_TOKEN
+      #     sync: false

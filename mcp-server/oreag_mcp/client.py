@@ -47,3 +47,21 @@ class OreagClient:
         r = self._http.post(self._p("/query"), json={"question": question})
         r.raise_for_status()
         return r.json()
+
+    def upload_document(self, filename, content):
+        r = self._http.post(
+            self._p("/files"),
+            files={"uploads": (filename, content.encode("utf-8"), "text/plain")},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def memory_graph(self):
+        r = self._http.get(self._p("/memory-graph"))
+        r.raise_for_status()
+        return r.json()
+
+    def explore_brain(self, query, hops=1):
+        r = self._http.post(self._p("/explore"), json={"query": query, "hops": hops})
+        r.raise_for_status()
+        return r.json()

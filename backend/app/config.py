@@ -25,5 +25,21 @@ class Settings(BaseSettings):
 
     max_upload_bytes: int = 50 * 1024 * 1024
 
+    # Guards for the public (API-key) ingest route /v1/projects/{id}/files.
+    # Owner/dashboard uploads are NOT limited by these.
+    max_files_per_upload: int = 20         # files accepted in one request
+    max_files_per_project: int = 1000      # total files a project may hold
+    upload_rate_per_minute: int = 60       # files ingested per project per minute
+
+    # "Brain": blend relevant agent memories into RAG answers, and link memories
+    # into the memory graph alongside document chunks (same embedding space).
+    rag_memory_blend_k: int = 4            # max memories blended into one answer
+    rag_memory_min_similarity: float = 0.35
+
+    # Agentic retrieval (explore_brain): graph-aware traversal of the brain.
+    explore_seeds_per_type: int = 6        # top chunks + top memories to seed from
+    explore_fanout: int = 4                # neighbours expanded per node per hop
+    explore_max_nodes: int = 50            # subgraph size cap
+
 
 settings = Settings()

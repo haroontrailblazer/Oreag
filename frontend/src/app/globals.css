@@ -877,3 +877,12 @@
 .dark .toast-sub {
   color: #9aa3af;
 }
+
+/* Keep an element scrollable but hide its scrollbar. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chromium / Safari */
+}

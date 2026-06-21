@@ -97,6 +97,7 @@ class ApiKeyOut(BaseModel):
     last_used_at: datetime | None
     created_at: datetime
     revoked_at: datetime | None
+    can_upload: bool = False
 
 
 class ApiKeyCreated(ApiKeyOut):
@@ -105,6 +106,7 @@ class ApiKeyCreated(ApiKeyOut):
 
 class ApiKeyCreate(BaseModel):
     name: str = Field(default="default", min_length=1, max_length=100)
+    can_upload: bool = False
 
 
 class ProviderKeyCreate(BaseModel):
@@ -211,3 +213,17 @@ class MemorySearchResult(MemoryOut):
 class RetrieveRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     top_k: int | None = Field(default=None, ge=1, le=20)
+
+
+class BrainExploreRequest(BaseModel):
+    """Agentic, graph-aware retrieval over the brain (chunks + memories)."""
+
+    query: str = Field(min_length=1, max_length=4000)
+    hops: int = Field(default=1, ge=0, le=3)
+
+
+class BrainExploreResponse(BaseModel):
+    query: str
+    seeds: list[str]  # node ids the walk started from (most relevant)
+    nodes: list[MemoryGraphNode]
+    edges: list[MemoryGraphEdge]
