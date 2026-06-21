@@ -1,7 +1,7 @@
 "use client"
 
 import { Key as KeyRound } from "@phosphor-icons/react/dist/ssr"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 import useSWR, { mutate as globalMutate } from "swr"
 
@@ -55,6 +55,7 @@ export function ProviderKeys() {
   const [saving, setSaving] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<ProviderId | null>(null)
   const [removing, setRemoving] = useState(false)
+  const removeDone = useRef(false)
 
   function openEditor(provider: ProviderId) {
     setValue("")
@@ -83,17 +84,25 @@ export function ProviderKeys() {
 
   async function confirmRemove() {
     if (!removeTarget) return
+    removeDone.current = false
     setRemoving(true)
     try {
       await api(`/api/provider-keys/${removeTarget}`, { method: "DELETE" })
       mutate()
       globalMutate("/api/models")
-      setRemoveTarget(null)
+      // Don't close yet — let the loader finish its current animation cycle.
+      removeDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to remove key")
-    } finally {
       setRemoving(false)
     }
+  }
+
+  function handleRemoveCycle() {
+    if (!removeDone.current) return
+    removeDone.current = false
+    setRemoveTarget(null)
+    setRemoving(false)
   }
 
   const editingProvider = PROVIDERS.find((p) => p.id === editing)
@@ -217,7 +226,7 @@ export function ProviderKeys() {
           </DialogHeader>
           {removing ? (
             <div className="flex flex-col items-center gap-2 py-4">
-              <BoxLoader scale={0.5} />
+              <BoxLoader scale={0.5} onCycle={handleRemoveCycle} />
               <p className="text-sm text-muted-foreground">Removing key…</p>
             </div>
           ) : (

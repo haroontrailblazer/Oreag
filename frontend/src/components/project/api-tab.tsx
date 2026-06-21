@@ -1,7 +1,7 @@
 "use client"
 
 import { Key as KeyRound, Plus } from "@phosphor-icons/react/dist/ssr"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
 
@@ -53,6 +53,7 @@ export function ApiTab({ project }: { project: Project }) {
   const [creating, setCreating] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
   const [revoking, setRevoking] = useState(false)
+  const revokeDone = useRef(false)
 
   // Resolve the public base URL on the client so the copyable endpoint reflects
   // the host the dashboard is actually open on (localhost or a LAN IP).
@@ -95,18 +96,26 @@ const { answer, sources } = await res.json();`
 
   async function confirmRevoke() {
     if (!revokeTarget) return
+    revokeDone.current = false
     setRevoking(true)
     try {
       await api(`/api/projects/${project.id}/keys/${revokeTarget.id}`, {
         method: "DELETE",
       })
       mutate()
-      setRevokeTarget(null)
+      // Don't close yet — let the loader finish its current animation cycle.
+      revokeDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to revoke key")
-    } finally {
       setRevoking(false)
     }
+  }
+
+  function handleRevokeCycle() {
+    if (!revokeDone.current) return
+    revokeDone.current = false
+    setRevokeTarget(null)
+    setRevoking(false)
   }
 
   return (
@@ -274,7 +283,7 @@ const { answer, sources } = await res.json();`
           </DialogHeader>
           {revoking ? (
             <div className="flex flex-col items-center gap-2 py-4">
-              <BoxLoader scale={0.5} />
+              <BoxLoader scale={0.5} onCycle={handleRevokeCycle} />
               <p className="text-sm text-muted-foreground">Revoking key…</p>
             </div>
           ) : (

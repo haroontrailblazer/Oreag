@@ -10,7 +10,7 @@ import {
   ArrowCounterClockwise as RotateCcw,
   Trash as Trash2,
 } from "@phosphor-icons/react/dist/ssr"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
 
@@ -55,7 +55,7 @@ const FILE_STATUS = {
     label: "Indexing",
     icon: Loader2,
     className:
-      "border-transparent bg-transparent text-sky-700 dark:text-sky-400",
+      "border-transparent bg-sky-500 text-white",
   },
   indexed: {
     label: "Indexed",
@@ -91,7 +91,7 @@ function FileStatus({ status }: { status: FileRecord["status"] }) {
       )}
     >
       {status === "processing" ? (
-        <BanterLoader size={20} />
+        <BanterLoader size={14} />
       ) : (
         <Icon className="size-3.5" />
       )}
@@ -111,6 +111,7 @@ export function FilesTab({
   const [highlightId, setHighlightId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<FileRecord | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const deleteDone = useRef(false)
 
   const { data: files, mutate } = useSWR<FileRecord[]>(
     `/api/projects/${project.id}/files`,
@@ -137,20 +138,29 @@ export function FilesTab({
 
   async function confirmDelete() {
     if (!deleteTarget) return
+    deleteDone.current = false
     setDeleting(true)
     try {
       await api(`/api/projects/${project.id}/files/${deleteTarget.id}`, {
         method: "DELETE",
       })
-      toast.success(`${deleteTarget.filename} deleted`)
-      setDeleteTarget(null)
-      mutate()
-      onChanged()
+      // Don't close yet — let the loader finish its current animation cycle.
+      deleteDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed")
-    } finally {
       setDeleting(false)
     }
+  }
+
+  // Called at each loader animation cycle; closes once the delete has finished.
+  function handleDeleteCycle() {
+    if (!deleteDone.current) return
+    deleteDone.current = false
+    toast.success(`${deleteTarget?.filename} deleted`)
+    setDeleteTarget(null)
+    setDeleting(false)
+    mutate()
+    onChanged()
   }
 
   async function handleRetry(file: FileRecord) {
@@ -356,7 +366,7 @@ export function FilesTab({
           </DialogHeader>
           {deleting ? (
             <div className="flex flex-col items-center gap-2 py-4">
-              <BoxLoader scale={0.5} />
+              <BoxLoader scale={0.5} onCycle={handleDeleteCycle} />
               <p className="text-sm text-muted-foreground">
                 Permanently deleting…
               </p>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 import useSWR from "swr"
 
@@ -73,6 +73,7 @@ export function SettingsTab({
 
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const deleteDone = useRef(false)
 
   // --- LLM derived state -----------------------------------------------------
   const llmProvider = providerOf(llm)
@@ -234,15 +235,23 @@ export function SettingsTab({
   }
 
   async function handleDelete() {
+    deleteDone.current = false
     setDeleting(true)
     try {
       await api(`/api/projects/${project.id}`, { method: "DELETE" })
-      toast.success("Project deleted")
-      router.push("/dashboard")
+      // Don't navigate yet — let the loader finish its current animation cycle.
+      deleteDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed")
       setDeleting(false)
     }
+  }
+
+  function handleDeleteCycle() {
+    if (!deleteDone.current) return
+    deleteDone.current = false
+    toast.success("Project deleted")
+    router.push("/dashboard")
   }
 
   return (
@@ -528,7 +537,7 @@ export function SettingsTab({
           </DialogHeader>
           {deleting ? (
             <div className="flex flex-col items-center gap-2 py-4">
-              <BoxLoader scale={0.5} />
+              <BoxLoader scale={0.5} onCycle={handleDeleteCycle} />
               <p className="text-sm text-muted-foreground">
                 Permanently deleting…
               </p>
