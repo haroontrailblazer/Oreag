@@ -2,7 +2,7 @@
 
 import { ArrowUp, Plus, Square } from "@phosphor-icons/react/dist/ssr"
 import { useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { Button } from "@/components/ui/button"

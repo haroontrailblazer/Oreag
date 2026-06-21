@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { SetPasswordForm } from "@/components/set-password-form"
 import { ThemeToggle } from "@/components/theme-toggle"

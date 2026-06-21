@@ -4,7 +4,7 @@ import { FileArrowUp as FileUp, X } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoaderOne } from "@/components/ui/loader"
+import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
@@ -26,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { api, fetcher } from "@/lib/api"
+import { api, fetcher, uploadWithProgress } from "@/lib/api"
 import { providerOf } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
@@ -90,6 +91,7 @@ export default function NewProjectPage() {
   const [llm, setLlm] = useState("openai/gpt-4o-mini")
   const [topK, setTopK] = useState(5)
   const [submitting, setSubmitting] = useState(false)
+  const [progress, setProgress] = useState(0)
 
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher, {
     onSuccess({ availability, catalog }) {
@@ -160,9 +162,9 @@ export default function NewProjectPage() {
       if (files.length > 0) {
         const form = new FormData()
         files.forEach((file) => form.append("uploads", file))
-        await api(`/api/projects/${project.id}/files`, {
-          method: "POST",
-          body: form,
+        setProgress(0)
+        await uploadWithProgress(`/api/projects/${project.id}/files`, form, {
+          onProgress: setProgress,
         })
       }
       toast.success("Project created — indexing started")
@@ -170,6 +172,7 @@ export default function NewProjectPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create project")
       setSubmitting(false)
+      setProgress(0)
     }
   }
 
@@ -425,6 +428,20 @@ export default function NewProjectPage() {
                 How many document chunks are retrieved per question.
               </p>
             </div>
+
+            {submitting && files.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>
+                    {progress < 100
+                      ? `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`
+                      : "Processing on the server…"}
+                  </span>
+                  <span className="tabular-nums">{progress}%</span>
+                </div>
+                <Progress value={progress} />
+              </div>
+            )}
 
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(1)}>

@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation"
 import { useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
 
 import { ProviderKeyField } from "@/components/project/provider-key-field"
@@ -543,9 +543,9 @@ export function SettingsTab({
             )}
           </DialogHeader>
           {deleting ? (
-            <div className="flex flex-col items-center gap-2 py-4">
+            <div className="flex flex-col items-center gap-6 px-6 py-6">
               <BoxLoader scale={0.5} onCycle={handleDeleteCycle} />
-              <p className="mt-[1.5cm] text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Permanently deleting…
               </p>
             </div>

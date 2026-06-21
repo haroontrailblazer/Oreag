@@ -2,7 +2,7 @@
 
 import { X } from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"

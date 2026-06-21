@@ -2,7 +2,7 @@
 
 import { FileArrowUp as FileUp, X } from "@phosphor-icons/react/dist/ssr"
 import { useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { Button } from "@/components/ui/button"
@@ -184,7 +184,7 @@ export function AddFilesDialog({
               onChange={(e) => addFiles(e.target.files)}
             />
             {files.length > 0 && (
-              <ul className="space-y-1">
+              <ul className="max-h-48 space-y-1 overflow-y-auto pr-1">
                 {files.map((file) => (
                   <li
                     key={file.name + file.size}

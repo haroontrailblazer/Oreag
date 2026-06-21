@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { AuthShell } from "@/components/auth-shell"
 import { SetPasswordForm } from "@/components/set-password-form"

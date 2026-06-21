@@ -2,7 +2,7 @@
 
 import { Brain, MagnifyingGlass as Search } from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { Badge } from "@/components/ui/badge"

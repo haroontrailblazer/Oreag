@@ -782,3 +782,110 @@
     display: none;
   }
 }
+
+/* Toast cards — custom sonner toasts (see lib/toast.tsx): a white pill with a
+   coloured wave, an icon disc, the message and a close button. Each variant
+   only changes three colour vars. */
+.toast-card {
+  --toast-accent: #d10d0d;
+  --toast-wave: #fc0c0c3a;
+  --toast-icon-bg: #fc0c0c48;
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  width: 330px;
+  max-width: calc(100vw - 2rem);
+  min-height: 80px;
+  padding: 10px 15px;
+  border-radius: 8px;
+  background-color: #ffffff;
+  box-shadow: rgba(149, 157, 165, 0.2) 0px 8px 24px;
+  overflow: hidden;
+}
+.toast-card--success {
+  --toast-accent: #0d9f44;
+  --toast-wave: #12bf4a3a;
+  --toast-icon-bg: #12bf4a48;
+}
+.toast-card--info {
+  --toast-accent: #124fff;
+  --toast-wave: #4777ff3a;
+  --toast-icon-bg: #4777ff48;
+}
+.toast-card--error {
+  --toast-accent: #d10d0d;
+  --toast-wave: #fc0c0c3a;
+  --toast-icon-bg: #fc0c0c48;
+}
+.toast-wave {
+  position: absolute;
+  left: -31px;
+  top: 32px;
+  width: 80px;
+  transform: rotate(90deg);
+  fill: var(--toast-wave);
+  pointer-events: none;
+}
+.toast-icon-container {
+  z-index: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 35px;
+  height: 35px;
+  border-radius: 50%;
+  background-color: var(--toast-icon-bg);
+}
+.toast-icon {
+  width: 17px;
+  height: 17px;
+  color: var(--toast-accent);
+}
+.toast-text {
+  z-index: 1;
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 2px;
+}
+.toast-title,
+.toast-sub {
+  margin: 0;
+  max-width: 100%;
+  cursor: default;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.toast-title {
+  color: var(--toast-accent);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.toast-sub {
+  -webkit-line-clamp: 1;
+  font-size: 13px;
+  color: #555;
+}
+.toast-cross {
+  z-index: 1;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+}
+.toast-cross:hover {
+  color: #111111;
+}

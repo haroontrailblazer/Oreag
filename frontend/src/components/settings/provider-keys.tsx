@@ -2,7 +2,7 @@
 
 import { Key as KeyRound } from "@phosphor-icons/react/dist/ssr"
 import { useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
 
 import { BoxLoader } from "@/components/ui/box-loader"

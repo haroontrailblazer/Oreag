@@ -2,7 +2,7 @@
 
 import { Key as KeyRound, Plus } from "@phosphor-icons/react/dist/ssr"
 import { useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { CopyField } from "@/components/copy-field"
