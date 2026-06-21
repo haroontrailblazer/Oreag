@@ -207,10 +207,10 @@ const { answer, sources } = await res.json();`
             copy-paste ready.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="space-y-2">
+        <CardContent className="divide-y p-0">
+          <div className="space-y-2.5 px-6 py-5">
             <h3 className="text-sm font-medium">Query endpoint</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               The main chat-style endpoint — POST a question and get an LLM
               answer grounded in this project&apos;s documents, with the source
               chunks it used.
@@ -218,9 +218,9 @@ const { answer, sources } = await res.json();`
             <CopyField value={endpoint} />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5 px-6 py-5">
             <h3 className="text-sm font-medium">curl</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               A ready-to-run shell request to the query endpoint — swap in your
               API key and question. Returns JSON with{" "}
               <code className="rounded bg-muted px-1">answer</code> and a{" "}
@@ -229,9 +229,9 @@ const { answer, sources } = await res.json();`
             <CopyBlock value={curlExample} />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5 px-6 py-5">
             <h3 className="text-sm font-medium">JavaScript</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               The same call from JavaScript with{" "}
               <code className="rounded bg-muted px-1">fetch</code> — destructure{" "}
               <code className="rounded bg-muted px-1">answer</code> and{" "}
@@ -241,9 +241,9 @@ const { answer, sources } = await res.json();`
             <CopyBlock value={fetchExample} />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5 px-6 py-5">
             <h3 className="text-sm font-medium">Upload documents</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               Ingest files programmatically with a key that has{" "}
               <span className="font-medium">Allow uploads</span> enabled
               (read-only keys can&apos;t):
@@ -251,9 +251,9 @@ const { answer, sources } = await res.json();`
             <CopyBlock value={uploadCurl} />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5 px-6 py-5">
             <h3 className="text-sm font-medium">Agent memory graph</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               GET this to fetch the project&apos;s full memory graph — every
               saved memory node and the related-edges between them — for
               visualizing or exploring what agents have stored.
@@ -261,9 +261,9 @@ const { answer, sources } = await res.json();`
             <CopyField value={memoryGraphEndpoint} />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5 px-6 py-5">
             <h3 className="text-sm font-medium">MCP connector (coding agents)</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               Add this project to Claude or Codex as a remote MCP server
               (authenticate with an API key as the bearer token). It exposes the
               project&apos;s memory and document search/answer tools to the
