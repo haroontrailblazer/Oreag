@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation"
 import { use, useEffect, useState } from "react"
-import useSWR from "swr"
+import useSWR, { mutate as globalMutate } from "swr"
 
 import { ApiTab } from "@/components/project/api-tab"
 import { FilesTab } from "@/components/project/files-tab"
@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher } from "@/lib/api"
 import type { Project } from "@/lib/types"
 
-const TAB_VALUES = ["files", "playground", "api", "memory", "settings"]
+const TAB_VALUES = ["files", "memory", "playground", "api", "settings"]
 
 export default function ProjectPage({
   params,
@@ -40,6 +40,16 @@ export default function ProjectPage({
     else if (tabParam && TAB_VALUES.includes(tabParam)) setTab(tabParam)
   }, [selectedFileId, tabParam])
 
+  // Let the active (Files) tab paint and fetch first, then quietly mount the
+  // remaining tabs in the background so switching to them is instant — without
+  // this, each tab only fetches its data the first time it's clicked.
+  const [prefetchTabs, setPrefetchTabs] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setPrefetchTabs(true), 150)
+    return () => clearTimeout(timer)
+  }, [])
+  const mountAll = prefetchTabs ? true : undefined
+
   const {
     data: project,
     error,
@@ -48,6 +58,31 @@ export default function ProjectPage({
     refreshInterval: (latest) =>
       latest?.status === "indexing" ? 3000 : 0,
   })
+
+  // Push this project's live data into the dashboard's cached "/api/projects"
+  // list so any change made here — deleting files, indexing progress, indexing
+  // finishing, name/stat updates — is already reflected when the user navigates
+  // back, instead of showing a stale card until a manual refresh. Patches the
+  // list in place (no refetch); if it isn't cached yet, the dashboard fetches
+  // it normally.
+  useEffect(() => {
+    if (!project) return
+    globalMutate<Project[]>(
+      "/api/projects",
+      (list) =>
+        list ? list.map((p) => (p.id === project.id ? project : p)) : list,
+      { revalidate: false }
+    )
+  }, [project])
+
+  // Refresh this project and the dashboard's project list together after any
+  // in-project change. The list backs the Settings → API keys "Project key
+  // overrides" table, so adding/removing a project-level key here shows up
+  // there immediately — no manual refresh, even if the list wasn't cached yet.
+  function handleChanged() {
+    mutate()
+    globalMutate("/api/projects")
+  }
 
   if (error) {
     return (
@@ -90,29 +125,29 @@ export default function ProjectPage({
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="files">Files</TabsTrigger>
+          <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="playground">Playground</TabsTrigger>
           <TabsTrigger value="api">API</TabsTrigger>
-          <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
-        <TabsContent value="files" className="mt-4">
+        <TabsContent value="files" className="mt-4" forceMount={mountAll}>
           <FilesTab
             project={project}
-            onChanged={() => mutate()}
+            onChanged={handleChanged}
             selectedFileId={selectedFileId}
           />
         </TabsContent>
-        <TabsContent value="playground" className="mt-4">
-          <PlaygroundTab project={project} />
-        </TabsContent>
-        <TabsContent value="api" className="mt-4">
-          <ApiTab project={project} />
-        </TabsContent>
-        <TabsContent value="memory" className="mt-4">
+        <TabsContent value="memory" className="mt-4" forceMount={mountAll}>
           <MemoryTab project={project} />
         </TabsContent>
-        <TabsContent value="settings" className="mt-4">
-          <SettingsTab project={project} onChanged={() => mutate()} />
+        <TabsContent value="playground" className="mt-4" forceMount={mountAll}>
+          <PlaygroundTab project={project} />
+        </TabsContent>
+        <TabsContent value="api" className="mt-4" forceMount={mountAll}>
+          <ApiTab project={project} />
+        </TabsContent>
+        <TabsContent value="settings" className="mt-4" forceMount={mountAll}>
+          <SettingsTab project={project} onChanged={handleChanged} />
         </TabsContent>
       </Tabs>
     </div>

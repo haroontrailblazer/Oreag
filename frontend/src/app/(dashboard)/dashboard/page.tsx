@@ -2,7 +2,8 @@
 
 import { FileText, Plus } from "@phosphor-icons/react/dist/ssr"
 import Link, { useLinkStatus } from "next/link"
-import useSWR from "swr"
+import { useEffect, type CSSProperties } from "react"
+import useSWR, { preload } from "swr"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -17,26 +18,22 @@ import { Spinner } from "@/components/ui/spinner"
 import { fetcher } from "@/lib/api"
 import { useProjectNavPending } from "@/lib/nav-pending"
 import type { Project } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
-const STATUS_TONE: Record<Project["status"], string> = {
-  empty: "bg-muted text-muted-foreground",
-  indexing:
-    "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400",
-  ready:
-    "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
-  error: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400",
+// Spinning glow colour per status — only the outline changes, text stays white.
+const STATUS_GLOW: Record<Project["status"], string> = {
+  empty: "#9ca3af",
+  indexing: "#eab308",
+  ready: "#22c55e",
+  error: "#ef4444",
 }
 
-function StatusPill({ status }: { status: Project["status"] }) {
+function StatusButton({ status }: { status: Project["status"] }) {
   return (
     <span
-      className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium capitalize",
-        STATUS_TONE[status]
-      )}
+      className="status-btn shrink-0 capitalize"
+      style={{ "--glow": STATUS_GLOW[status] } as CSSProperties}
     >
-      {status}
+      <span>{status}</span>
     </span>
   )
 }
@@ -101,6 +98,13 @@ export default function DashboardPage() {
     fetcher
   )
 
+  // Warm the Settings → API keys page in the background so opening it is
+  // instant instead of fetching on click. Its other dataset (/api/projects) is
+  // already loaded above; only the provider keys still need fetching.
+  useEffect(() => {
+    preload("/api/provider-keys", fetcher)
+  }, [])
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -153,7 +157,7 @@ export default function DashboardPage() {
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="truncate">{project.name}</CardTitle>
-                    <StatusPill status={project.status} />
+                    <StatusButton status={project.status} />
                   </div>
                   {project.description && (
                     <CardDescription className="line-clamp-2">

@@ -658,3 +658,48 @@
   0%, 65% { opacity: 0; }
   66%, 100% { opacity: 1; }
 }
+
+/* Project status chip — a dark pill with a glow border that spins around it,
+   tinted by --glow (with a white highlight). Only the glow colour changes per
+   status; the label text stays white. See the dashboard StatusButton. */
+.status-btn {
+  --glow: #22c55e;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 1.5px;
+  isolation: isolate;
+  overflow: hidden;
+  background: #181b1b;
+}
+.status-btn::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -150%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--glow) 40deg,
+    #ffffff 70deg,
+    transparent 110deg,
+    transparent 360deg
+  );
+  animation: status-btn-spin 2.4s linear infinite;
+}
+.status-btn > span {
+  position: relative;
+  border-radius: 9999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: #fff;
+  background: radial-gradient(circle 30px at 80% -60%, #404040, #0f1111);
+}
+@keyframes status-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

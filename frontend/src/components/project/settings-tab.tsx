@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useRef, useState } from "react"
 import { toast } from "sonner"
-import useSWR from "swr"
+import useSWR, { mutate as globalMutate } from "swr"
 
 import { ProviderKeyField } from "@/components/project/provider-key-field"
 import { BoxLoader } from "@/components/ui/box-loader"
@@ -239,6 +239,13 @@ export function SettingsTab({
     setDeleting(true)
     try {
       await api(`/api/projects/${project.id}`, { method: "DELETE" })
+      // Drop it from the dashboard/sidebar list right away so the deleted card
+      // is gone the instant we navigate back (no stale flash before revalidate).
+      globalMutate<Project[]>(
+        "/api/projects",
+        (list) => list?.filter((p) => p.id !== project.id),
+        { revalidate: false }
+      )
       // Don't navigate yet — let the loader finish its current animation cycle.
       deleteDone.current = true
     } catch (err) {
