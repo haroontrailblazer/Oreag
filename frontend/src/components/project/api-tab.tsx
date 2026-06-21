@@ -310,7 +310,7 @@ const { answer, sources } = await res.json();`
                     <TableCell>
                       <Skeleton className="h-5 w-16 rounded-full" />
                     </TableCell>
-                    <TableCell className="pr-6" />
+                    <TableCell className="w-20 pr-6 text-right" />
                   </TableRow>
                 ))
               ) : keys.length === 0 ? (
@@ -364,7 +364,7 @@ const { answer, sources } = await res.json();`
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="pr-6">
+                    <TableCell className="w-20 pr-6 text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
