@@ -1,0 +1,20 @@
+# One-click-ish Render deploy. Render builds the Dockerfile and serves the
+# streamable-HTTP connector at https://<service>.onrender.com/mcp
+services:
+  - type: web
+    name: oreag-mcp
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: MCP_TRANSPORT
+        value: http
+      # Set these in the Render dashboard (kept out of git):
+      - key: OREAG_API_BASE
+        sync: false
+      - key: OREAG_API_KEY
+        sync: false
+      - key: OREAG_PROJECT_ID
+        sync: false
+      - key: MCP_AUTH_TOKEN
+        sync: false

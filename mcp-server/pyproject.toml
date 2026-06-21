@@ -1,9 +1,9 @@
 [project]
 name = "oreag-mcp"
-version = "0.1.0"
-description = "MCP server for Oreag — per-project agent memory + RAG over documents."
+version = "0.2.0"
+description = "MCP server for Oreag — per-project agent memory + RAG over documents. Runs locally over stdio or deployed as a remote streamable-HTTP connector."
 requires-python = ">=3.10"
-dependencies = ["mcp[cli]>=1.2", "httpx>=0.27"]
+dependencies = ["mcp[cli]>=1.10", "httpx>=0.27", "uvicorn>=0.30"]
 
 [project.scripts]
 oreag-mcp = "oreag_mcp.server:main"
