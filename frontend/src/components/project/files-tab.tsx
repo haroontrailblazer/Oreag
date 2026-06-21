@@ -15,8 +15,18 @@ import { toast } from "sonner"
 import useSWR from "swr"
 
 import { AddFilesDialog } from "@/components/project/add-files-dialog"
+import { BanterLoader } from "@/components/ui/banter-loader"
+import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,9 +90,11 @@ function FileStatus({ status }: { status: FileRecord["status"] }) {
         config.className
       )}
     >
-      <Icon
-        className={cn("size-3.5", status === "processing" && "animate-spin")}
-      />
+      {status === "processing" ? (
+        <BanterLoader size={20} />
+      ) : (
+        <Icon className="size-3.5" />
+      )}
     </span>
   )
 }
@@ -97,6 +109,8 @@ export function FilesTab({
   selectedFileId?: string | null
 }) {
   const [highlightId, setHighlightId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<FileRecord | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const { data: files, mutate } = useSWR<FileRecord[]>(
     `/api/projects/${project.id}/files`,
@@ -121,16 +135,21 @@ export function FilesTab({
     return () => clearTimeout(timer)
   }, [selectedFileId, files])
 
-  async function handleDelete(file: FileRecord) {
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api(`/api/projects/${project.id}/files/${file.id}`, {
+      await api(`/api/projects/${project.id}/files/${deleteTarget.id}`, {
         method: "DELETE",
       })
-      toast.success(`${file.filename} deleted`)
+      toast.success(`${deleteTarget.filename} deleted`)
+      setDeleteTarget(null)
       mutate()
       onChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed")
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -303,7 +322,7 @@ export function FilesTab({
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       variant="destructive"
-                      onSelect={() => handleDelete(file)}
+                      onSelect={() => setDeleteTarget(file)}
                     >
                       <Trash2 className="size-4" />
                       Delete file
@@ -315,6 +334,45 @@ export function FilesTab({
           })}
         </ul>
       )}
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this file?</DialogTitle>
+            {!deleting && (
+              <DialogDescription>
+                <span className="font-medium text-foreground">
+                  {deleteTarget?.filename}
+                </span>{" "}
+                and its indexed chunks will be permanently deleted from this
+                project. This can&apos;t be undone.
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {deleting ? (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <BoxLoader scale={0.5} />
+              <p className="text-sm text-muted-foreground">
+                Permanently deleting…
+              </p>
+            </div>
+          ) : (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmDelete}>
+                Delete
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

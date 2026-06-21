@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import useSWR from "swr"
 
 import { ProviderKeyField } from "@/components/project/provider-key-field"
+import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -509,27 +510,39 @@ export function SettingsTab({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setConfirmDelete(false)
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete {project.name}?</DialogTitle>
-            <DialogDescription>
-              This permanently removes the project, its files, index, and API
-              keys. Apps calling its endpoint will break.
-            </DialogDescription>
+            {!deleting && (
+              <DialogDescription>
+                This permanently removes the project, its files, index, and API
+                keys. Apps calling its endpoint will break.
+              </DialogDescription>
+            )}
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDelete(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? <LoaderOne /> : "Delete forever"}
-            </Button>
-          </DialogFooter>
+          {deleting ? (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <BoxLoader scale={0.5} />
+              <p className="text-sm text-muted-foreground">
+                Permanently deleting…
+              </p>
+            </div>
+          ) : (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handleDelete}>
+                Delete forever
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </div>

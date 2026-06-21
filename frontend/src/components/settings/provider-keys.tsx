@@ -5,6 +5,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import useSWR, { mutate as globalMutate } from "swr"
 
+import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -199,28 +200,36 @@ export function ProviderKeys() {
 
       <Dialog
         open={removeTarget !== null}
-        onOpenChange={(open) => !open && setRemoveTarget(null)}
+        onOpenChange={(open) => {
+          if (!open && !removing) setRemoveTarget(null)
+        }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Remove your {removingProvider?.label} key?</DialogTitle>
-            <DialogDescription>
-              Projects that rely on this account key — and have no key of their
-              own — will stop embedding and answering until you add a new one.
-            </DialogDescription>
+            {!removing && (
+              <DialogDescription>
+                Projects that rely on this account key — and have no key of
+                their own — will stop embedding and answering until you add a
+                new one.
+              </DialogDescription>
+            )}
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoveTarget(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmRemove}
-              disabled={removing}
-            >
-              {removing ? <LoaderOne /> : "Remove key"}
-            </Button>
-          </DialogFooter>
+          {removing ? (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <BoxLoader scale={0.5} />
+              <p className="text-sm text-muted-foreground">Removing key…</p>
+            </div>
+          ) : (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRemoveTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmRemove}>
+                Remove key
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </Card>

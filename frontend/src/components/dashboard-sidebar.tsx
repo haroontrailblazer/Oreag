@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { SquaresLoader } from "@/components/ui/squares-loader"
 import { fetcher } from "@/lib/api"
 import { useProjectNavPending } from "@/lib/nav-pending"
 import type { FileRecord, Project } from "@/lib/types"
@@ -181,9 +182,7 @@ function FileItem({
       <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
       <span className="min-w-0 flex-1 truncate">{display}</span>
       <span className="flex size-4 shrink-0 items-center justify-center">
-        {loading && (
-          <span className="size-3.5 animate-spin rounded-full border-2 border-sidebar-foreground/25 border-t-sidebar-foreground" />
-        )}
+        {loading && <SquaresLoader className="text-sidebar-foreground" />}
       </span>
     </Link>
   )

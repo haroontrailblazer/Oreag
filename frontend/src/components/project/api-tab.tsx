@@ -7,6 +7,7 @@ import useSWR from "swr"
 
 import { CopyField } from "@/components/copy-field"
 import { Badge } from "@/components/ui/badge"
+import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -255,30 +256,37 @@ const { answer, sources } = await res.json();`
 
       <Dialog
         open={revokeTarget !== null}
-        onOpenChange={(open) => !open && setRevokeTarget(null)}
+        onOpenChange={(open) => {
+          if (!open && !revoking) setRevokeTarget(null)
+        }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Revoke this API key?</DialogTitle>
-            <DialogDescription>
-              Key{" "}
-              <span className="font-mono">{revokeTarget?.key_prefix}…</span> will
-              stop working immediately. Any app or agent using it will start
-              getting 401 errors. This cannot be undone.
-            </DialogDescription>
+            {!revoking && (
+              <DialogDescription>
+                Key{" "}
+                <span className="font-mono">{revokeTarget?.key_prefix}…</span>{" "}
+                will stop working immediately. Any app or agent using it will
+                start getting 401 errors. This cannot be undone.
+              </DialogDescription>
+            )}
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRevokeTarget(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmRevoke}
-              disabled={revoking}
-            >
-              {revoking ? <LoaderOne /> : "Revoke key"}
-            </Button>
-          </DialogFooter>
+          {revoking ? (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <BoxLoader scale={0.5} />
+              <p className="text-sm text-muted-foreground">Revoking key…</p>
+            </div>
+          ) : (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRevokeTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmRevoke}>
+                Revoke key
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </div>
