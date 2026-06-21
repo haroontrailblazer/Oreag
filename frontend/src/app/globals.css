@@ -664,6 +664,13 @@
    status; the label text stays white. See the dashboard StatusButton. */
 .status-btn {
   --glow: #22c55e;
+  /* Light mode: a light ring + near-white face with dark text. The dark
+     equivalents live under .dark below. The spinning glow is identical in both
+     themes, so the effect is preserved either way. */
+  --chip-track: #cbd5e1;
+  --chip-from: #ffffff;
+  --chip-to: #eef2f6;
+  --chip-text: #1f2937;
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -671,7 +678,13 @@
   padding: 1.5px;
   isolation: isolate;
   overflow: hidden;
-  background: #181b1b;
+  background: var(--chip-track);
+}
+.dark .status-btn {
+  --chip-track: #181b1b;
+  --chip-from: #404040;
+  --chip-to: #0f1111;
+  --chip-text: #ffffff;
 }
 .status-btn::before {
   content: "";
@@ -695,8 +708,12 @@
   font-size: 11px;
   line-height: 1.35;
   font-weight: 500;
-  color: #fff;
-  background: radial-gradient(circle 30px at 80% -60%, #404040, #0f1111);
+  color: var(--chip-text);
+  background: radial-gradient(
+    circle 30px at 80% -60%,
+    var(--chip-from),
+    var(--chip-to)
+  );
 }
 @keyframes status-btn-spin {
   to {
