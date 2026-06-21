@@ -538,7 +538,7 @@ export function SettingsTab({
           {deleting ? (
             <div className="flex flex-col items-center gap-2 py-4">
               <BoxLoader scale={0.5} onCycle={handleDeleteCycle} />
-              <p className="text-sm text-muted-foreground">
+              <p className="mt-[1.5cm] text-sm text-muted-foreground">
                 Permanently deleting…
               </p>
             </div>

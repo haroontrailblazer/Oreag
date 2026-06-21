@@ -55,7 +55,7 @@ const FILE_STATUS = {
     label: "Indexing",
     icon: Loader2,
     className:
-      "border-transparent bg-sky-500 text-white",
+      "border-transparent bg-transparent text-sky-600 dark:text-sky-400",
   },
   indexed: {
     label: "Indexed",
@@ -91,7 +91,7 @@ function FileStatus({ status }: { status: FileRecord["status"] }) {
       )}
     >
       {status === "processing" ? (
-        <SquaresLoader size={4} />
+        <SquaresLoader size={3} />
       ) : (
         <Icon className="size-3.5" />
       )}
@@ -367,7 +367,7 @@ export function FilesTab({
           {deleting ? (
             <div className="flex flex-col items-center gap-2 py-4">
               <BoxLoader scale={0.5} onCycle={handleDeleteCycle} />
-              <p className="text-sm text-muted-foreground">
+              <p className="mt-[1.5cm] text-sm text-muted-foreground">
                 Permanently deleting…
               </p>
             </div>

@@ -188,11 +188,12 @@ export function AddFilesDialog({
                 {files.map((file) => (
                   <li
                     key={file.name + file.size}
-                    className="flex items-center justify-between rounded border px-3 py-1.5 text-sm"
+                    className="flex items-center gap-2 rounded border px-3 py-1.5 text-sm"
                   >
-                    <span className="truncate">{file.name}</span>
+                    <span className="min-w-0 flex-1 truncate">{file.name}</span>
                     <button
                       type="button"
+                      className="shrink-0"
                       onClick={() => setFiles(files.filter((f) => f !== file))}
                     >
                       <X className="size-4 text-muted-foreground" />

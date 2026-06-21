@@ -177,7 +177,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                   {result.model} / {result.latency_ms} ms
                 </div>
               </div>
-              <p className="whitespace-pre-wrap text-sm leading-6">
+              <p className="break-words whitespace-pre-wrap text-sm leading-6">
                 {result.answer}
               </p>
             </div>
@@ -190,15 +190,18 @@ export function PlaygroundTab({ project }: { project: Project }) {
           <div className="space-y-2">
             <h3 className="text-sm font-medium">References</h3>
             {result.sources.map((source, i) => (
-              <details key={i} className="rounded-lg border px-3 py-2 text-sm">
-                <summary className="cursor-pointer">
+              <details
+                key={i}
+                className="overflow-hidden rounded-lg border px-3 py-2 text-sm"
+              >
+                <summary className="cursor-pointer break-words">
                   [{i + 1}] {source.filename}
                   {source.page_number != null && ` - page ${source.page_number}`}{" "}
                   <span className="text-muted-foreground">
                     ({(source.similarity * 100).toFixed(0)}% match)
                   </span>
                 </summary>
-                <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
+                <p className="mt-2 break-words whitespace-pre-wrap text-muted-foreground">
                   {source.content}
                 </p>
               </details>
