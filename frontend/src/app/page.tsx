@@ -3,8 +3,16 @@ import Image from "next/image"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
+import { createClient } from "@/lib/supabase/server"
 
-export default function Home() {
+export default async function Home() {
+  // Show the landing page to everyone, but if the visitor is already signed in
+  // (session cookie), swap the sign-in CTAs for a dashboard link.
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
   return (
     <main className="grid min-h-dvh bg-background lg:grid-cols-2">
       {/* Left — content */}
@@ -33,16 +41,28 @@ export default function Home() {
             — and ship a grounded endpoint your apps and agents can call.
           </p>
           <div className="flex items-center gap-5">
-            <Button asChild size="lg" className="rounded-full px-6">
-              <Link href="/signup">Get started</Link>
-            </Button>
-            <Link
-              href="/login"
-              className="group inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-foreground/70"
-            >
-              Sign in
-              <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-            </Link>
+            {user ? (
+              // Already signed in — go straight to the dashboard, no sign in.
+              <Button asChild size="lg" className="group rounded-full px-6">
+                <Link href="/dashboard">
+                  Go to dashboard
+                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+              </Button>
+            ) : (
+              <>
+                <Button asChild size="lg" className="rounded-full px-6">
+                  <Link href="/signup">Get started</Link>
+                </Button>
+                <Link
+                  href="/login"
+                  className="group inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-foreground/70"
+                >
+                  Sign in
+                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+              </>
+            )}
           </div>
         </div>
 
