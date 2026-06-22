@@ -61,10 +61,11 @@ export function CodeTabs({ tabs }: { tabs: OsTab[] }) {
         </div>
         <Button
           type="button"
-          variant="ghost"
+          variant="outline"
           size="icon-sm"
           onClick={copy}
           aria-label="Copy"
+          className="my-1 bg-background dark:bg-input dark:hover:bg-input/70"
         >
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
         </Button>

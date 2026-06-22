@@ -30,7 +30,7 @@ export function CopyBlock({ value }: { value: string }) {
         size="icon-sm"
         onClick={copy}
         aria-label="Copy"
-        className="absolute right-2 top-2"
+        className="absolute right-2 top-2 bg-background dark:bg-input dark:hover:bg-input/70"
       >
         {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
       </Button>
