@@ -41,5 +41,33 @@ class Settings(BaseSettings):
     explore_fanout: int = 4                # neighbours expanded per node per hop
     explore_max_nodes: int = 50            # subgraph size cap
 
+    # Agentic query loop (run_query): decompose broad/exam-style questions, gather
+    # a wide context over several rounds, and only ask the human to clarify when
+    # grounding is genuinely too thin — instead of refusing with "no reference".
+    agentic_max_subqueries: int = 5        # sub-queries a broad question is split into
+    agentic_max_clarifying: int = 3        # clarifying questions when escalating
+    agentic_min_similarity: float = 0.2    # a source must clear this to count as grounding
+    agentic_min_strong: int = 1            # this many grounding sources = enough to answer
+    agentic_max_rounds: int = 2            # retrieval rounds before escalating to a human
+
+    # CAG (Cache-Augmented Generation): cache answers so a repeated question isn't
+    # re-retrieved and re-generated, and simultaneous identical asks compute once.
+    # Keyed on project+model+top_k+content+question, so new files/memories
+    # invalidate it. Entries also expire after the TTL.
+    query_cache_enabled: bool = True
+    query_cache_ttl_seconds: int = 300     # 5 minutes
+    query_cache_max_entries: int = 512     # in-memory LRU cap across all projects
+
+    # Optional Redis: when set, the CAG cache AND conversation memory use Redis
+    # (shared across workers, survives restarts); otherwise they fall back to an
+    # in-memory store, so local dev needs no Redis running.
+    redis_url: str = ""
+
+    # Conversation memory (server-side, keyed by conversation_id): lets a follow-up
+    # like "summarize that" be rewritten against the previous turns before retrieval.
+    conversation_ttl_seconds: int = 86400  # 24h — how long a thread is remembered
+    conversation_max_turns: int = 20       # turns retained per conversation
+    conversation_history_turns: int = 6    # recent turns fed to the condense step
+
 
 settings = Settings()

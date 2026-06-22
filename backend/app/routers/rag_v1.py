@@ -44,7 +44,14 @@ def public_query(
     db: Session = Depends(get_db),
 ):
     project = _get_project(db, project_id)
-    return run_query(db, project, body.question, body.top_k, api_key_id=api_key.id)
+    return run_query(
+        db,
+        project,
+        body.question,
+        body.top_k,
+        api_key_id=api_key.id,
+        conversation_id=body.conversation_id,
+    )
 
 
 @router.post("/retrieve", response_model=list[SourceChunk])

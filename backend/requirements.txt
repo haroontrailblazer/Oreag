@@ -15,3 +15,6 @@ langchain-text-splitters>=0.3
 markitdown[all]>=0.1.0
 supabase>=2.7
 python-multipart>=0.0.9
+# Optional: only imported when REDIS_URL is set (shared CAG cache + conversation
+# memory across workers). Without REDIS_URL the app uses an in-memory fallback.
+redis>=5.0

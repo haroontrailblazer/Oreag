@@ -86,6 +86,15 @@ export interface QueryResponse {
   sources: SourceChunk[]
   model: string
   latency_ms: number
+  // Agentic loop transparency (optional — older responses may omit them).
+  depth?: "short" | "long"
+  sub_queries?: string[]
+  // Human-in-the-loop: set when the loop couldn't ground an answer and is
+  // asking you to clarify instead of guessing. `answer` then holds the prompt.
+  needs_clarification?: boolean
+  clarification_questions?: string[]
+  // Echoed back for a conversational query (server-side memory).
+  conversation_id?: string | null
 }
 
 export interface EmbeddingModelEntry {

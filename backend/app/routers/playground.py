@@ -16,4 +16,11 @@ def playground_query(
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
 ):
-    return run_query(db, project, body.question, body.top_k, api_key_id=None)
+    return run_query(
+        db,
+        project,
+        body.question,
+        body.top_k,
+        api_key_id=None,
+        conversation_id=body.conversation_id,
+    )

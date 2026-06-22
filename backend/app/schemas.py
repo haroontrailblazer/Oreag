@@ -135,6 +135,10 @@ class ProviderKeyOut(BaseModel):
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     top_k: int | None = Field(default=None, ge=1, le=20)
+    # Opaque id tying queries into a conversation. When set, the server loads the
+    # prior turns, rewrites this follow-up to be standalone, and remembers the new
+    # turn. Omit for a one-off, stateless query.
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class SourceChunk(BaseModel):
@@ -150,6 +154,15 @@ class QueryResponse(BaseModel):
     sources: list[SourceChunk]
     model: str
     latency_ms: int
+    # Agentic loop transparency (defaults keep older clients working):
+    depth: str = "short"  # "short" or "long" — how the question was classified
+    sub_queries: list[str] = Field(default_factory=list)  # the loop's queries
+    # Human-in-the-loop: set when the loop couldn't ground an answer and is
+    # asking the caller to clarify instead of guessing.
+    needs_clarification: bool = False
+    clarification_questions: list[str] = Field(default_factory=list)
+    # Echoed back when the query was part of a conversation (else null).
+    conversation_id: str | None = None
 
 
 class ProjectInfo(BaseModel):
