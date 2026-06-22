@@ -31,7 +31,7 @@ export default async function Home() {
               Docs
             </Link>
             <a
-              href="https://github.com/your-org/oreag"
+              href="https://github.com/haroontrailblazer/Oreag"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
