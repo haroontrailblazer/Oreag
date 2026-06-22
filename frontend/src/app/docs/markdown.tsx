@@ -38,7 +38,7 @@ export function Markdown({
   children: string
 }) {
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:scroll-mt-24 prose-h2:mt-0 prose-h2:border-b prose-h2:pb-2 prose-h3:mt-8 prose-a:text-sky-600 dark:prose-a:text-sky-400 prose-code:before:content-none prose-code:after:content-none">
+    <div className="prose prose-base max-w-none leading-7 text-foreground/90 dark:prose-invert prose-headings:scroll-mt-24 prose-h2:mt-0 prose-h2:border-b prose-h2:pb-3 prose-h2:text-3xl prose-h2:font-bold prose-h2:tracking-tight prose-h3:mt-8 prose-h3:text-xl prose-p:leading-7 prose-li:leading-7 prose-li:my-1 prose-a:text-sky-600 dark:prose-a:text-sky-400 prose-code:before:content-none prose-code:after:content-none">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
