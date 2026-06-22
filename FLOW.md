@@ -76,6 +76,8 @@ flowchart TB
             Ingest["Ingestion<br/>background tasks"]
             Retrieve["Retrieval"]
             Generate["Generation"]
+            Agentic["Agentic query loop<br/>depth · sub-queries · clarify"]
+            QCache["Query cache (CAG)"]
             Memory["Memory<br/>save · search · recent"]
             MemGraph["Memory Graph"]
         end
@@ -88,6 +90,7 @@ flowchart TB
         Auth["Auth<br/>JWT / JWKS"]
         PG[("Postgres + pgvector<br/>projects · files · chunks · memories<br/>provider_keys · api_keys · query_logs")]
         Store[["Storage<br/>project-files bucket"]]
+        Redis[("Redis · optional<br/>CAG cache + conversation memory<br/>falls back to in-memory")]
     end
 
     subgraph ai["AI PROVIDERS · BYOK / local"]
@@ -112,8 +115,12 @@ flowchart TB
     API     -.->|"validate JWT · JWKS"| Auth
 
     %% --- application fan-out ---
-    API --> Ingest & Retrieve & Generate & Memory & MemGraph
-    PublicAPI --> Retrieve & Generate & Memory & MemGraph
+    API --> Ingest & Retrieve & Generate & Agentic & Memory & MemGraph
+    PublicAPI --> Retrieve & Generate & Agentic & Memory & MemGraph
+
+    %% --- agentic query loop + CAG cache ---
+    Agentic --> QCache & Retrieve & Generate
+    QCache -->|"cache + conversation"| Redis
 
     %% --- BYOK resolution & provider calls ---
     Ingest & Retrieve & Generate & Memory --> Resolver
@@ -139,8 +146,8 @@ flowchart TB
     class Browser,ExtApp tClient
     class Agent,MCP tAgent
     class Next,AuthRt tEdge
-    class API,PublicAPI,Ingest,Retrieve,Generate,Memory,MemGraph,Resolver,Registry tApp
-    class Auth,PG,Store tData
+    class API,PublicAPI,Ingest,Retrieve,Generate,Agentic,QCache,Memory,MemGraph,Resolver,Registry tApp
+    class Auth,PG,Store,Redis tData
     class OpenAI,Gemini,Anthropic,Sarvam,Ollama tAI
 ```
 
@@ -183,47 +190,76 @@ flowchart LR
 
 ## 3. Query / RAG · read path
 
-A caller hits the public endpoint; the API validates the key, retrieval resolves
-an embedding key and runs a vector search, generation grounds an answer, and the
-query is logged.
+A caller hits either endpoint (dashboard `/api/projects/{id}/query` or public
+`/v1/projects/{id}/query` — both run the same `run_query()`). When a
+`conversation_id` is present the follow-up is condensed to a standalone question;
+the CAG cache is checked first; depth is classified; a long question is decomposed
+into sub-queries and each is retrieved + merged; a sufficiency check either grounds
+a depth-aware answer or returns a human clarification (with a retry/broaden loop);
+then the answer is cached, the conversation turn appended, and `query_logs` written.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor C as Caller
-    participant API as FastAPI · /v1
+    participant API as FastAPI · /query
+    participant Q as run_query
+    participant AG as Agentic loop
+    participant CC as Redis · cache + conversation
     participant R as Retrieval
-    participant RV as Key Resolver
-    participant E as Embedder
     participant DB as pgvector
     participant L as LLM
 
-    C->>+API: POST /v1/projects/{id}/query
-    Note over API,DB: validate API key (SHA-256) · check indexed content
-    opt invalid key or no chunks
+    C->>+API: POST /projects/{id}/query
+    Note over API,DB: validate auth (JWT or API key) · check indexed content
+    opt invalid auth or no chunks
         API-->>C: 401 / 409
     end
+    API->>+Q: run_query(question, top_k, conversation_id?)
 
-    API->>+R: retrieve(question, top_k)
-    R->>RV: resolve embedding key
-    alt per-project override
-        RV-->>R: decrypt project key
-    else account-level key
-        RV-->>R: decrypt account key
-    else none and key required
-        RV-->>R: 503 — no key configured
+    opt conversation_id present
+        Q->>CC: load prior turns
+        CC-->>Q: history
+        Q->>L: condense follow-up → standalone question
+        L-->>Q: standalone question
     end
-    R->>E: embed_query(question)
-    E-->>R: query vector
-    R->>DB: nearest-neighbour search (top_k)
-    Note right of DB: ORDER BY embedding <=> qvec
-    DB-->>R: top-k chunks
-    R-->>-API: sources
 
-    API->>+L: generate(context + question)
-    L-->>-API: grounded answer
-    API->>DB: write query_logs
-    API-->>-C: 200 — answer + sources + latency
+    Q->>CC: CAG cache lookup (project · models · top_k · content sig · question)
+    alt cache hit
+        CC-->>Q: cached answer (no retrieval · no LLM)
+    else cache miss
+        Q->>AG: detect_depth(question) → short | long
+        opt long question
+            AG->>L: plan_subqueries() — decompose (literal question kept)
+            L-->>AG: sub-queries
+        end
+        loop retrieve + merge · max 2 rounds
+            AG->>R: retrieve each sub-query (top_k)
+            R->>DB: nearest-neighbour search
+            DB-->>R: top-k chunks
+            R-->>AG: sources
+            Note over AG: merge + de-dup (best similarity) · is_sufficient?
+            alt grounding too thin
+                Note over AG: broaden & retry
+            end
+        end
+        alt sufficient
+            AG->>L: generate depth-aware grounded answer
+            L-->>AG: answer (concise short · structured long)
+        else still insufficient
+            Note over AG: human-in-the-loop — clarifying questions
+            AG-->>Q: needs_clarification · answer = clarification prompt
+        end
+        AG-->>Q: answer + sources + depth + sub_queries
+        Q->>CC: store in CAG cache (TTL)
+    end
+
+    opt conversation_id present
+        Q->>CC: append turn (question + answer)
+    end
+    Q->>DB: write query_logs
+    Q-->>-API: result
+    API-->>-C: 200 — answer · sources · depth · sub_queries · needs_clarification · conversation_id
 ```
 
 ---

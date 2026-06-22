@@ -29,6 +29,9 @@ Anthropic credentials (or runs a local Ollama model), stored encrypted at rest.
 
 - **Any document to an API** — upload, auto-convert to Markdown, chunk, embed, and serve.
 - **Per-project RAG endpoint** — `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
+- **Agentic retrieval loop** — auto depth detection (short vs long), query decomposition for big/exam questions, multi-round retrieve-and-merge with a sufficiency check, and human-in-the-loop clarification instead of a dead "no reference".
+- **CAG answer cache** — repeated identical questions are served with no retrieval and no LLM call, with single-flight de-duplication and optional Redis (via `REDIS_URL`).
+- **Conversation memory** — server-side, keyed by an optional `conversation_id`, so follow-ups like "summarize that" are condensed into standalone questions before retrieval.
 - **Agent memory graph** — a queryable graph of sections and entities derived from indexed content.
 - **Agent memory (MCP)** — coding agents (Claude Code, Codex, Claude) save & recall per-project memory and pull document context through the Oreag MCP server.
 - **BYOK, multi-provider** — OpenAI, Google Gemini, Anthropic, Sarvam AI, Ollama (local), sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
@@ -165,38 +168,55 @@ sequenceDiagram
     autonumber
     actor C as Caller
     participant API as FastAPI · /v1
+    participant CV as Conversation memory
+    participant QC as Query cache (CAG)
+    participant AG as Agentic loop
     participant R as Retrieval
-    participant RV as Key Resolver
-    participant E as Embedder
     participant DB as pgvector
     participant L as LLM
 
-    C->>+API: POST /v1/projects/{id}/query
+    C->>+API: POST /v1/projects/{id}/query (+ optional conversation_id)
     Note over API,DB: validate API key (SHA-256) and check indexed content
     opt invalid key or no chunks
         API-->>C: 401 / 409
     end
 
-    API->>+R: retrieve(question, top_k)
-    R->>RV: resolve embedding key
-    alt per-project override
-        RV-->>R: decrypt project key
-    else account-level key
-        RV-->>R: decrypt account key
-    else none and key required
-        RV-->>R: 503 — no key configured
+    opt conversation_id present
+        API->>CV: load prior turns
+        CV-->>API: history
+        API->>L: condense_question() → standalone question
     end
-    R->>E: embed_query(question)
-    E-->>R: query vector
-    R->>DB: nearest-neighbour search (top_k)
-    Note right of DB: ORDER BY embedding <=> qvec
-    DB-->>R: top-k chunks
-    R-->>-API: sources
 
-    API->>+L: generate(context + question)
-    L-->>-API: grounded answer
+    API->>QC: cache lookup (project · models · top_k · content sig · question)
+    alt cache hit
+        QC-->>API: cached answer (no retrieval, no LLM)
+    else cache miss (single-flight)
+        API->>AG: detect_depth(question) → short | long
+        opt long
+            AG->>L: plan_subqueries() (literal question kept)
+        end
+        loop up to agentic_max_rounds
+            AG->>R: retrieve every sub-query
+            R->>DB: nearest-neighbour search (top_k)
+            DB-->>R: top-k chunks
+            R-->>AG: sources
+            AG->>AG: merge + de-duplicate · is_sufficient()
+        end
+        alt sufficient
+            AG->>L: depth-aware answer (long = structured · short = strict)
+            L-->>AG: grounded answer
+        else still insufficient
+            AG-->>API: needs_clarification + clarification_questions
+        end
+        AG-->>API: answer or clarification
+        API->>QC: store answer in cache
+    end
+
+    opt conversation_id present
+        API->>CV: save turn (question + answer)
+    end
     API->>DB: write query_logs
-    API-->>-C: 200 — answer + sources + latency
+    API-->>-C: 200 — answer + sources + depth + latency
 ```
 
 ### 3. BYOK Key Resolution
@@ -313,6 +333,7 @@ sequenceDiagram
 | **Database** | Supabase Postgres + `pgvector` |
 | **Auth** | Supabase Auth (JWT / JWKS) |
 | **Storage** | Supabase Storage (private bucket) |
+| **Cache / conversation memory** | Redis (optional, via `REDIS_URL`) with in-memory fallback |
 | **AI providers** | OpenAI · Google Gemini · Anthropic · Sarvam AI · Ollama · sentence-transformers |
 | **Ingestion** | PyMuPDF, MarkItDown, LangChain text splitters |
 | **Crypto** | `cryptography` (Fernet) for BYOK keys |
@@ -332,7 +353,7 @@ Oreag/
 │   └── app/
 │       ├── routers/          # projects, files, keys, provider_keys, account, memory, meta, playground, rag_v1, memory_graph
 │       ├── providers/        # registry, resolver, openai/gemini/anthropic/sarvam/ollama/st
-│       ├── services/         # ingestion, retrieval, generation, query, memory, memory_graph, conversion, storage
+│       ├── services/         # ingestion, retrieval, generation, query, agentic, query_cache, memory, memory_graph, conversion, storage
 │       ├── crypto.py         # Fernet encrypt/decrypt for BYOK keys
 │       └── models.py, schemas.py, config.py, db.py, main.py
 ├── mcp-server/               # Oreag MCP server (FastMCP) — agent memory + docs tools

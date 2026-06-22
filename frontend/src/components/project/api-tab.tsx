@@ -89,7 +89,7 @@ export function ApiTab({ project }: { project: Project }) {
   const curlExample = `curl -X POST ${endpoint} \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"question": "What is this document about?"}'`
+  -d '{"question": "What is this document about?", "conversation_id": "thread-1"}'`
 
   const fetchExample = `const res = await fetch("${endpoint}", {
   method: "POST",
@@ -97,9 +97,26 @@ export function ApiTab({ project }: { project: Project }) {
     Authorization: "Bearer YOUR_API_KEY",
     "Content-Type": "application/json",
   },
-  body: JSON.stringify({ question: "What is this document about?" }),
+  // Pass an optional conversation_id to make follow-ups conversational —
+  // the server remembers the thread. Omit it for a stateless one-off query.
+  body: JSON.stringify({
+    question: "What is this document about?",
+    conversation_id: "thread-1",
+  }),
 });
-const { answer, sources } = await res.json();`
+const { answer, sources, depth, sub_queries, needs_clarification } =
+  await res.json();
+
+// Reuse the same conversation_id and the server resolves the follow-up
+// against the prior turns (e.g. "summarize that").
+const followUp = await fetch("${endpoint}", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer YOUR_API_KEY",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ question: "Summarize that", conversation_id: "thread-1" }),
+});`
 
   // Per-project remote MCP connector (the multi-tenant mcp-server/). The host
   // comes from NEXT_PUBLIC_MCP_URL; callers authenticate with an API key as the
@@ -357,7 +374,25 @@ const { answer, sources } = await res.json();`
             <p className="text-xs leading-relaxed text-muted-foreground">
               The main chat-style endpoint — POST a question and get an LLM
               answer grounded in this project&apos;s documents, with the source
-              chunks it used.
+              chunks it used. Pass an optional{" "}
+              <code className="rounded bg-muted px-1">conversation_id</code> in
+              the JSON body to make follow-ups conversational — the server
+              remembers the thread and resolves references against prior turns.
+              The response also includes{" "}
+              <code className="rounded bg-muted px-1">depth</code> (
+              <code className="rounded bg-muted px-1">&quot;short&quot;</code> or{" "}
+              <code className="rounded bg-muted px-1">&quot;long&quot;</code>),
+              the{" "}
+              <code className="rounded bg-muted px-1">sub_queries</code> it
+              expanded the question into, and{" "}
+              <code className="rounded bg-muted px-1">needs_clarification</code>{" "}
+              /{" "}
+              <code className="rounded bg-muted px-1">
+                clarification_questions
+              </code>{" "}
+              when it needs you to clarify (the{" "}
+              <code className="rounded bg-muted px-1">answer</code> then holds
+              the clarification prompt).
             </p>
             <CopyField value={endpoint} />
           </div>
@@ -367,8 +402,14 @@ const { answer, sources } = await res.json();`
             <p className="text-xs leading-relaxed text-muted-foreground">
               A ready-to-run shell request to the query endpoint — swap in your
               API key and question. Returns JSON with{" "}
-              <code className="rounded bg-muted px-1">answer</code> and a{" "}
-              <code className="rounded bg-muted px-1">sources</code> array.
+              <code className="rounded bg-muted px-1">answer</code>, a{" "}
+              <code className="rounded bg-muted px-1">sources</code> array,{" "}
+              <code className="rounded bg-muted px-1">depth</code>,{" "}
+              <code className="rounded bg-muted px-1">sub_queries</code>, and{" "}
+              <code className="rounded bg-muted px-1">needs_clarification</code>.
+              The optional{" "}
+              <code className="rounded bg-muted px-1">conversation_id</code> here
+              ties follow-ups to the same thread.
             </p>
             <CopyBlock value={curlExample} />
           </div>
@@ -378,9 +419,14 @@ const { answer, sources } = await res.json();`
             <p className="text-xs leading-relaxed text-muted-foreground">
               The same call from JavaScript with{" "}
               <code className="rounded bg-muted px-1">fetch</code> — destructure{" "}
-              <code className="rounded bg-muted px-1">answer</code> and{" "}
-              <code className="rounded bg-muted px-1">sources</code> from the
-              response.
+              <code className="rounded bg-muted px-1">answer</code>,{" "}
+              <code className="rounded bg-muted px-1">sources</code>,{" "}
+              <code className="rounded bg-muted px-1">depth</code>,{" "}
+              <code className="rounded bg-muted px-1">sub_queries</code>, and{" "}
+              <code className="rounded bg-muted px-1">needs_clarification</code>{" "}
+              from the response. The follow-up reuses the same{" "}
+              <code className="rounded bg-muted px-1">conversation_id</code> so
+              the server resolves it against the thread.
             </p>
             <CopyBlock value={fetchExample} />
           </div>
