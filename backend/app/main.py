@@ -73,6 +73,8 @@ app.include_router(rag_v1.router)
 app.include_router(memory_graph.public_router)
 
 
-@app.get("/healthz")
+# GET and HEAD: uptime monitors (e.g. UptimeRobot) default to HEAD, and FastAPI
+# does not auto-add HEAD to a GET route — without this a HEAD probe gets a 405.
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 def healthz():
     return {"status": "ok"}
