@@ -46,6 +46,11 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Skip Next internals, static assets, AND the metadata file-convention routes
+    // (opengraph-image, twitter-image, icon, apple-icon, sitemap, robots,
+    // manifest). Those render with NO file extension, so without listing them
+    // here the auth check below redirects unauthenticated social crawlers to
+    // /login — which is why the OG preview image never loaded.
+    "/((?!_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|icon|apple-icon|sitemap\\.xml|robots\\.txt|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 }
