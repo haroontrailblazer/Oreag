@@ -1,6 +1,8 @@
 "use client"
 
 import {
+  Check,
+  Copy,
   DotsThree as MoreHorizontal,
   Key as KeyRound,
   Plus,
@@ -11,8 +13,6 @@ import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
-import { CopyBlock } from "@/components/copy-block"
-import { CopyField } from "@/components/copy-field"
 import { Badge } from "@/components/ui/badge"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
@@ -48,8 +48,117 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getApiBase, api, fetcher } from "@/lib/api"
 import type { ApiKey, ApiKeyCreated, Project } from "@/lib/types"
+
+/* ------------------------------------------------------------------ */
+/* Reference / quickstart primitives                                   */
+/* ------------------------------------------------------------------ */
+
+/** Small copy button with check feedback; `tone` adapts it to dark panels. */
+function CopyButton({
+  value,
+  tone = "light",
+  label = "Copy",
+}: {
+  value: string
+  tone?: "light" | "dark"
+  label?: string
+}) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    await navigator.clipboard.writeText(value)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      onClick={copy}
+      aria-label={label}
+      className={
+        tone === "dark"
+          ? "size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          : "size-7 shrink-0 text-muted-foreground hover:text-foreground"
+      }
+    >
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+    </Button>
+  )
+}
+
+/** Production-style code block: dark canvas in both themes, header bar with a
+ * label + copy action, horizontal scroll for long lines. */
+function CodePanel({ title, code }: { title: string; code: string }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
+      <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/80 py-1.5 pl-4 pr-2">
+        <span className="font-mono text-[11px] font-medium tracking-wide text-zinc-400">
+          {title}
+        </span>
+        <CopyButton value={code} tone="dark" label={`Copy ${title}`} />
+      </div>
+      <pre className="overflow-x-auto p-4 font-mono text-[12.5px] leading-relaxed text-zinc-100">
+        {code}
+      </pre>
+    </div>
+  )
+}
+
+/** Mono value in a quiet field with a copy action (URLs, keys). */
+function CopyRow({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border bg-muted/40 py-2 pl-4 pr-2">
+      <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">
+        {value}
+      </span>
+      <CopyButton value={value} label={label} />
+    </div>
+  )
+}
+
+const METHOD_STYLES: Record<string, string> = {
+  GET: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  POST: "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
+}
+
+/** One row of the endpoint reference: method chip, path, purpose, copy URL. */
+function EndpointRow({
+  method,
+  path,
+  url,
+  description,
+}: {
+  method: "GET" | "POST"
+  path: string
+  url: string
+  description: string
+}) {
+  return (
+    <div className="flex items-center gap-3 border-b px-6 py-3 last:border-b-0">
+      <Badge
+        variant="outline"
+        className={`w-14 justify-center font-mono text-[10.5px] font-semibold ${METHOD_STYLES[method]}`}
+      >
+        {method}
+      </Badge>
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-mono text-[12.5px] text-foreground">{path}</p>
+        <p className="truncate text-xs text-muted-foreground">{description}</p>
+      </div>
+      <CopyButton value={url} label={`Copy ${method} ${path} URL`} />
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* API tab                                                             */
+/* ------------------------------------------------------------------ */
 
 export function ApiTab({ project }: { project: Project }) {
   const { data: keys, mutate } = useSWR<ApiKey[]>(
@@ -78,45 +187,94 @@ export function ApiTab({ project }: { project: Project }) {
   const [apiBase, setApiBase] = useState("")
   useEffect(() => setApiBase(getApiBase()), [])
 
-  const endpoint = `${apiBase}/v1/projects/${project.id}/query`
-  const uploadEndpoint = `${apiBase}/v1/projects/${project.id}/files`
-  const memoryGraphEndpoint = `${apiBase}/v1/projects/${project.id}/memory-graph`
+  const basePath = `/v1/projects/${project.id}`
+  const endpoint = `${apiBase}${basePath}/query`
 
-  const uploadCurl = `curl -X POST ${uploadEndpoint} \\
-  -H "Authorization: Bearer YOUR_UPLOAD_KEY" \\
-  -F "uploads=@document.pdf"`
+  const endpoints = [
+    {
+      method: "POST" as const,
+      path: `${basePath}/query`,
+      description:
+        "Ask a question — grounded answer with cited sources and conversation memory",
+    },
+    {
+      method: "POST" as const,
+      path: `${basePath}/retrieve`,
+      description: "Retrieval only — top-matching chunks, no LLM call",
+    },
+    {
+      method: "POST" as const,
+      path: `${basePath}/files`,
+      description: "Ingest documents (requires a key with upload permission)",
+    },
+    {
+      method: "GET" as const,
+      path: `${basePath}/memory-graph`,
+      description: "Full agent memory graph — nodes and related edges",
+    },
+  ]
 
   const curlExample = `curl -X POST ${endpoint} \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"question": "What is this document about?", "conversation_id": "thread-1"}'`
+  -d '{
+    "question": "What is this document about?",
+    "conversation_id": "chat-001"
+  }'`
 
-  const fetchExample = `const res = await fetch("${endpoint}", {
-  method: "POST",
-  headers: {
-    Authorization: "Bearer YOUR_API_KEY",
-    "Content-Type": "application/json",
-  },
-  // Pass an optional conversation_id to make follow-ups conversational —
-  // the server remembers the thread. Omit it for a stateless one-off query.
-  body: JSON.stringify({
-    question: "What is this document about?",
-    conversation_id: "thread-1",
-  }),
-});
-const { answer, sources, depth, sub_queries, needs_clarification } =
-  await res.json();
+  const jsExample = `const res = await fetch(
+  "${endpoint}",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer YOUR_API_KEY",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      question: "What is this document about?",
+      conversation_id: "chat-001", // same id keeps follow-ups conversational
+    }),
+  }
+);
 
-// Reuse the same conversation_id and the server resolves the follow-up
-// against the prior turns (e.g. "summarize that").
-const followUp = await fetch("${endpoint}", {
-  method: "POST",
-  headers: {
-    Authorization: "Bearer YOUR_API_KEY",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({ question: "Summarize that", conversation_id: "thread-1" }),
-});`
+const { answer, sources, needs_clarification } = await res.json();`
+
+  const pythonExample = `import requests
+
+res = requests.post(
+    "${endpoint}",
+    headers={"Authorization": "Bearer YOUR_API_KEY"},
+    json={
+        "question": "What is this document about?",
+        "conversation_id": "chat-001",
+    },
+)
+data = res.json()
+print(data["answer"])`
+
+  const responseExample = `{
+  "answer": "This document describes... [1]",
+  "sources": [
+    {
+      "filename": "handbook.pdf",
+      "page_number": 12,
+      "chunk_index": 4,
+      "content": "...",
+      "similarity": 0.87
+    }
+  ],
+  "model": "${project.llm_provider}/${project.llm_model}",
+  "latency_ms": 1240,
+  "depth": "short",
+  "sub_queries": [],
+  "needs_clarification": false,
+  "clarification_questions": [],
+  "conversation_id": "chat-001"
+}`
+
+  const uploadExample = `curl -X POST ${apiBase}${basePath}/files \\
+  -H "Authorization: Bearer YOUR_UPLOAD_KEY" \\
+  -F "uploads=@document.pdf"`
 
   // Per-project remote MCP connector (the multi-tenant mcp-server/). The host
   // comes from NEXT_PUBLIC_MCP_URL; callers authenticate with an API key as the
@@ -362,115 +520,112 @@ const followUp = await fetch("${endpoint}", {
 
       <Card>
         <CardHeader>
-          <CardTitle>Your RAG endpoint</CardTitle>
+          <CardTitle>API reference</CardTitle>
           <CardDescription>
-            Call this project over HTTP with an API key — every snippet below is
-            copy-paste ready.
+            Authenticate every request with{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+              Authorization: Bearer oreag_sk_…
+            </code>
           </CardDescription>
         </CardHeader>
-        <CardContent className="divide-y p-0">
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">Query endpoint</h3>
+        <CardContent className="p-0">
+          <div className="flex items-center gap-3 border-b bg-muted/40 px-6 py-2.5">
+            <span className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Base URL
+            </span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">
+              {apiBase || "…"}
+            </span>
+            <CopyButton value={apiBase} label="Copy base URL" />
+          </div>
+          {endpoints.map((ep) => (
+            <EndpointRow
+              key={ep.path}
+              method={ep.method}
+              path={ep.path}
+              url={`${apiBase}${ep.path}`}
+              description={ep.description}
+            />
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Quickstart</CardTitle>
+          <CardDescription>
+            Query this project from your app — swap in an API key and go. Pass
+            the same{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+              conversation_id
+            </code>{" "}
+            to make follow-ups like &ldquo;summarize that&rdquo; conversational.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <Tabs defaultValue="curl">
+            <TabsList>
+              <TabsTrigger value="curl">cURL</TabsTrigger>
+              <TabsTrigger value="js">JavaScript</TabsTrigger>
+              <TabsTrigger value="python">Python</TabsTrigger>
+            </TabsList>
+            <TabsContent value="curl">
+              <CodePanel title="Terminal" code={curlExample} />
+            </TabsContent>
+            <TabsContent value="js">
+              <CodePanel title="query.ts" code={jsExample} />
+            </TabsContent>
+            <TabsContent value="python">
+              <CodePanel title="query.py" code={pythonExample} />
+            </TabsContent>
+          </Tabs>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">Response</span>
+              <Badge
+                variant="outline"
+                className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[10.5px] text-emerald-600 dark:text-emerald-400"
+              >
+                200 OK
+              </Badge>
+            </div>
+            <CodePanel title="application/json" code={responseExample} />
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-sm font-medium">Ingest documents</span>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              The main chat-style endpoint — POST a question and get an LLM
-              answer grounded in this project&apos;s documents, with the source
-              chunks it used. Pass an optional{" "}
-              <code className="rounded bg-muted px-1">conversation_id</code> in
-              the JSON body to make follow-ups conversational — the server
-              remembers the thread and resolves references against prior turns.
-              The response also includes{" "}
-              <code className="rounded bg-muted px-1">depth</code> (
-              <code className="rounded bg-muted px-1">&quot;short&quot;</code> or{" "}
-              <code className="rounded bg-muted px-1">&quot;long&quot;</code>),
-              the{" "}
-              <code className="rounded bg-muted px-1">sub_queries</code> it
-              expanded the question into, and{" "}
-              <code className="rounded bg-muted px-1">needs_clarification</code>{" "}
-              /{" "}
-              <code className="rounded bg-muted px-1">
-                clarification_questions
+              Upload files programmatically with a key that has{" "}
+              <span className="font-medium text-foreground">uploads</span>{" "}
+              enabled — read-only keys get a 403.
+            </p>
+            <CodePanel title="Terminal" code={uploadExample} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>MCP connector</CardTitle>
+          <CardDescription>
+            Give coding agents (Claude Code, Codex) persistent memory and
+            document search on this project — authenticate with an API key as
+            the bearer token.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <CopyRow value={mcpConnectorUrl} label="Copy MCP connector URL" />
+          <CodePanel title="Terminal" code={mcpAddCommand} />
+          {!process.env.NEXT_PUBLIC_MCP_URL && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Set{" "}
+              <code className="rounded bg-muted px-1 font-mono">
+                NEXT_PUBLIC_MCP_URL
               </code>{" "}
-              when it needs you to clarify (the{" "}
-              <code className="rounded bg-muted px-1">answer</code> then holds
-              the clarification prompt).
+              to your deployed MCP server URL to fill in the host above.
             </p>
-            <CopyField value={endpoint} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">curl</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              A ready-to-run shell request to the query endpoint — swap in your
-              API key and question. Returns JSON with{" "}
-              <code className="rounded bg-muted px-1">answer</code>, a{" "}
-              <code className="rounded bg-muted px-1">sources</code> array,{" "}
-              <code className="rounded bg-muted px-1">depth</code>,{" "}
-              <code className="rounded bg-muted px-1">sub_queries</code>, and{" "}
-              <code className="rounded bg-muted px-1">needs_clarification</code>.
-              The optional{" "}
-              <code className="rounded bg-muted px-1">conversation_id</code> here
-              ties follow-ups to the same thread.
-            </p>
-            <CopyBlock value={curlExample} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">JavaScript</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              The same call from JavaScript with{" "}
-              <code className="rounded bg-muted px-1">fetch</code> — destructure{" "}
-              <code className="rounded bg-muted px-1">answer</code>,{" "}
-              <code className="rounded bg-muted px-1">sources</code>,{" "}
-              <code className="rounded bg-muted px-1">depth</code>,{" "}
-              <code className="rounded bg-muted px-1">sub_queries</code>, and{" "}
-              <code className="rounded bg-muted px-1">needs_clarification</code>{" "}
-              from the response. The follow-up reuses the same{" "}
-              <code className="rounded bg-muted px-1">conversation_id</code> so
-              the server resolves it against the thread.
-            </p>
-            <CopyBlock value={fetchExample} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">Upload documents</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Ingest files programmatically with a key that has{" "}
-              <span className="font-medium">Allow uploads</span> enabled
-              (read-only keys can&apos;t):
-            </p>
-            <CopyBlock value={uploadCurl} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">Agent memory graph</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              GET this to fetch the project&apos;s full memory graph — every
-              saved memory node and the related-edges between them — for
-              visualizing or exploring what agents have stored.
-            </p>
-            <CopyField value={memoryGraphEndpoint} />
-          </div>
-
-          <div className="space-y-2.5 px-6 py-5">
-            <h3 className="text-sm font-medium">MCP connector (coding agents)</h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Add this project to Claude or Codex as a remote MCP server
-              (authenticate with an API key as the bearer token). It exposes the
-              project&apos;s memory and document search/answer tools to the
-              agent.
-            </p>
-            <CopyField value={mcpConnectorUrl} />
-            <CopyBlock value={mcpAddCommand} />
-            {!process.env.NEXT_PUBLIC_MCP_URL && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                Set{" "}
-                <code className="rounded bg-background px-1">
-                  NEXT_PUBLIC_MCP_URL
-                </code>{" "}
-                to your deployed MCP server URL to fill in the host above.
-              </p>
-            )}
-          </div>
+          )}
         </CardContent>
       </Card>
 
@@ -484,7 +639,7 @@ const followUp = await fetch("${endpoint}", {
           </DialogHeader>
           {newKey && (
             <div className="space-y-2">
-              <CopyField value={newKey.key} />
+              <CopyRow value={newKey.key} label="Copy API key" />
               <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                 Copy this key now — for security it will{" "}
                 <span className="font-medium">never be shown again</span>.
