@@ -821,6 +821,14 @@
   --toast-accent: #ef4444;
   --toast-glow: rgba(239, 68, 68, 0.16);
 }
+/* Mobile — sonner (≤600px, its own breakpoint) stretches each toast slot to
+   the full viewport width, so the fixed-width card sat flush left. Center it
+   inside the slot; desktop (>600px) keeps the bottom-right layout untouched. */
+@media (max-width: 600px) {
+  .toast-card {
+    margin-inline: auto;
+  }
+}
 /* Dark theme — the dark notification card from the reference design. */
 .dark .toast-card {
   background-color: rgba(28, 31, 38, 0.94);

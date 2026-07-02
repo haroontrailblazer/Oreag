@@ -1,7 +1,9 @@
 """Anthropic Claude provider (chat only — Anthropic has no embedding models)."""
 from .base import ProviderUnavailableError
 
-MAX_TOKENS = 1024
+# Big enough for the agentic loop's long exam-style answers; small enough to
+# stay well under non-streaming SDK timeouts.
+MAX_TOKENS = 8192
 
 
 def _client(api_key: str | None):
@@ -25,10 +27,11 @@ class AnthropicLLM:
         self.client = _client(api_key)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        # No `temperature`: it was removed on Claude Sonnet 5 / Opus 4.8 and
+        # returns a 400 if sent; omitting it works on every model.
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=MAX_TOKENS,
-            temperature=0,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )

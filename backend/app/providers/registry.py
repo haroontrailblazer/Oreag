@@ -20,11 +20,33 @@ CATALOG: dict = {
         ],
     },
     "llm": {
-        "openai": ["gpt-4o-mini", "gpt-4o"],
-        "gemini": ["gemini-2.0-flash", "gemini-1.5-pro"],
-        "anthropic": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"],
+        # Current GPT-5.x lineup (cheap default → flagship); the legacy 4o pair
+        # is still served by OpenAI and stored on existing projects.
+        "openai": ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-4o-mini", "gpt-4o"],
+        # Google retires models fast (gemini-1.5-*, gemini-2.0-flash, and even
+        # 3.x previews all 404 now). Offer live-verified stable models plus the
+        # rolling -latest aliases (always point at the newest served model);
+        # never pin previews.
+        "gemini": [
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-flash-latest",
+            "gemini-pro-latest",
+        ],
+        # Current Sonnet 5 + most-capable Opus 4.8, plus the still-active
+        # previous generation. The dated haiku id stays because existing
+        # projects may have it stored (validate_llm runs on every query).
+        "anthropic": [
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        ],
         "sarvam": ["sarvam-30b", "sarvam-105b"],
-        "ollama": ["llama3.1", "mistral", "qwen2.5"],
+        # Local tags never 404; headline current models. llama3.1 stays (most
+        # pulled, only current-quality 8B Llama); qwen2.5 → successor qwen3.
+        "ollama": ["llama3.3", "llama3.1", "qwen3", "gemma4", "deepseek-r1", "mistral"],
     },
 }
 

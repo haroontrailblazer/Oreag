@@ -39,12 +39,21 @@ class OpenAILLM:
         self.client = _client(api_key)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        # GPT-5.x reasoning models reject `temperature` unless reasoning_effort
+        # is "none" (gpt-5.5 defaults to "medium"). Pin effort to "none" for
+        # fast, RAG-suited answers and skip temperature there; legacy 4o-era
+        # models don't accept reasoning_effort, so they keep temperature=0.
+        params: dict = {}
+        if self.model.startswith("gpt-5"):
+            params["reasoning_effort"] = "none"
+        else:
+            params["temperature"] = 0
         resp = self.client.chat.completions.create(
             model=self.model,
-            temperature=0,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            **params,
         )
         return resp.choices[0].message.content or ""

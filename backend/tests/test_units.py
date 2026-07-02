@@ -149,6 +149,141 @@ class TestRegistry:
         with pytest.raises(ValueError):
             get_embedder("anthropic", "claude-haiku-4-5-20251001")
 
+    def test_gemini_chat_models_are_current(self):
+        # Google retired gemini-1.5-*, gemini-2.0-flash, and even
+        # gemini-3-pro-preview (previews die fast); offering dead ids made every
+        # Gemini chat answer fail while embeddings kept working. Offer verified
+        # stable models plus Google's rolling -latest aliases (never previews).
+        assert CATALOG["llm"]["gemini"] == [
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-flash-latest",
+            "gemini-pro-latest",
+        ]
+        with pytest.raises(ValueError):
+            validate_llm("gemini", "gemini-2.0-flash")
+        with pytest.raises(ValueError):
+            validate_llm("gemini", "gemini-1.5-pro")
+        with pytest.raises(ValueError):
+            validate_llm("gemini", "gemini-3-pro-preview")
+
+    def test_anthropic_chat_models_are_current(self):
+        # Wide range: current Sonnet 5 + most-capable Opus 4.8, plus the still-
+        # active previous generation. The dated haiku id stays for projects that
+        # already store it (removing it would 500 their queries at validate_llm).
+        assert CATALOG["llm"]["anthropic"] == [
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        ]
+
+    def test_openai_chat_models_are_current(self):
+        # Current GPT-5.x lineup (cheap default → flagship) plus the legacy 4o
+        # pair, which OpenAI still serves and existing projects have stored.
+        assert CATALOG["llm"]["openai"] == [
+            "gpt-5.4-mini",
+            "gpt-5.4",
+            "gpt-5.5",
+            "gpt-4o-mini",
+            "gpt-4o",
+        ]
+
+    def test_ollama_chat_models_are_current(self):
+        # Local tags never 404, but the list should headline current models.
+        # llama3.1 stays (top-pulled, only current-quality 8B Llama); qwen2.5 is
+        # dropped for its direct successor qwen3.
+        assert CATALOG["llm"]["ollama"] == [
+            "llama3.3",
+            "llama3.1",
+            "qwen3",
+            "gemma4",
+            "deepseek-r1",
+            "mistral",
+        ]
+
+    def test_sarvam_chat_models_are_current(self):
+        # Verified against docs.sarvam.ai: these are the two current chat ids.
+        assert CATALOG["llm"]["sarvam"] == ["sarvam-30b", "sarvam-105b"]
+
+
+class TestAnthropicProviderCompat:
+    """Claude Sonnet 5 / Opus 4.8 removed `temperature` (400 if sent), and the
+    old max_tokens=1024 truncated the agentic loop's long exam-style answers."""
+
+    def _fake_client(self, calls):
+        class _Messages:
+            def create(self, **kwargs):
+                calls.append(kwargs)
+
+                class _Resp:
+                    content = [type("B", (), {"text": "ok"})()]
+
+                return _Resp()
+
+        class _Client:
+            messages = _Messages()
+
+        return _Client()
+
+    def test_generate_omits_temperature_and_allows_long_answers(self, monkeypatch):
+        from app.providers import anthropic_provider
+
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            anthropic_provider, "_client", lambda key: self._fake_client(calls)
+        )
+        llm = anthropic_provider.AnthropicLLM("claude-sonnet-5", "k")
+        assert llm.generate("sys", "user") == "ok"
+        assert "temperature" not in calls[0]
+        assert calls[0]["max_tokens"] >= 8192
+
+
+class TestOpenAIProviderCompat:
+    """GPT-5.x reasoning models reject `temperature` unless reasoning_effort is
+    'none' (gpt-5.5 defaults to 'medium'); gpt-4o-era models keep temperature=0."""
+
+    def _fake_client(self, calls):
+        class _Completions:
+            def create(self, **kwargs):
+                calls.append(kwargs)
+                msg = type("M", (), {"content": "ok"})()
+                choice = type("C", (), {"message": msg})()
+                return type("R", (), {"choices": [choice]})()
+
+        class _Chat:
+            completions = _Completions()
+
+        class _Client:
+            chat = _Chat()
+
+        return _Client()
+
+    def test_gpt5_family_uses_no_reasoning_and_no_temperature(self, monkeypatch):
+        from app.providers import openai_provider
+
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            openai_provider, "_client", lambda key: self._fake_client(calls)
+        )
+        llm = openai_provider.OpenAILLM("gpt-5.5", "k")
+        assert llm.generate("sys", "user") == "ok"
+        assert calls[0]["reasoning_effort"] == "none"
+        assert "temperature" not in calls[0]
+
+    def test_legacy_models_keep_temperature_zero(self, monkeypatch):
+        from app.providers import openai_provider
+
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            openai_provider, "_client", lambda key: self._fake_client(calls)
+        )
+        llm = openai_provider.OpenAILLM("gpt-4o-mini", "k")
+        assert llm.generate("sys", "user") == "ok"
+        assert calls[0]["temperature"] == 0
+        assert "reasoning_effort" not in calls[0]
+
 
 class TestCrypto:
     def test_encrypt_roundtrip(self):
