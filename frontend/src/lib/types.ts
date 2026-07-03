@@ -97,6 +97,28 @@ export interface QueryResponse {
   conversation_id?: string | null
 }
 
+/** Node in the project "brain" graph (files, sections, chunks, memories). */
+export interface MemoryGraphNode {
+  id: string
+  type: "project" | "file" | "section" | "chunk" | "memory" | (string & {})
+  label: string
+  text?: string | null
+  metadata: Record<string, unknown>
+}
+
+export interface MemoryGraphEdge {
+  source: string
+  target: string
+  type: string
+  metadata?: Record<string, unknown>
+}
+
+export interface MemoryGraphResponse {
+  project: { id: string; name: string; status: string; file_count: number }
+  nodes: MemoryGraphNode[]
+  edges: MemoryGraphEdge[]
+}
+
 export interface EmbeddingModelEntry {
   model: string
   dimensions: number

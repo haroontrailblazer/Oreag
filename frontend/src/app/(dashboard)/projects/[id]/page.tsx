@@ -9,13 +9,21 @@ import { FilesTab } from "@/components/project/files-tab"
 import { MemoryTab } from "@/components/project/memory-tab"
 import { PlaygroundTab } from "@/components/project/playground-tab"
 import { SettingsTab } from "@/components/project/settings-tab"
+import { VisualizeTab } from "@/components/project/visualize-tab"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher } from "@/lib/api"
 import type { Project } from "@/lib/types"
 
-const TAB_VALUES = ["files", "memory", "playground", "api", "settings"]
+const TAB_VALUES = [
+  "files",
+  "memory",
+  "playground",
+  "api",
+  "visualize",
+  "settings",
+]
 
 export default function ProjectPage({
   params,
@@ -128,6 +136,7 @@ export default function ProjectPage({
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="playground">Playground</TabsTrigger>
           <TabsTrigger value="api">API</TabsTrigger>
+          <TabsTrigger value="visualize">Visualize</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="files" className="mt-4" forceMount={mountAll}>
@@ -145,6 +154,10 @@ export default function ProjectPage({
         </TabsContent>
         <TabsContent value="api" className="mt-4" forceMount={mountAll}>
           <ApiTab project={project} />
+        </TabsContent>
+        {/* No forceMount: the 3D canvas (WebGL) only spins up when opened. */}
+        <TabsContent value="visualize" className="mt-4">
+          <VisualizeTab project={project} />
         </TabsContent>
         <TabsContent value="settings" className="mt-4" forceMount={mountAll}>
           <SettingsTab project={project} onChanged={handleChanged} />
