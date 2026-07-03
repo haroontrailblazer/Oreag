@@ -1,6 +1,11 @@
 "use client"
 
-import { Key as KeyRound } from "@phosphor-icons/react/dist/ssr"
+import {
+  ArrowsClockwise,
+  DotsThree as MoreHorizontal,
+  Key as KeyRound,
+  Trash,
+} from "@phosphor-icons/react/dist/ssr"
 import { useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
@@ -22,6 +27,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoaderOne } from "@/components/ui/loader"
@@ -124,7 +136,7 @@ export function ProviderKeys() {
             <TableRow>
               <TableHead className="pl-6">Provider</TableHead>
               <TableHead>Key</TableHead>
-              <TableHead className="w-40 pr-6" />
+              <TableHead className="w-20 pr-6" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -145,21 +157,40 @@ export function ProviderKeys() {
                       <span className="text-muted-foreground">Not set</span>
                     )}
                   </TableCell>
-                  <TableCell className="space-x-2 pr-6 text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openEditor(provider.id)}
-                    >
-                      {existing ? "Replace" : "Add"}
-                    </Button>
-                    {existing && (
+                  <TableCell className="w-20 pr-6 text-right">
+                    {existing ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`${provider.label} key actions`}
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => openEditor(provider.id)}>
+                            <ArrowsClockwise className="size-4" />
+                            Replace
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setRemoveTarget(provider.id)}
+                          >
+                            <Trash className="size-4" />
+                            Remove
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : (
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        onClick={() => setRemoveTarget(provider.id)}
+                        onClick={() => openEditor(provider.id)}
                       >
-                        Remove
+                        Add
                       </Button>
                     )}
                   </TableCell>

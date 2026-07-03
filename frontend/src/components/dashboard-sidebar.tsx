@@ -188,6 +188,29 @@ function FileItem({
   )
 }
 
+/** Relevance of `term` inside a name: prefix beats word-start beats substring.
+ * 0 = no match. Keeps "pytorch_intro" ahead of "intro_to_pytorch" for "py". */
+function nameScore(name: string, term: string): number {
+  if (name.startsWith(term)) return 5
+  const idx = name.indexOf(term)
+  if (idx > 0 && /[^a-z0-9]/.test(name[idx - 1])) return 4 // starts a word
+  if (idx > 0) return 3 // anywhere else in the name
+  return 0
+}
+
+/** Score a filename against the search term. The extension is scored separately
+ * and weakest, so "py" ranks pytorch_*.py files above deep_learning.py (whose
+ * only match is its .py extension). */
+function fileScore(filename: string, term: string): number {
+  const lower = filename.toLowerCase()
+  const dot = lower.lastIndexOf(".")
+  const stem = dot > 0 ? lower.slice(0, dot) : lower
+  const ext = dot > 0 ? lower.slice(dot + 1) : ""
+  const score = nameScore(stem, term)
+  if (score > 0) return score
+  return ext.includes(term) ? 1 : 0
+}
+
 /** The full sidebar panel — rendered in the desktop column and the mobile drawer. */
 function SidebarBody() {
   const pathname = usePathname()
@@ -228,12 +251,21 @@ function SidebarBody() {
   const filteredProjects = useMemo(() => {
     const term = query.trim().toLowerCase()
     if (!term) return projects ?? []
-    return (projects ?? []).filter((project) =>
-      [project.name, project.description ?? "", project.status]
-        .join(" ")
-        .toLowerCase()
-        .includes(term)
-    )
+    // Rank by where the term matches: project name first, then description /
+    // status mentions. Stable sort keeps the original order within a tier.
+    return (projects ?? [])
+      .map((project) => {
+        let score = nameScore(project.name.toLowerCase(), term)
+        if (score === 0) {
+          const rest =
+            `${project.description ?? ""} ${project.status}`.toLowerCase()
+          if (rest.includes(term)) score = 1
+        }
+        return { project, score }
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((entry) => entry.project)
   }, [projects, query])
 
   const filteredFiles = useMemo(() => {
@@ -243,7 +275,13 @@ function SidebarBody() {
     )
     const term = query.trim().toLowerCase()
     if (!term) return list
-    return list.filter((file) => file.filename.toLowerCase().includes(term))
+    // Rank by match quality (name prefix > word start > substring > extension);
+    // recency only breaks ties within the same tier.
+    return list
+      .map((file) => ({ file, score: fileScore(file.filename, term) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((entry) => entry.file)
   }, [files, query])
 
   // Group the project's files by type (PDF, DOCX, …) for collapsible sections.
@@ -347,8 +385,19 @@ function SidebarBody() {
                   No matching files
                 </div>
               )}
-              {fileGroups.map((group) => {
-                const open = searching || openGroups.has(group.type)
+              {searching &&
+                filteredFiles.map((file) => (
+                  <FileItem
+                    key={file.id}
+                    file={file}
+                    projectId={projectId as string}
+                    loading={loadingFileId === file.id}
+                    onSelect={() => setLoadingFileId(file.id)}
+                  />
+                ))}
+              {!searching &&
+                fileGroups.map((group) => {
+                const open = openGroups.has(group.type)
                 return (
                   <div key={group.type}>
                     <button
