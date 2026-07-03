@@ -6,6 +6,7 @@ import {
   FileText,
   X,
 } from "@phosphor-icons/react/dist/ssr"
+import { useTheme } from "next-themes"
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type ForceGraph3DComponent from "react-force-graph-3d"
@@ -29,13 +30,23 @@ import type {
   Project,
 } from "@/lib/types"
 
-/* Colors / sizes per node kind — files are the anchors, chunks the fine grain. */
-const NODE_COLORS: Record<string, string> = {
+/* Colors / sizes per node kind — files are the anchors, chunks the fine grain.
+   Separate palettes per theme so nodes and edges keep contrast on both
+   canvases. The renderer multiplies edge colors by linkOpacity, so timid
+   values disappear — keep them bright/high-alpha. */
+const NODE_COLORS_DARK: Record<string, string> = {
   project: "#f59e0b",
   file: "#38bdf8",
   section: "#a78bfa",
   chunk: "#64748b",
   memory: "#34d399",
+}
+const NODE_COLORS_LIGHT: Record<string, string> = {
+  project: "#d97706",
+  file: "#0284c7",
+  section: "#7c3aed",
+  chunk: "#475569",
+  memory: "#059669",
 }
 const NODE_SIZES: Record<string, number> = {
   project: 10,
@@ -44,13 +55,17 @@ const NODE_SIZES: Record<string, number> = {
   chunk: 1.5,
   memory: 3,
 }
-// Bright, high-alpha colors — the renderer multiplies these by linkOpacity, so
-// timid values disappear against the dark canvas.
-const LINK_COLORS: Record<string, string> = {
+const LINK_COLORS_DARK: Record<string, string> = {
   related: "#38bdf8",
   contains: "rgba(212, 212, 216, 0.75)",
   next: "rgba(161, 161, 170, 0.55)",
   derived_from: "rgba(161, 161, 170, 0.4)",
+}
+const LINK_COLORS_LIGHT: Record<string, string> = {
+  related: "#0284c7",
+  contains: "rgba(63, 63, 70, 0.65)",
+  next: "rgba(82, 82, 91, 0.5)",
+  derived_from: "rgba(82, 82, 91, 0.38)",
 }
 
 const LEGEND = [
@@ -92,6 +107,13 @@ export function VisualizeTab({ project }: { project: Project }) {
   const fgRef = useRef<ForceGraphMethods<MemoryGraphNode> | undefined>(undefined)
   const [selected, setSelected] = useState<MemoryGraphNode | null>(null)
   const [rotating, setRotating] = useState(true)
+
+  // Theme-matched canvas: dark scene in dark mode, paper-light in light mode.
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme !== "light"
+  const nodeColors = isDark ? NODE_COLORS_DARK : NODE_COLORS_LIGHT
+  const linkColors = isDark ? LINK_COLORS_DARK : LINK_COLORS_LIGHT
+  const canvasBg = isDark ? "#09090b" : "#fafafa"
 
   // The library mutates node/link objects (adds coordinates) — feed it clones.
   const graphData = useMemo(
@@ -200,7 +222,7 @@ export function VisualizeTab({ project }: { project: Project }) {
             <span key={entry.type} className="inline-flex items-center gap-1.5">
               <span
                 className="size-2.5 rounded-full"
-                style={{ backgroundColor: NODE_COLORS[entry.type] }}
+                style={{ backgroundColor: nodeColors[entry.type] }}
               />
               {entry.label}
             </span>
@@ -214,18 +236,18 @@ export function VisualizeTab({ project }: { project: Project }) {
 
         <div
           ref={boxRef}
-          className="relative h-[560px] overflow-hidden rounded-xl border border-zinc-800 bg-[#09090b]"
+          className="relative h-[560px] overflow-hidden rounded-xl border bg-zinc-50 dark:border-zinc-800 dark:bg-[#09090b]"
         >
           {(isLoading || !ForceGraph3D) && (
             <div className="absolute inset-0 p-4">
-              <Skeleton className="size-full bg-zinc-900" />
+              <Skeleton className="size-full" />
             </div>
           )}
 
           {isEmpty && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
-              <p className="text-sm text-zinc-300">Nothing to visualize yet</p>
-              <p className="max-w-sm text-xs text-zinc-500">
+              <p className="text-sm text-foreground">Nothing to visualize yet</p>
+              <p className="max-w-sm text-xs text-muted-foreground">
                 Upload and index documents (or save agent memories) and the
                 brain graph will grow here.
               </p>
@@ -238,20 +260,27 @@ export function VisualizeTab({ project }: { project: Project }) {
               width={size.width}
               height={size.height}
               graphData={graphData}
-              backgroundColor="#09090b"
+              backgroundColor={canvasBg}
               showNavInfo={false}
               nodeLabel={(node: GNode) =>
-                `<div style="padding:6px 10px;border-radius:8px;background:rgba(24,24,27,.95);border:1px solid rgba(255,255,255,.12);color:#fafafa;font-size:12px;max-width:280px">
-                   <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(node.label)}</div>
-                   <div style="color:#a1a1aa;text-transform:capitalize">${esc(node.type)}</div>
-                 </div>`
+                isDark
+                  ? `<div style="padding:6px 10px;border-radius:8px;background:rgba(24,24,27,.95);border:1px solid rgba(255,255,255,.12);color:#fafafa;font-size:12px;max-width:280px">
+                       <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(node.label)}</div>
+                       <div style="color:#a1a1aa;text-transform:capitalize">${esc(node.type)}</div>
+                     </div>`
+                  : `<div style="padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.97);border:1px solid rgba(0,0,0,.12);color:#18181b;font-size:12px;max-width:280px;box-shadow:0 4px 12px rgba(0,0,0,.08)">
+                       <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(node.label)}</div>
+                       <div style="color:#52525b;text-transform:capitalize">${esc(node.type)}</div>
+                     </div>`
               }
-              nodeColor={(node: GNode) => NODE_COLORS[node.type] ?? "#e4e4e7"}
+              nodeColor={(node: GNode) =>
+                nodeColors[node.type] ?? (isDark ? "#e4e4e7" : "#3f3f46")
+              }
               nodeVal={(node: GNode) => NODE_SIZES[node.type] ?? 2}
               nodeOpacity={0.92}
               linkColor={(link) =>
-                LINK_COLORS[(link as { type?: string }).type ?? ""] ??
-                "rgba(212, 212, 216, 0.6)"
+                linkColors[(link as { type?: string }).type ?? ""] ??
+                (isDark ? "rgba(212, 212, 216, 0.6)" : "rgba(63, 63, 70, 0.5)")
               }
               linkOpacity={0.9}
               linkWidth={(link) =>
@@ -263,16 +292,13 @@ export function VisualizeTab({ project }: { project: Project }) {
           )}
 
           {selected && (
-            <div className="absolute right-3 top-3 w-72 max-w-[calc(100%-1.5rem)] rounded-xl border border-zinc-700 bg-zinc-900/95 p-4 text-zinc-100 shadow-xl backdrop-blur">
+            <div className="absolute right-3 top-3 w-72 max-w-[calc(100%-1.5rem)] rounded-xl border bg-background/95 p-4 text-foreground shadow-xl backdrop-blur">
               <div className="flex items-start justify-between gap-2">
-                <Badge
-                  variant="outline"
-                  className="border-zinc-600 capitalize text-zinc-200"
-                >
+                <Badge variant="outline" className="capitalize">
                   <span
                     className="size-2 rounded-full"
                     style={{
-                      backgroundColor: NODE_COLORS[selected.type] ?? "#e4e4e7",
+                      backgroundColor: nodeColors[selected.type] ?? "#71717a",
                     }}
                   />
                   {selected.type}
@@ -282,7 +308,7 @@ export function VisualizeTab({ project }: { project: Project }) {
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Close details"
-                  className="size-6 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                  className="size-6 text-muted-foreground hover:text-foreground"
                   onClick={() => setSelected(null)}
                 >
                   <X className="size-3.5" />
@@ -292,11 +318,11 @@ export function VisualizeTab({ project }: { project: Project }) {
                 {selected.label}
               </p>
               {selected.text && (
-                <p className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-zinc-400">
+                <p className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
                   {selected.text}
                 </p>
               )}
-              <dl className="mt-3 space-y-1 text-[11px] text-zinc-400">
+              <dl className="mt-3 space-y-1 text-[11px] text-muted-foreground">
                 {Object.entries(selected.metadata ?? {})
                   .filter(([, v]) => v != null && v !== "" && String(v) !== "[]")
                   .slice(0, 5)
@@ -305,7 +331,7 @@ export function VisualizeTab({ project }: { project: Project }) {
                       <dt className="shrink-0 capitalize">
                         {k.replaceAll("_", " ")}
                       </dt>
-                      <dd className="truncate font-mono text-zinc-300">
+                      <dd className="truncate font-mono text-foreground/80">
                         {Array.isArray(v) ? v.join(", ") : String(v)}
                       </dd>
                     </div>
@@ -316,7 +342,7 @@ export function VisualizeTab({ project }: { project: Project }) {
                   asChild
                   size="sm"
                   variant="outline"
-                  className="mt-3 w-full border-zinc-600 bg-transparent text-zinc-100 hover:bg-zinc-800"
+                  className="mt-3 w-full"
                 >
                   <Link href={fileHref(selected) as string}>
                     <FileText className="size-4" />
