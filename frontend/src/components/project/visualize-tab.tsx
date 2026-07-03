@@ -194,24 +194,29 @@ export function VisualizeTab({ project }: { project: Project }) {
               zoom, click a node to inspect it.
             </CardDescription>
           </div>
+          {/* Compact icon buttons on phones; labels appear from sm: up. */}
           <div className="flex items-center gap-2">
             <Button
               type="button"
               variant="outline"
               size="sm"
+              aria-label={rotating ? "Stop rotation" : "Auto-rotate"}
               onClick={() => setRotating((r) => !r)}
             >
               <ArrowsClockwise className="size-4" />
-              {rotating ? "Stop rotation" : "Auto-rotate"}
+              <span className="hidden sm:inline">
+                {rotating ? "Stop rotation" : "Auto-rotate"}
+              </span>
             </Button>
             <Button
               type="button"
               variant="outline"
               size="sm"
+              aria-label="Reset view"
               onClick={() => fgRef.current?.zoomToFit(600)}
             >
               <CornersOut className="size-4" />
-              Reset view
+              <span className="hidden sm:inline">Reset view</span>
             </Button>
           </div>
         </div>
@@ -236,7 +241,10 @@ export function VisualizeTab({ project }: { project: Project }) {
 
         <div
           ref={boxRef}
-          className="relative h-[560px] overflow-hidden rounded-xl border bg-zinc-50 dark:border-zinc-800 dark:bg-[#09090b]"
+          // Desktop: size the canvas to the space left under the page header,
+          // tabs and card chrome (~22.5rem) so the whole tab fits the viewport
+          // with no page scroll; phones keep a fixed height and scroll as usual.
+          className="relative h-[60dvh] min-h-[340px] overflow-hidden rounded-xl border bg-zinc-50 sm:h-[480px] lg:h-[calc(100dvh-22.5rem)] lg:min-h-[420px] dark:border-zinc-800 dark:bg-[#09090b]"
         >
           {(isLoading || !ForceGraph3D) && (
             <div className="absolute inset-0 p-4">

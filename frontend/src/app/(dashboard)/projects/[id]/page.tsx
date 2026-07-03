@@ -131,7 +131,10 @@ export default function ProjectPage({
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        {/* Six tabs overflow a phone screen — let the bar swipe horizontally
+            (the app-wide CSS already hides the scrollbar) and size-to-fit on
+            desktop as before. */}
+        <TabsList className="w-full justify-start overflow-x-auto md:w-fit">
           <TabsTrigger value="files">Files</TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="playground">Playground</TabsTrigger>
