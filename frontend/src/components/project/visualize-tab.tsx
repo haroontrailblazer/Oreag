@@ -44,11 +44,13 @@ const NODE_SIZES: Record<string, number> = {
   chunk: 1.5,
   memory: 3,
 }
+// Bright, high-alpha colors — the renderer multiplies these by linkOpacity, so
+// timid values disappear against the dark canvas.
 const LINK_COLORS: Record<string, string> = {
-  related: "rgba(56, 189, 248, 0.4)",
-  contains: "rgba(148, 163, 184, 0.22)",
-  next: "rgba(148, 163, 184, 0.12)",
-  derived_from: "rgba(148, 163, 184, 0.08)",
+  related: "#38bdf8",
+  contains: "rgba(212, 212, 216, 0.75)",
+  next: "rgba(161, 161, 170, 0.55)",
+  derived_from: "rgba(161, 161, 170, 0.4)",
 }
 
 const LEGEND = [
@@ -249,10 +251,11 @@ export function VisualizeTab({ project }: { project: Project }) {
               nodeOpacity={0.92}
               linkColor={(link) =>
                 LINK_COLORS[(link as { type?: string }).type ?? ""] ??
-                "rgba(148, 163, 184, 0.15)"
+                "rgba(212, 212, 216, 0.6)"
               }
+              linkOpacity={0.9}
               linkWidth={(link) =>
-                (link as { type?: string }).type === "related" ? 1.2 : 0.4
+                (link as { type?: string }).type === "related" ? 1.8 : 0.7
               }
               onNodeClick={(node) => focusNode(node as GNode)}
               onBackgroundClick={() => setSelected(null)}
