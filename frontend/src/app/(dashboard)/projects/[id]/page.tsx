@@ -10,20 +10,28 @@ import { MemoryTab } from "@/components/project/memory-tab"
 import { PlaygroundTab } from "@/components/project/playground-tab"
 import { SettingsTab } from "@/components/project/settings-tab"
 import { VisualizeTab } from "@/components/project/visualize-tab"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher } from "@/lib/api"
 import type { Project } from "@/lib/types"
 
-const TAB_VALUES = [
-  "files",
-  "memory",
-  "playground",
-  "api",
-  "visualize",
-  "settings",
+const TABS = [
+  { value: "files", label: "Files" },
+  { value: "memory", label: "Memory" },
+  { value: "playground", label: "Playground" },
+  { value: "api", label: "API" },
+  { value: "visualize", label: "Visualize" },
+  { value: "settings", label: "Settings" },
 ]
+const TAB_VALUES = TABS.map((t) => t.value)
 
 export default function ProjectPage({
   params,
@@ -117,8 +125,12 @@ export default function ProjectPage({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
+    // Desktop: the page is a fixed frame (viewport minus the layout's 2rem
+    // paddings) — title, meta and the tab bar never move; each tab's content
+    // scrolls in its own container below them, so nothing slides behind the
+    // header. Phones keep natural page flow.
+    <div className="space-y-6 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:gap-6">
+      <div className="flex flex-wrap items-center gap-3 md:shrink-0">
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         {project.status === "indexing" && (
           <SquaresLoader size={4} className="text-muted-foreground" />
@@ -130,39 +142,55 @@ export default function ProjectPage({
         </span>
       </div>
 
-      <Tabs value={tab} onValueChange={setTab}>
-        {/* Six tabs overflow a phone screen — let the bar swipe horizontally
-            (the app-wide CSS already hides the scrollbar) and size-to-fit on
-            desktop as before. */}
-        <TabsList className="w-full justify-start overflow-x-auto md:w-fit">
-          <TabsTrigger value="files">Files</TabsTrigger>
-          <TabsTrigger value="memory">Memory</TabsTrigger>
-          <TabsTrigger value="playground">Playground</TabsTrigger>
-          <TabsTrigger value="api">API</TabsTrigger>
-          <TabsTrigger value="visualize">Visualize</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
+      <Tabs
+        value={tab}
+        onValueChange={setTab}
+        className="md:min-h-0 md:flex-1"
+      >
+        {/* Phones: six tabs don't fit, so the section switcher becomes a
+            full-width dropdown. Desktop keeps the classic tab pills. */}
+        <div className="md:hidden">
+          <Select value={tab} onValueChange={setTab}>
+            <SelectTrigger className="w-full" aria-label="Project section">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TABS.map((t) => (
+                <SelectItem key={t.value} value={t.value}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <TabsList className="hidden md:inline-flex md:shrink-0">
+          {TABS.map((t) => (
+            <TabsTrigger key={t.value} value={t.value}>
+              {t.label}
+            </TabsTrigger>
+          ))}
         </TabsList>
-        <TabsContent value="files" className="mt-4" forceMount={mountAll}>
+        <TabsContent value="files" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
           <FilesTab
             project={project}
             onChanged={handleChanged}
             selectedFileId={selectedFileId}
           />
         </TabsContent>
-        <TabsContent value="memory" className="mt-4" forceMount={mountAll}>
+        <TabsContent value="memory" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
           <MemoryTab project={project} />
         </TabsContent>
-        <TabsContent value="playground" className="mt-4" forceMount={mountAll}>
+        <TabsContent value="playground" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
           <PlaygroundTab project={project} />
         </TabsContent>
-        <TabsContent value="api" className="mt-4" forceMount={mountAll}>
+        <TabsContent value="api" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
           <ApiTab project={project} />
         </TabsContent>
         {/* No forceMount: the 3D canvas (WebGL) only spins up when opened. */}
-        <TabsContent value="visualize" className="mt-4">
+        <TabsContent value="visualize" className="mt-4 md:min-h-0 md:overflow-y-auto">
           <VisualizeTab project={project} />
         </TabsContent>
-        <TabsContent value="settings" className="mt-4" forceMount={mountAll}>
+        <TabsContent value="settings" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
           <SettingsTab project={project} onChanged={handleChanged} />
         </TabsContent>
       </Tabs>

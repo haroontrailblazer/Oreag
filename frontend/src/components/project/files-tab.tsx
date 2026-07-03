@@ -266,6 +266,10 @@ export function FilesTab({
           </p>
         </div>
       ) : (
+        // Desktop: cap the list to the viewport so the page itself never
+        // scrolls — only the rows do, under the pinned "Files" header bar
+        // above. Phones keep natural page flow.
+        <div className="md:max-h-[calc(100dvh-16.5rem)] md:min-h-48 md:overflow-y-auto">
         <ul className="divide-y">
           {(files ?? []).map((file) => {
             const meta = [
@@ -343,6 +347,7 @@ export function FilesTab({
             )
           })}
         </ul>
+        </div>
       )}
 
       <Dialog
