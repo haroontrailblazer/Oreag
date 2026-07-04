@@ -125,12 +125,13 @@ export default function ProjectPage({
   }
 
   return (
-    // Desktop: the page is a fixed frame (viewport minus the layout's 2rem
-    // paddings) — title, meta and the tab bar never move; each tab's content
-    // scrolls in its own container below them, so nothing slides behind the
-    // header. Phones keep natural page flow.
-    <div className="space-y-6 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:gap-6">
-      <div className="flex flex-wrap items-center gap-3 md:shrink-0">
+    // The page is a fixed frame on every screen (viewport minus the chrome
+    // above/around it: mobile top bar + wrapper padding, or the desktop
+    // layout's 2rem paddings) — title, meta and the tab switcher never move;
+    // each tab's content scrolls in its own container below them, so nothing
+    // slides behind the header.
+    <div className="flex h-[calc(100dvh-6.25rem)] flex-col gap-4 md:h-[calc(100dvh-4rem)] md:gap-6">
+      <div className="flex flex-wrap items-center gap-3 shrink-0">
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         {project.status === "indexing" && (
           <SquaresLoader size={4} className="text-muted-foreground" />
@@ -142,14 +143,10 @@ export default function ProjectPage({
         </span>
       </div>
 
-      <Tabs
-        value={tab}
-        onValueChange={setTab}
-        className="md:min-h-0 md:flex-1"
-      >
+      <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1">
         {/* Phones: six tabs don't fit, so the section switcher becomes a
             full-width dropdown. Desktop keeps the classic tab pills. */}
-        <div className="md:hidden">
+        <div className="shrink-0 md:hidden">
           <Select value={tab} onValueChange={setTab}>
             <SelectTrigger className="w-full" aria-label="Project section">
               <SelectValue />
@@ -170,27 +167,27 @@ export default function ProjectPage({
             </TabsTrigger>
           ))}
         </TabsList>
-        <TabsContent value="files" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="files" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
           <FilesTab
             project={project}
             onChanged={handleChanged}
             selectedFileId={selectedFileId}
           />
         </TabsContent>
-        <TabsContent value="memory" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="memory" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
           <MemoryTab project={project} />
         </TabsContent>
-        <TabsContent value="playground" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="playground" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
           <PlaygroundTab project={project} />
         </TabsContent>
-        <TabsContent value="api" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="api" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
           <ApiTab project={project} />
         </TabsContent>
         {/* No forceMount: the 3D canvas (WebGL) only spins up when opened. */}
-        <TabsContent value="visualize" className="mt-4 md:min-h-0 md:overflow-y-auto">
+        <TabsContent value="visualize" className="mt-4 min-h-0 overflow-y-auto">
           <VisualizeTab project={project} />
         </TabsContent>
-        <TabsContent value="settings" className="mt-4 md:min-h-0 md:overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="settings" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
           <SettingsTab project={project} onChanged={handleChanged} />
         </TabsContent>
       </Tabs>
