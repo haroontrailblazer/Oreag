@@ -77,6 +77,81 @@ const FILE_STATUS = {
   }
 >
 
+/* Skeleton text lines drawn inside each mini document card. */
+const CARD_LINES = [
+  { x2: 96, accent: false },
+  { x2: 99, accent: true },
+  { x2: 94, accent: false },
+  { x2: 90, accent: false },
+]
+
+/** Loader matching the Lottielab "Data | Bundling" reference: document cards
+ * slide in and stack into a deck while uploads are chunked and embedded.
+ * Pure SVG/SMIL in the app palette — no animation runtime. */
+function BundlingLoader() {
+  return (
+    <svg viewBox="0 0 120 48" className="h-10 w-24 shrink-0" aria-hidden="true">
+      {/* The deck: cards already bundled, peeking out behind. */}
+      {[6, 3].map((offset, i) => (
+        <rect
+          key={i}
+          x={78 + offset}
+          y="7"
+          width="26"
+          height="34"
+          rx="4"
+          strokeWidth="1.2"
+          className="fill-background stroke-border"
+          opacity={0.55 + i * 0.25}
+        />
+      ))}
+      {/* The incoming document: slides from the left onto the stack. */}
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="translate"
+          values="-62 0; 0 0; 0 0"
+          keyTimes="0; 0.55; 1"
+          dur="1.8s"
+          repeatCount="indefinite"
+        />
+        <animate
+          attributeName="opacity"
+          values="0; 1; 1; 1"
+          keyTimes="0; 0.25; 0.9; 1"
+          dur="1.8s"
+          repeatCount="indefinite"
+        />
+        <rect
+          x="78"
+          y="7"
+          width="26"
+          height="34"
+          rx="4"
+          strokeWidth="1.4"
+          className="fill-background stroke-border"
+        />
+        {CARD_LINES.map((line, i) => (
+          <line
+            key={i}
+            x1="83"
+            y1={15 + i * 6}
+            x2={line.x2}
+            y2={15 + i * 6}
+            strokeWidth="2"
+            strokeLinecap="round"
+            className={
+              line.accent
+                ? "stroke-sky-500 dark:stroke-sky-400"
+                : "stroke-muted-foreground/35"
+            }
+          />
+        ))}
+      </g>
+    </svg>
+  )
+}
+
 function FileStatus({ status }: { status: FileRecord["status"] }) {
   const config = FILE_STATUS[status]
   const Icon = config.icon
@@ -213,6 +288,12 @@ export function FilesTab({
 
   const fileCount = files?.length ?? 0
   const totalChunks = files?.reduce((sum, file) => sum + file.chunk_count, 0) ?? 0
+  // Files still being chunked/embedded — drives the bundling banner that shows
+  // from the moment the upload dialog closes until indexing settles.
+  const inFlight =
+    files?.filter(
+      (file) => file.status === "pending" || file.status === "processing"
+    ).length ?? 0
 
   return (
     <Card className="gap-0 overflow-hidden p-0">
@@ -254,6 +335,21 @@ export function FilesTab({
           </DropdownMenu>
         </div>
       </div>
+
+      {inFlight > 0 && (
+        <div className="flex items-center gap-4 border-b bg-muted/30 px-6 py-2.5">
+          <BundlingLoader />
+          <div className="min-w-0">
+            <p className="font-mono text-xs font-medium text-sky-600 dark:text-sky-400">
+              Bundling...
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {fileCount - inFlight} of {fileCount} processed — chunking &
+              embedding into the knowledge base
+            </p>
+          </div>
+        </div>
+      )}
 
       {fileCount === 0 ? (
         <div className="px-6 py-16 text-center">

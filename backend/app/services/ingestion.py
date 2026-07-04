@@ -51,6 +51,40 @@ def recompute_project_status(db: Session, project: Project) -> None:
         project.status = "ready"
 
 
+def _file_still_exists(db: Session, file_id: uuid.UUID) -> bool:
+    """Fresh SELECT (bypasses the identity map): the user may delete the file
+    from another session while ingestion is mid-flight."""
+    return db.scalar(select(File.id).where(File.id == file_id)) is not None
+
+
+def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
+    """Best-effort failure marking that NEVER raises.
+
+    The file may have been deleted mid-ingestion; after a rollback, db.get()
+    would happily return the stale identity-map object and the follow-up
+    commit would explode inside the error handler. An exception escaping this
+    background task aborts every queued ingestion behind it — the "delete a
+    waiting file and the backend dies" bug.
+    """
+    try:
+        db.rollback()
+        db.expunge_all()  # drop stale identity-map entries so get() hits the DB
+        file = db.get(File, file_id)
+        if file is None:
+            logger.info("File %s was deleted during ingestion — skipping", file_id)
+            return
+        file.status = "failed"
+        file.error = message[:500]
+        file.conversion_error = message[:500]
+        project = db.get(Project, file.project_id)
+        if project is not None:
+            recompute_project_status(db, project)
+        db.commit()
+    except Exception:
+        logger.exception("Could not mark file %s as failed", file_id)
+        db.rollback()
+
+
 def ingest_file(file_id: uuid.UUID) -> None:
     """Background task: parse -> chunk -> embed -> store, with status updates.
 
@@ -69,6 +103,13 @@ def ingest_file(file_id: uuid.UUID) -> None:
 
         source_bytes = storage.download(file.storage_path)
         converted = convert_to_markdown(source_bytes, file.filename)
+
+        # The user may have deleted the file while we were converting — bail
+        # before uploading markdown / paying for embeddings on a ghost.
+        if not _file_still_exists(db, file.id):
+            logger.info("File %s deleted during conversion — aborting", file_id)
+            return
+
         file.page_count = converted.page_count
         file.conversion_error = None
 
@@ -131,16 +172,7 @@ def ingest_file(file_id: uuid.UUID) -> None:
         logger.info("Indexed file %s (%d chunks)", file.filename, len(chunks))
     except Exception as exc:
         logger.exception("Ingestion failed for file %s", file_id)
-        db.rollback()
-        file = db.get(File, file_id)
-        if file is not None:
-            file.status = "failed"
-            file.error = str(exc)[:500]
-            file.conversion_error = str(exc)[:500]
-            project = db.get(Project, file.project_id)
-            if project is not None:
-                recompute_project_status(db, project)
-            db.commit()
+        mark_file_failed(db, file_id, str(exc))
     finally:
         db.close()
 

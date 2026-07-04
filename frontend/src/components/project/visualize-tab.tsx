@@ -79,87 +79,60 @@ type GNode = NodeObject<MemoryGraphNode>
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
-/* Paths for the loading animation: four curves converging on the hub. */
-const LOADER_PATHS = [
-  "M 14,18 C 64,18 72,60 100,60",
-  "M 14,102 C 64,102 72,60 100,60",
-  "M 186,18 C 136,18 128,60 100,60",
-  "M 186,102 C 136,102 128,60 100,60",
-]
+/* Loader matching the Lottielab "Data | Encrypting" reference: rows of
+   monospace codes with a single highlighted row scrambling its characters,
+   and a mono pill label — recolored from orange to the app's sky accent. */
+const SCRAMBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+const SCRAMBLE_ROWS = 5
 
-/** Graph-assembly loader (data-ingesting style): themed dots stream along
- * converging paths into a pulsing hub while the scene loads. Pure SVG/SMIL —
- * no animation runtime needed. */
-function GraphLoader({
-  isDark,
-  colors,
-}: {
-  isDark: boolean
-  colors: Record<string, string>
-}) {
-  const dotColors = [colors.file, colors.memory, colors.section, colors.project]
-  const line = isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)"
+function scrambleCode(): string {
+  const pick = (n: number) =>
+    Array.from(
+      { length: n },
+      () => SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)]
+    ).join("")
+  return `${pick(4)}-${pick(2)}-${pick(4)}`
+}
+
+function GraphLoader() {
+  const [rows, setRows] = useState<string[]>(() =>
+    Array.from({ length: SCRAMBLE_ROWS }, scrambleCode)
+  )
+  const [tick, setTick] = useState(0)
+  const active = Math.floor(tick / 5) % SCRAMBLE_ROWS
+
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 90)
+    return () => clearInterval(id)
+  }, [])
+
+  // The highlighted row keeps scrambling while the others hold still.
+  useEffect(() => {
+    setRows((prev) => prev.map((row, i) => (i === active ? scrambleCode() : row)))
+  }, [tick, active])
+
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-      <svg viewBox="0 0 200 120" className="w-56 max-w-[70%]" aria-hidden="true">
-        {LOADER_PATHS.map((d, i) => (
-          <path key={i} d={d} fill="none" stroke={line} strokeWidth="1.5" />
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-8">
+      <div
+        className="flex flex-col gap-1.5 text-center font-mono text-lg tracking-[0.18em] sm:text-xl"
+        aria-hidden="true"
+      >
+        {rows.map((row, i) => (
+          <span
+            key={i}
+            className={
+              i === active
+                ? "text-sky-600 dark:text-sky-400"
+                : "text-muted-foreground/50"
+            }
+          >
+            {row}
+          </span>
         ))}
-        {LOADER_PATHS.map((d, i) => (
-          <circle key={i} r="3.2" fill={dotColors[i % dotColors.length]}>
-            <animateMotion
-              dur="1.8s"
-              repeatCount="indefinite"
-              begin={`${-i * 0.45}s`}
-              path={d}
-            />
-            <animate
-              attributeName="opacity"
-              values="0;1;1;0"
-              keyTimes="0;0.15;0.85;1"
-              dur="1.8s"
-              repeatCount="indefinite"
-              begin={`${-i * 0.45}s`}
-            />
-          </circle>
-        ))}
-        {/* Hub: pulsing core + expanding ring, in the graph's file color. */}
-        <circle cx="100" cy="60" r="7" fill={colors.file}>
-          <animate
-            attributeName="r"
-            values="6.5;8;6.5"
-            dur="1.8s"
-            repeatCount="indefinite"
-          />
-        </circle>
-        <circle
-          cx="100"
-          cy="60"
-          r="12"
-          fill="none"
-          stroke={colors.file}
-          strokeWidth="1.5"
-        >
-          <animate
-            attributeName="r"
-            values="10;18"
-            dur="1.8s"
-            repeatCount="indefinite"
-          />
-          <animate
-            attributeName="opacity"
-            values="0.6;0"
-            dur="1.8s"
-            repeatCount="indefinite"
-          />
-        </circle>
-      </svg>
-      <p className="text-sm font-medium text-muted-foreground">
-        Visualizing
-        <span className="animate-pulse">.</span>
-        <span className="animate-pulse [animation-delay:200ms]">.</span>
-        <span className="animate-pulse [animation-delay:400ms]">.</span>
-      </p>
+      </div>
+      <span className="rounded-full border bg-background px-4 py-1.5 font-mono text-xs text-sky-600 dark:text-sky-400">
+        Visualizing...
+      </span>
     </div>
   )
 }
@@ -330,9 +303,7 @@ export function VisualizeTab({ project }: { project: Project }) {
           // with no page scroll; phones keep a fixed height and scroll as usual.
           className="relative h-[60dvh] min-h-[340px] overflow-hidden rounded-xl border bg-zinc-50 sm:h-[480px] lg:h-[calc(100dvh-22.5rem)] lg:min-h-[420px] dark:border-zinc-800 dark:bg-[#09090b]"
         >
-          {(isLoading || !ForceGraph3D) && (
-            <GraphLoader isDark={isDark} colors={nodeColors} />
-          )}
+          {(isLoading || !ForceGraph3D) && <GraphLoader />}
 
           {isEmpty && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">

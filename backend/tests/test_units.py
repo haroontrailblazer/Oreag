@@ -448,6 +448,66 @@ class TestParsePdf:
             parse_pdf(b"this is not a pdf")
 
 
+class TestIngestionDeleteRace:
+    """Deleting a file while it's queued/indexing must not blow up the
+    background task — an exception escaping one task aborts every queued
+    ingestion behind it (the 'delete during indexing crashes the backend' bug)."""
+
+    class _FakeDB:
+        def __init__(self, file_obj=None, commit_error=None):
+            self._file = file_obj
+            self._commit_error = commit_error
+            self.commits = 0
+            self.rollbacks = 0
+            self.expunged = False
+
+        def rollback(self):
+            self.rollbacks += 1
+
+        def expunge_all(self):
+            self.expunged = True
+
+        def get(self, model, key):
+            from app.models import File as FileModel
+
+            if model is FileModel:
+                return self._file
+            return None
+
+        def commit(self):
+            if self._commit_error:
+                raise self._commit_error
+            self.commits += 1
+
+    def test_skips_quietly_when_file_was_deleted(self):
+        from app.services.ingestion import mark_file_failed
+
+        db = self._FakeDB(file_obj=None)
+        mark_file_failed(db, uuid.uuid4(), "boom")  # must not raise
+        assert db.expunged  # bypassed the stale identity map
+        assert db.commits == 0  # nothing to mark
+
+    def test_swallows_errors_from_the_marking_commit(self):
+        from app.models import File as FileModel
+        from app.services.ingestion import mark_file_failed
+
+        file_obj = FileModel(project_id=uuid.uuid4())
+        db = self._FakeDB(file_obj=file_obj, commit_error=RuntimeError("row gone"))
+        mark_file_failed(db, uuid.uuid4(), "boom")  # must not raise
+        assert db.rollbacks >= 2  # initial rollback + cleanup after failed commit
+
+    def test_marks_failed_when_file_still_exists(self):
+        from app.models import File as FileModel
+        from app.services.ingestion import mark_file_failed
+
+        file_obj = FileModel(project_id=uuid.uuid4())
+        db = self._FakeDB(file_obj=file_obj)
+        mark_file_failed(db, uuid.uuid4(), "x" * 900)
+        assert file_obj.status == "failed"
+        assert len(file_obj.error) <= 500
+        assert db.commits == 1
+
+
 class TestApiSurface:
     def test_healthz(self):
         client = TestClient(app)
