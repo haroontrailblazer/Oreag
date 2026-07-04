@@ -79,57 +79,106 @@ type GNode = NodeObject<MemoryGraphNode>
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
-/* Loader matching the Lottielab "Data | Encrypting" reference: rows of
-   monospace codes with a single highlighted row scrambling its characters,
-   and a mono pill label — recolored from orange to the app's sky accent. */
-const SCRAMBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-const SCRAMBLE_ROWS = 5
-
-function scrambleCode(): string {
-  const pick = (n: number) =>
-    Array.from(
-      { length: n },
-      () => SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)]
-    ).join("")
-  return `${pick(4)}-${pick(2)}-${pick(4)}`
-}
+/* Loader matching the Lottielab "Data | Ingesting" reference: a document card
+   streaming dashed rows into a database cylinder whose rims light up in
+   sequence — recolored from orange to the app's sky accent. */
+const CARD_LINES = [
+  { y: 34, x2: 66, accent: false },
+  { y: 42, x2: 74, accent: true },
+  { y: 48, x2: 70, accent: true },
+  { y: 58, x2: 74, accent: false },
+  { y: 64, x2: 68, accent: false },
+  { y: 70, x2: 60, accent: false },
+  { y: 80, x2: 56, accent: false },
+]
+/* The cylinder's three rims (top ellipse + two body arcs), lit in sequence. */
+const DB_RIMS = [
+  "M 151,38 A 24 9 0 1 0 199,38 A 24 9 0 1 0 151,38",
+  "M 151,61 A 24 9 0 0 0 199,61",
+  "M 151,84 A 24 9 0 0 0 199,84",
+]
 
 function GraphLoader() {
-  const [rows, setRows] = useState<string[]>(() =>
-    Array.from({ length: SCRAMBLE_ROWS }, scrambleCode)
-  )
-  const [tick, setTick] = useState(0)
-  const active = Math.floor(tick / 5) % SCRAMBLE_ROWS
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 90)
-    return () => clearInterval(id)
-  }, [])
-
-  // The highlighted row keeps scrambling while the others hold still.
-  useEffect(() => {
-    setRows((prev) => prev.map((row, i) => (i === active ? scrambleCode() : row)))
-  }, [tick, active])
-
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-8">
-      <div
-        className="flex flex-col gap-1.5 text-center font-mono text-lg tracking-[0.18em] sm:text-xl"
-        aria-hidden="true"
-      >
-        {rows.map((row, i) => (
-          <span
+      <svg viewBox="0 0 230 120" className="w-64 max-w-[75%]" aria-hidden="true">
+        {/* Source document */}
+        <rect
+          x="30"
+          y="22"
+          width="56"
+          height="76"
+          rx="6"
+          strokeWidth="1.5"
+          className="fill-background stroke-border"
+        />
+        {CARD_LINES.map((line, i) => (
+          <line
             key={i}
+            x1="38"
+            y1={line.y}
+            x2={line.x2}
+            y2={line.y}
+            strokeWidth="2.5"
+            strokeLinecap="round"
             className={
-              i === active
-                ? "text-sky-600 dark:text-sky-400"
-                : "text-muted-foreground/50"
+              line.accent
+                ? "stroke-sky-500 dark:stroke-sky-400"
+                : "stroke-muted-foreground/30"
             }
-          >
-            {row}
-          </span>
+          />
         ))}
-      </div>
+        {/* Data stream: dashed rows flowing toward the database */}
+        {[52, 60, 68].map((y, i) => (
+          <line
+            key={y}
+            x1="94"
+            y1={y}
+            x2="142"
+            y2={y}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray="5 7"
+            className="stroke-sky-500/80 dark:stroke-sky-400/80"
+          >
+            <animate
+              attributeName="stroke-dashoffset"
+              values="0;-12"
+              dur="0.7s"
+              begin={`${-i * 0.23}s`}
+              repeatCount="indefinite"
+            />
+          </line>
+        ))}
+        {/* Database cylinder */}
+        <path
+          d="M 151,38 L 151,84 A 24 9 0 0 0 199,84 L 199,38"
+          fill="none"
+          strokeWidth="1.5"
+          className="stroke-border"
+        />
+        {DB_RIMS.map((d, i) => (
+          <g key={i}>
+            <path d={d} fill="none" strokeWidth="1.5" className="stroke-border" />
+            {/* Accent sweep: each rim lights up in turn */}
+            <path
+              d={d}
+              fill="none"
+              strokeWidth="1.8"
+              className="stroke-sky-500 dark:stroke-sky-400"
+            >
+              <animate
+                attributeName="opacity"
+                values="0;1;1;0"
+                keyTimes="0;0.25;0.5;0.75"
+                dur="2.1s"
+                begin={`${i * 0.7}s`}
+                repeatCount="indefinite"
+              />
+            </path>
+          </g>
+        ))}
+      </svg>
       <span className="rounded-full border bg-background px-4 py-1.5 font-mono text-xs text-sky-600 dark:text-sky-400">
         Visualizing...
       </span>

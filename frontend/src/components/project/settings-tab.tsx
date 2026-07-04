@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { EncryptingLoader } from "@/components/ui/encrypting-loader"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoaderOne } from "@/components/ui/loader"
@@ -58,6 +59,9 @@ export function SettingsTab({
   const [llmKeyInput, setLlmKeyInput] = useState("")
   const [llmEditingKey, setLlmEditingKey] = useState(false)
   const [savingLlm, setSavingLlm] = useState(false)
+  // True only while a NEW key is being encrypted + stored (drives the
+  // encrypting animation; plain model changes keep the quiet button spinner).
+  const [encryptingLlm, setEncryptingLlm] = useState(false)
 
   // Indexing + embedding — key-only change is instant; model/chunk change re-indexes
   const [chunkSize, setChunkSize] = useState(project.chunk_size)
@@ -68,6 +72,7 @@ export function SettingsTab({
   const [embKeyInput, setEmbKeyInput] = useState("")
   const [embEditingKey, setEmbEditingKey] = useState(false)
   const [savingEmbKey, setSavingEmbKey] = useState(false)
+  const [encryptingEmb, setEncryptingEmb] = useState(false)
   const [confirmReindex, setConfirmReindex] = useState(false)
   const [reindexing, setReindexing] = useState(false)
 
@@ -145,12 +150,21 @@ export function SettingsTab({
       // the old provider, so drop it and fall back to the account key.
       body.llm_api_key = ""
     }
+    // A pasted key gets the encrypting animation (with a minimum display so
+    // it reads, not flashes); a plain model change stays quiet.
+    const encrypting = Boolean(body.llm_api_key)
     setSavingLlm(true)
+    if (encrypting) setEncryptingLlm(true)
     try {
-      await api(`/api/projects/${project.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      })
+      await Promise.all([
+        api(`/api/projects/${project.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        }),
+        encrypting
+          ? new Promise((resolve) => setTimeout(resolve, 1400))
+          : Promise.resolve(),
+      ])
       toast.success("Answer model saved")
       setLlmKeyInput("")
       setLlmEditingKey(false)
@@ -159,16 +173,24 @@ export function SettingsTab({
       toast.error(err instanceof Error ? err.message : "Save failed")
     } finally {
       setSavingLlm(false)
+      setEncryptingLlm(false)
     }
   }
 
   async function patchLlmKey(value: string) {
+    const encrypting = value !== ""
     setSavingLlm(true)
+    if (encrypting) setEncryptingLlm(true)
     try {
-      await api(`/api/projects/${project.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ llm_api_key: value }),
-      })
+      await Promise.all([
+        api(`/api/projects/${project.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ llm_api_key: value }),
+        }),
+        encrypting
+          ? new Promise((resolve) => setTimeout(resolve, 1400))
+          : Promise.resolve(),
+      ])
       toast.success(value === "" ? "Reverted to account key" : "Project key saved")
       setLlmKeyInput("")
       setLlmEditingKey(false)
@@ -177,16 +199,24 @@ export function SettingsTab({
       toast.error(err instanceof Error ? err.message : "Failed to update key")
     } finally {
       setSavingLlm(false)
+      setEncryptingLlm(false)
     }
   }
 
   async function patchEmbeddingKey(value: string) {
+    const encrypting = value !== ""
     setSavingEmbKey(true)
+    if (encrypting) setEncryptingEmb(true)
     try {
-      await api(`/api/projects/${project.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ embedding_api_key: value }),
-      })
+      await Promise.all([
+        api(`/api/projects/${project.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ embedding_api_key: value }),
+        }),
+        encrypting
+          ? new Promise((resolve) => setTimeout(resolve, 1400))
+          : Promise.resolve(),
+      ])
       toast.success(value === "" ? "Reverted to account key" : "Project key saved")
       setEmbKeyInput("")
       setEmbEditingKey(false)
@@ -195,6 +225,7 @@ export function SettingsTab({
       toast.error(err instanceof Error ? err.message : "Failed to update key")
     } finally {
       setSavingEmbKey(false)
+      setEncryptingEmb(false)
     }
   }
 
@@ -347,18 +378,22 @@ export function SettingsTab({
               </SelectContent>
             </Select>
           </div>
-          <ProviderKeyField
-            provider={llmProvider}
-            last4={llmOverrideLast4}
-            accountHasKey={llmAccountHasKey}
-            value={llmKeyInput}
-            onChange={setLlmKeyInput}
-            editing={llmEditingKey}
-            onEditingChange={setLlmEditingKey}
-            onRemove={() => patchLlmKey("")}
-            busy={savingLlm}
-          />
-          {(llmEditingKey || llmForcedInput || llmChanged) && (
+          {encryptingLlm ? (
+            <EncryptingLoader rows={3} />
+          ) : (
+            <ProviderKeyField
+              provider={llmProvider}
+              last4={llmOverrideLast4}
+              accountHasKey={llmAccountHasKey}
+              value={llmKeyInput}
+              onChange={setLlmKeyInput}
+              editing={llmEditingKey}
+              onEditingChange={setLlmEditingKey}
+              onRemove={() => patchLlmKey("")}
+              busy={savingLlm}
+            />
+          )}
+          {!encryptingLlm && (llmEditingKey || llmForcedInput || llmChanged) && (
             <div className="flex gap-2">
               {llmEditingKey && (
                 <Button
@@ -446,18 +481,22 @@ export function SettingsTab({
               </SelectContent>
             </Select>
           </div>
-          <ProviderKeyField
-            provider={embProvider}
-            last4={embOverrideLast4}
-            accountHasKey={embAccountHasKey}
-            value={embKeyInput}
-            onChange={setEmbKeyInput}
-            editing={embEditingKey}
-            onEditingChange={setEmbEditingKey}
-            onRemove={() => patchEmbeddingKey("")}
-            busy={savingEmbKey}
-          />
-          {(reindexNeeded || embEditingKey || embForcedInput) && (
+          {encryptingEmb ? (
+            <EncryptingLoader rows={3} />
+          ) : (
+            <ProviderKeyField
+              provider={embProvider}
+              last4={embOverrideLast4}
+              accountHasKey={embAccountHasKey}
+              value={embKeyInput}
+              onChange={setEmbKeyInput}
+              editing={embEditingKey}
+              onEditingChange={setEmbEditingKey}
+              onRemove={() => patchEmbeddingKey("")}
+              busy={savingEmbKey}
+            />
+          )}
+          {!encryptingEmb && (reindexNeeded || embEditingKey || embForcedInput) && (
             <div className="flex gap-2">
               {embEditingKey && (
                 <Button

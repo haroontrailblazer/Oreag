@@ -12,6 +12,7 @@ import useSWR, { mutate as globalMutate } from "swr"
 
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
+import { EncryptingLoader } from "@/components/ui/encrypting-loader"
 import {
   Card,
   CardContent,
@@ -36,7 +37,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { LoaderOne } from "@/components/ui/loader"
 import {
   Table,
   TableBody,
@@ -78,10 +78,14 @@ export function ProviderKeys() {
     if (!editing || !value.trim()) return
     setSaving(true)
     try {
-      await api("/api/provider-keys", {
-        method: "PUT",
-        body: JSON.stringify({ provider: editing, key: value.trim() }),
-      })
+      // Minimum display time so the encrypting animation reads, not flashes.
+      await Promise.all([
+        api("/api/provider-keys", {
+          method: "PUT",
+          body: JSON.stringify({ provider: editing, key: value.trim() }),
+        }),
+        new Promise((resolve) => setTimeout(resolve, 1400)),
+      ])
       toast.success("Key saved")
       setEditing(null)
       mutate()
@@ -201,7 +205,12 @@ export function ProviderKeys() {
         </Table>
       </CardContent>
 
-      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(o) => {
+          if (!o && !saving) setEditing(null)
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -213,28 +222,34 @@ export function ProviderKeys() {
               the last 4 characters for display.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="provider-key">API key</Label>
-            <Input
-              id="provider-key"
-              type="password"
-              autoComplete="off"
-              placeholder="Paste your key"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSave()
-              }}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saving || !value.trim()}>
-              {saving ? <LoaderOne /> : "Save key"}
-            </Button>
-          </DialogFooter>
+          {saving ? (
+            <EncryptingLoader />
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="provider-key">API key</Label>
+                <Input
+                  id="provider-key"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Paste your key"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSave()
+                  }}
+                />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditing(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSave} disabled={saving || !value.trim()}>
+                  Save key
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

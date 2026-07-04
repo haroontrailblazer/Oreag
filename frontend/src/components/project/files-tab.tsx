@@ -90,7 +90,10 @@ const CARD_LINES = [
  * Pure SVG/SMIL in the app palette — no animation runtime. */
 function BundlingLoader() {
   return (
-    <svg viewBox="0 0 120 48" className="h-10 w-24 shrink-0" aria-hidden="true">
+    // viewBox is cropped to the artwork (no leading dead space) so the deck's
+    // left edge lines up with the file icons below; the incoming card slides
+    // in from the crop edge.
+    <svg viewBox="14 0 98 48" className="h-10 w-auto shrink-0" aria-hidden="true">
       {/* The deck: cards already bundled, peeking out behind. */}
       {[6, 3].map((offset, i) => (
         <rect

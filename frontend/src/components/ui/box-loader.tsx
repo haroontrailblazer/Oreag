@@ -10,6 +10,13 @@ import { cn } from "@/lib/utils"
  * `onCycle` fires once at the end of every full animation cycle — use it to
  * defer closing until the animation has finished, even if the work ended early.
  */
+/* The composition paints beyond its authored 200×320 box: the ground plane
+   reaches ~120px below it and the background-colored mask rects swing out the
+   sides. Reserve the real bounds and clip, so nothing overlaps content that
+   sits under the loader (e.g. dialog captions). */
+const PAD_X = 50
+const PAD_BOTTOM = 125
+
 export function BoxLoader({
   scale = 0.5,
   className,
@@ -23,12 +30,18 @@ export function BoxLoader({
     <div
       role="status"
       aria-label="Loading"
-      className={cn("relative", className)}
-      style={{ width: 200 * scale, height: 320 * scale }}
+      className={cn("relative overflow-hidden", className)}
+      style={{
+        width: (200 + PAD_X * 2) * scale,
+        height: (320 + PAD_BOTTOM) * scale,
+      }}
     >
       <div
         className="box-build"
-        style={{ transform: `scale(${scale})`, transformOrigin: "top left" }}
+        style={{
+          transform: `translateX(${PAD_X * scale}px) scale(${scale})`,
+          transformOrigin: "top left",
+        }}
       >
         {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
           <div
