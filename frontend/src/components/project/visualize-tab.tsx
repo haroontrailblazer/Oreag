@@ -22,7 +22,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { fetcher } from "@/lib/api"
 import type {
   MemoryGraphNode,
@@ -79,6 +78,91 @@ type GNode = NodeObject<MemoryGraphNode>
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+/* Paths for the loading animation: four curves converging on the hub. */
+const LOADER_PATHS = [
+  "M 14,18 C 64,18 72,60 100,60",
+  "M 14,102 C 64,102 72,60 100,60",
+  "M 186,18 C 136,18 128,60 100,60",
+  "M 186,102 C 136,102 128,60 100,60",
+]
+
+/** Graph-assembly loader (data-ingesting style): themed dots stream along
+ * converging paths into a pulsing hub while the scene loads. Pure SVG/SMIL —
+ * no animation runtime needed. */
+function GraphLoader({
+  isDark,
+  colors,
+}: {
+  isDark: boolean
+  colors: Record<string, string>
+}) {
+  const dotColors = [colors.file, colors.memory, colors.section, colors.project]
+  const line = isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)"
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+      <svg viewBox="0 0 200 120" className="w-56 max-w-[70%]" aria-hidden="true">
+        {LOADER_PATHS.map((d, i) => (
+          <path key={i} d={d} fill="none" stroke={line} strokeWidth="1.5" />
+        ))}
+        {LOADER_PATHS.map((d, i) => (
+          <circle key={i} r="3.2" fill={dotColors[i % dotColors.length]}>
+            <animateMotion
+              dur="1.8s"
+              repeatCount="indefinite"
+              begin={`${-i * 0.45}s`}
+              path={d}
+            />
+            <animate
+              attributeName="opacity"
+              values="0;1;1;0"
+              keyTimes="0;0.15;0.85;1"
+              dur="1.8s"
+              repeatCount="indefinite"
+              begin={`${-i * 0.45}s`}
+            />
+          </circle>
+        ))}
+        {/* Hub: pulsing core + expanding ring, in the graph's file color. */}
+        <circle cx="100" cy="60" r="7" fill={colors.file}>
+          <animate
+            attributeName="r"
+            values="6.5;8;6.5"
+            dur="1.8s"
+            repeatCount="indefinite"
+          />
+        </circle>
+        <circle
+          cx="100"
+          cy="60"
+          r="12"
+          fill="none"
+          stroke={colors.file}
+          strokeWidth="1.5"
+        >
+          <animate
+            attributeName="r"
+            values="10;18"
+            dur="1.8s"
+            repeatCount="indefinite"
+          />
+          <animate
+            attributeName="opacity"
+            values="0.6;0"
+            dur="1.8s"
+            repeatCount="indefinite"
+          />
+        </circle>
+      </svg>
+      <p className="text-sm font-medium text-muted-foreground">
+        Visualizing
+        <span className="animate-pulse">.</span>
+        <span className="animate-pulse [animation-delay:200ms]">.</span>
+        <span className="animate-pulse [animation-delay:400ms]">.</span>
+      </p>
+    </div>
+  )
+}
 
 /** Interactive 3D view of the project's brain: files, sections, chunks and
  * agent memories as a force-directed graph. Drag to rotate, scroll to zoom,
@@ -247,9 +331,7 @@ export function VisualizeTab({ project }: { project: Project }) {
           className="relative h-[60dvh] min-h-[340px] overflow-hidden rounded-xl border bg-zinc-50 sm:h-[480px] lg:h-[calc(100dvh-22.5rem)] lg:min-h-[420px] dark:border-zinc-800 dark:bg-[#09090b]"
         >
           {(isLoading || !ForceGraph3D) && (
-            <div className="absolute inset-0 p-4">
-              <Skeleton className="size-full" />
-            </div>
+            <GraphLoader isDark={isDark} colors={nodeColors} />
           )}
 
           {isEmpty && (
