@@ -80,79 +80,103 @@ const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 /* Loader matching the Lottielab "Data | Ingesting" reference: a document card
-   streaming dashed rows into a database cylinder whose rims light up in
-   sequence — recolored from orange to the app's sky accent. */
-const CARD_LINES = [
-  { y: 34, x2: 66, accent: false },
-  { y: 42, x2: 74, accent: true },
-  { y: 48, x2: 70, accent: true },
-  { y: 58, x2: 74, accent: false },
-  { y: 64, x2: 68, accent: false },
-  { y: 70, x2: 60, accent: false },
-  { y: 80, x2: 56, accent: false },
+   (grouped two-segment skeleton rows, one row flashing accent) streams a block
+   of chunky aligned dashes into a tall 3-tier database cylinder whose rims
+   light in sequence — recolored from orange to the app's sky accent. */
+const CARD_ROWS: { y: number; segs: [number, number][]; accent?: boolean }[] = [
+  { y: 30, segs: [[36, 48]] },
+  { y: 40, segs: [[36, 58], [61, 72]] },
+  { y: 47, segs: [[36, 62], [65, 74]], accent: true },
+  { y: 54, segs: [[36, 54]] },
+  { y: 66, segs: [[36, 60], [63, 72]] },
+  { y: 73, segs: [[36, 56]] },
+  { y: 80, segs: [[36, 64], [67, 74]] },
+  { y: 92, segs: [[36, 46], [49, 54]] },
 ]
-/* The cylinder's three rims (top ellipse + two body arcs), lit in sequence. */
+/* Top ellipse, middle seam and bottom rim of the cylinder, lit in turn. */
 const DB_RIMS = [
-  "M 151,38 A 24 9 0 1 0 199,38 A 24 9 0 1 0 151,38",
-  "M 151,61 A 24 9 0 0 0 199,61",
-  "M 151,84 A 24 9 0 0 0 199,84",
+  "M 159,38 A 26 10 0 1 0 211,38 A 26 10 0 1 0 159,38",
+  "M 159,69 A 26 10 0 0 0 211,69",
+  "M 159,100 A 26 10 0 0 0 211,100",
 ]
+const CYCLE = "2.1s"
 
 function GraphLoader() {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-8">
-      <svg viewBox="0 0 230 120" className="w-64 max-w-[75%]" aria-hidden="true">
+      <svg viewBox="0 0 240 130" className="w-72 max-w-[80%]" aria-hidden="true">
         {/* Source document */}
         <rect
-          x="30"
-          y="22"
-          width="56"
-          height="76"
+          x="28"
+          y="20"
+          width="64"
+          height="86"
           rx="6"
           strokeWidth="1.5"
           className="fill-background stroke-border"
         />
-        {CARD_LINES.map((line, i) => (
-          <line
-            key={i}
-            x1="38"
-            y1={line.y}
-            x2={line.x2}
-            y2={line.y}
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            className={
-              line.accent
-                ? "stroke-sky-500 dark:stroke-sky-400"
-                : "stroke-muted-foreground/30"
-            }
-          />
+        {CARD_ROWS.map((row, i) => (
+          <g key={i}>
+            {row.segs.map(([x1, x2], j) => (
+              <g key={j}>
+                <line
+                  x1={x1}
+                  y1={row.y}
+                  x2={x2}
+                  y2={row.y}
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  className="stroke-muted-foreground/25"
+                />
+                {row.accent && (
+                  // The row being ingested flashes accent, in step with the
+                  // dash stream and the cylinder rims.
+                  <line
+                    x1={x1}
+                    y1={row.y}
+                    x2={x2}
+                    y2={row.y}
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    className="stroke-sky-500 dark:stroke-sky-400"
+                  >
+                    <animate
+                      attributeName="opacity"
+                      values="0;1;1;0"
+                      keyTimes="0;0.12;0.5;0.72"
+                      dur={CYCLE}
+                      repeatCount="indefinite"
+                    />
+                  </line>
+                )}
+              </g>
+            ))}
+          </g>
         ))}
-        {/* Data stream: dashed rows flowing toward the database */}
-        {[52, 60, 68].map((y, i) => (
+        {/* Data stream: a block of chunky aligned dashes on the move */}
+        {[52, 58, 64, 70].map((y) => (
           <line
             key={y}
-            x1="94"
+            x1="102"
             y1={y}
-            x2="142"
+            x2="150"
             y2={y}
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeDasharray="5 7"
-            className="stroke-sky-500/80 dark:stroke-sky-400/80"
+            strokeWidth="3"
+            strokeLinecap="butt"
+            strokeDasharray="7 5"
+            className="stroke-sky-500 dark:stroke-sky-400"
           >
             <animate
               attributeName="stroke-dashoffset"
               values="0;-12"
-              dur="0.7s"
-              begin={`${-i * 0.23}s`}
+              dur="0.8s"
               repeatCount="indefinite"
             />
           </line>
         ))}
-        {/* Database cylinder */}
+        {/* Database cylinder: tall 3-tier body */}
         <path
-          d="M 151,38 L 151,84 A 24 9 0 0 0 199,84 L 199,38"
+          d="M 159,38 L 159,100 A 26 10 0 0 0 211,100 L 211,38"
           fill="none"
           strokeWidth="1.5"
           className="stroke-border"
@@ -171,7 +195,7 @@ function GraphLoader() {
                 attributeName="opacity"
                 values="0;1;1;0"
                 keyTimes="0;0.25;0.5;0.75"
-                dur="2.1s"
+                dur={CYCLE}
                 begin={`${i * 0.7}s`}
                 repeatCount="indefinite"
               />
