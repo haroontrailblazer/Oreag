@@ -532,14 +532,17 @@
   --y: 0;
   --b: 1.4;
 }
-.box-build .box.box0 { --x: -220px; --y: -120px; left: 58px; top: 108px; }
-.box-build .box.box1 { --x: -260px; --y: 120px; left: 25px; top: 120px; }
-.box-build .box.box2 { --x: 120px; --y: -190px; left: 58px; top: 64px; }
-.box-build .box.box3 { --x: 280px; --y: -40px; left: 91px; top: 120px; }
-.box-build .box.box4 { --x: 60px; --y: 200px; left: 58px; top: 132px; }
-.box-build .box.box5 { --x: -220px; --y: -120px; left: 25px; top: 76px; }
-.box-build .box.box6 { --x: -260px; --y: 120px; left: 91px; top: 76px; }
-.box-build .box.box7 { --x: -240px; --y: 200px; left: 58px; top: 87px; }
+/* Scatter offsets kept compact (≤ ~90px) so the full fly-in happens inside
+   the BoxLoader's clipped frame — large offsets left the frame empty for most
+   of the cycle once clipping was added (boxes travelled outside the box). */
+.box-build .box.box0 { --x: -70px; --y: -40px; left: 58px; top: 108px; }
+.box-build .box.box1 { --x: -85px; --y: 40px; left: 25px; top: 120px; }
+.box-build .box.box2 { --x: 40px; --y: -62px; left: 58px; top: 64px; }
+.box-build .box.box3 { --x: 90px; --y: -15px; left: 91px; top: 120px; }
+.box-build .box.box4 { --x: 25px; --y: 64px; left: 58px; top: 132px; }
+.box-build .box.box5 { --x: -70px; --y: -40px; left: 25px; top: 76px; }
+.box-build .box.box6 { --x: -85px; --y: 40px; left: 91px; top: 76px; }
+.box-build .box.box7 { --x: -78px; --y: 64px; left: 58px; top: 87px; }
 .box-build .box0 { animation-name: bb-move0; }
 .box-build .box0 div { animation-name: bb-scale0; }
 .box-build .box1 { animation-name: bb-move1; }

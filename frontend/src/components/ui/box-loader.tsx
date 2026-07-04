@@ -10,14 +10,15 @@ import { cn } from "@/lib/utils"
  * `onCycle` fires once at the end of every full animation cycle — use it to
  * defer closing until the animation has finished, even if the work ended early.
  */
-/* The composition paints beyond its authored 200×320 box: the ground plane
-   reaches below it and the background-colored mask rects swing out the sides.
-   Reserve the visible bounds and clip, so nothing overlaps content around the
-   loader — and crop the artwork's empty top band so the reserved box hugs the
-   visuals and dialog spacing stays proportionate. */
-const PAD_X = 50
-const PAD_BOTTOM = 90
-const CROP_TOP = 45
+/* The scatter/drop travel paints beyond the assembled cube, and the
+   background-colored mask rects swing out the sides. Clip to a snug window
+   around the action (fly-ins enter and the final drop exits through the clip
+   edges) so the loader hugs its visuals and never overlaps dialog text.
+   Coordinates are authored-units; scatter offsets in globals.css are kept
+   within this window. */
+const PAD_X = 20
+const CROP_TOP = 25
+const VISIBLE_BOTTOM = 235
 
 export function BoxLoader({
   scale = 0.5,
@@ -35,7 +36,7 @@ export function BoxLoader({
       className={cn("relative overflow-hidden", className)}
       style={{
         width: (200 + PAD_X * 2) * scale,
-        height: (320 + PAD_BOTTOM - CROP_TOP) * scale,
+        height: (VISIBLE_BOTTOM - CROP_TOP) * scale,
       }}
     >
       <div

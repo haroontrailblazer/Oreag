@@ -95,17 +95,18 @@ const CARD_ROWS: { y: number; segs: [number, number][]; accent?: boolean }[] = [
 ]
 /* Top ellipse, middle seam and bottom rim of the cylinder, lit in turn. */
 const DB_RIMS = [
-  "M 159,38 A 26 10 0 1 0 211,38 A 26 10 0 1 0 159,38",
-  "M 159,69 A 26 10 0 0 0 211,69",
-  "M 159,100 A 26 10 0 0 0 211,100",
+  "M 163,44 A 22 8.5 0 1 0 207,44 A 22 8.5 0 1 0 163,44",
+  "M 163,68 A 22 8.5 0 0 0 207,68",
+  "M 163,92 A 22 8.5 0 0 0 207,92",
 ]
 const CYCLE = "2.1s"
 
 function GraphLoader() {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-8">
-      <svg viewBox="0 0 240 130" className="w-72 max-w-[80%]" aria-hidden="true">
-        {/* Source document */}
+      <svg viewBox="0 0 240 116" className="w-72 max-w-[80%]" aria-hidden="true">
+        {/* Source document — lifted fill + brighter strokes in dark mode so
+            the composition reads on the near-black canvas. */}
         <rect
           x="28"
           y="20"
@@ -113,7 +114,7 @@ function GraphLoader() {
           height="86"
           rx="6"
           strokeWidth="1.5"
-          className="fill-background stroke-border"
+          className="fill-background stroke-border dark:fill-zinc-900 dark:stroke-zinc-600"
         />
         {CARD_ROWS.map((row, i) => (
           <g key={i}>
@@ -124,9 +125,9 @@ function GraphLoader() {
                   y1={row.y}
                   x2={x2}
                   y2={row.y}
-                  strokeWidth="3"
+                  strokeWidth="2.5"
                   strokeLinecap="round"
-                  className="stroke-muted-foreground/25"
+                  className="stroke-muted-foreground/25 dark:stroke-zinc-600/60"
                 />
                 {row.accent && (
                   // The row being ingested flashes accent, in step with the
@@ -136,7 +137,7 @@ function GraphLoader() {
                     y1={row.y}
                     x2={x2}
                     y2={row.y}
-                    strokeWidth="3"
+                    strokeWidth="2.5"
                     strokeLinecap="round"
                     className="stroke-sky-500 dark:stroke-sky-400"
                   >
@@ -153,37 +154,42 @@ function GraphLoader() {
             ))}
           </g>
         ))}
-        {/* Data stream: a block of chunky aligned dashes on the move */}
-        {[52, 58, 64, 70].map((y) => (
+        {/* Data stream: a fine block of thin aligned dashes on the move */}
+        {[57, 60.4, 63.8, 67.2].map((y) => (
           <line
             key={y}
-            x1="102"
+            x1="104"
             y1={y}
-            x2="150"
+            x2="142"
             y2={y}
-            strokeWidth="3"
+            strokeWidth="1.6"
             strokeLinecap="butt"
-            strokeDasharray="7 5"
+            strokeDasharray="4 2.5"
             className="stroke-sky-500 dark:stroke-sky-400"
           >
             <animate
               attributeName="stroke-dashoffset"
-              values="0;-12"
+              values="0;-6.5"
               dur="0.8s"
               repeatCount="indefinite"
             />
           </line>
         ))}
-        {/* Database cylinder: tall 3-tier body */}
+        {/* Database cylinder */}
         <path
-          d="M 159,38 L 159,100 A 26 10 0 0 0 211,100 L 211,38"
+          d="M 163,44 L 163,92 A 22 8.5 0 0 0 207,92 L 207,44"
           fill="none"
           strokeWidth="1.5"
-          className="stroke-border"
+          className="stroke-border dark:stroke-zinc-600"
         />
         {DB_RIMS.map((d, i) => (
           <g key={i}>
-            <path d={d} fill="none" strokeWidth="1.5" className="stroke-border" />
+            <path
+              d={d}
+              fill="none"
+              strokeWidth="1.5"
+              className="stroke-border dark:stroke-zinc-600"
+            />
             {/* Accent sweep: each rim lights up in turn */}
             <path
               d={d}
