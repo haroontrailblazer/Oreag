@@ -51,7 +51,7 @@ export function EncryptingLoader({
             key={i}
             className={
               i === active
-                ? "text-sky-600 dark:text-sky-400"
+                ? "text-zinc-800 dark:text-zinc-100"
                 : "text-muted-foreground/50"
             }
           >
@@ -59,7 +59,7 @@ export function EncryptingLoader({
           </span>
         ))}
       </div>
-      <span className="rounded-full border bg-background px-3 py-1 font-mono text-[11px] text-sky-600 dark:text-sky-400">
+      <span className="rounded-full border bg-background px-3 py-1 font-mono text-[11px] text-zinc-700 dark:text-zinc-100">
         {label}
       </span>
     </div>

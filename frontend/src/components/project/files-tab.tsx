@@ -145,7 +145,7 @@ function BundlingLoader() {
             strokeLinecap="round"
             className={
               line.accent
-                ? "stroke-sky-500 dark:stroke-sky-400"
+                ? "stroke-zinc-700 dark:stroke-zinc-100"
                 : "stroke-muted-foreground/35"
             }
           />
@@ -347,7 +347,7 @@ export function FilesTab({
             <BundlingLoader />
           </span>
           <div className="min-w-0">
-            <p className="font-mono text-xs font-medium text-sky-600 dark:text-sky-400">
+            <p className="font-mono text-xs font-medium text-zinc-700 dark:text-zinc-100">
               Bundling...
             </p>
             <p className="text-[11px] text-muted-foreground">

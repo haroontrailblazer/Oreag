@@ -139,7 +139,7 @@ function GraphLoader() {
                     y2={row.y}
                     strokeWidth="2.5"
                     strokeLinecap="round"
-                    className="stroke-sky-500 dark:stroke-sky-400"
+                    className="stroke-zinc-700 dark:stroke-zinc-100"
                   >
                     <animate
                       attributeName="opacity"
@@ -165,7 +165,7 @@ function GraphLoader() {
             strokeWidth="1.6"
             strokeLinecap="butt"
             strokeDasharray="4 2.5"
-            className="stroke-sky-500 dark:stroke-sky-400"
+            className="stroke-zinc-700 dark:stroke-zinc-100"
           >
             <animate
               attributeName="stroke-dashoffset"
@@ -195,7 +195,7 @@ function GraphLoader() {
               d={d}
               fill="none"
               strokeWidth="1.8"
-              className="stroke-sky-500 dark:stroke-sky-400"
+              className="stroke-zinc-700 dark:stroke-zinc-100"
             >
               <animate
                 attributeName="opacity"
@@ -209,7 +209,7 @@ function GraphLoader() {
           </g>
         ))}
       </svg>
-      <span className="rounded-full border bg-background px-4 py-1.5 font-mono text-xs text-sky-600 dark:text-sky-400">
+      <span className="rounded-full border bg-background px-4 py-1.5 font-mono text-xs text-zinc-700 dark:text-zinc-100">
         Visualizing...
       </span>
     </div>
