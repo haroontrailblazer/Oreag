@@ -39,7 +39,7 @@ import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 function formatSize(bytes: number | null): string {
-  if (bytes == null) return "—"
+  if (bytes == null) return "-"
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
@@ -87,10 +87,10 @@ const CARD_LINES = [
 
 /** Loader matching the Lottielab "Data | Bundling" reference: document cards
  * slide in and stack into a deck while uploads are chunked and embedded.
- * Pure SVG/SMIL in the app palette — no animation runtime. */
+ * Pure SVG/SMIL in the app palette - no animation runtime. */
 function BundlingLoader() {
   return (
-    // viewBox is cropped to the deck itself — no slide runway — so the
+    // viewBox is cropped to the deck itself - no slide runway - so the
     // artwork's left edge sits exactly where the file icons below start; the
     // incoming card materialises through the left clip edge onto the stack.
     <svg viewBox="76 0 36 48" className="h-9 w-auto shrink-0" aria-hidden="true">
@@ -222,7 +222,7 @@ export function FilesTab({
       await api(`/api/projects/${project.id}/files/${deleteTarget.id}`, {
         method: "DELETE",
       })
-      // Don't close yet — let the loader finish its current animation cycle.
+      // Don't close yet - let the loader finish its current animation cycle.
       deleteDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed")
@@ -291,7 +291,7 @@ export function FilesTab({
 
   const fileCount = files?.length ?? 0
   const totalChunks = files?.reduce((sum, file) => sum + file.chunk_count, 0) ?? 0
-  // Files still being chunked/embedded — drives the bundling banner that shows
+  // Files still being chunked/embedded - drives the bundling banner that shows
   // from the moment the upload dialog closes until indexing settles.
   const inFlight =
     files?.filter(
@@ -351,7 +351,7 @@ export function FilesTab({
               Bundling...
             </p>
             <p className="text-[11px] text-muted-foreground">
-              {fileCount - inFlight} of {fileCount} processed — chunking &
+              {fileCount - inFlight} of {fileCount} processed - chunking &
               embedding into the knowledge base
             </p>
           </div>
@@ -370,7 +370,7 @@ export function FilesTab({
         </div>
       ) : (
         // Desktop: cap the list to the viewport so the page itself never
-        // scrolls — only the rows do, under the pinned "Files" header bar
+        // scrolls - only the rows do, under the pinned "Files" header bar
         // above. No min-height: the card shrinks to fit when files are
         // deleted. Phones keep natural page flow.
         <div className="md:max-h-[calc(100dvh-16.5rem)] md:overflow-y-auto">

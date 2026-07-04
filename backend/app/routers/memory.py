@@ -37,7 +37,7 @@ def create_memory(
     out = MemoryOut.model_validate(memory)
     if memory.embedding is None:
         out.warning = (
-            "Stored without an embedding (no embedding key) — not searchable yet."
+            "Stored without an embedding (no embedding key) - not searchable yet."
         )
     return out
 

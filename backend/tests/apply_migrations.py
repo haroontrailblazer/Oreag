@@ -25,5 +25,5 @@ try:
 finally:
     conn.close()
 
-print("OK — migrations applied")
+print("OK - migrations applied")
 sys.exit(0)

@@ -16,16 +16,16 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://oreag.vercel.app"),
-  title: "Oreag — RAG & Memory as a Service",
+  title: "Oreag - RAG & Memory as a Service",
   description:
     "Turn your documents into a queryable RAG API with a built-in memory graph: upload, tune chunking and embeddings, and get a per-project endpoint.",
   // Favicons are picked up from the app/ file conventions: icon.svg + favicon.ico
   // The OG/Twitter image is the static public/og.png (regenerate with
   // `node scripts/generate-og.mjs`). A static asset resolves via metadataBase to
   // an absolute URL, is CDN-cached, and its .png path is exempt from the auth
-  // middleware — so crawlers always get it.
+  // middleware - so crawlers always get it.
   openGraph: {
-    title: "Oreag — RAG & Memory as a Service",
+    title: "Oreag - RAG & Memory as a Service",
     description:
       "Turn your documents into a queryable RAG API with a built-in memory graph.",
     url: "/",
@@ -36,13 +36,13 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "Oreag — RAG & Memory as a Service",
+        alt: "Oreag - RAG & Memory as a Service",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Oreag — RAG & Memory as a Service",
+    title: "Oreag - RAG & Memory as a Service",
     description:
       "Turn your documents into a queryable RAG API with a built-in memory graph.",
     images: ["/og.png"],

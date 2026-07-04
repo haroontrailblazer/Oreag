@@ -7,7 +7,7 @@ import { NextResponse } from "next/server"
  * Email-confirmation handler (signup, recovery, email-change, etc.).
  *
  * The email template links here with `token_hash` + `type` instead of relying on
- * the PKCE `?code=` flow — `verifyOtp` works regardless of which browser/device
+ * the PKCE `?code=` flow - `verifyOtp` works regardless of which browser/device
  * opens the link, which the `/auth/callback` code flow can't guarantee.
  */
 export async function GET(request: Request) {

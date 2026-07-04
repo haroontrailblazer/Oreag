@@ -211,7 +211,7 @@ function fileScore(filename: string, term: string): number {
   return ext.includes(term) ? 1 : 0
 }
 
-/** The full sidebar panel — rendered in the desktop column and the mobile drawer. */
+/** The full sidebar panel - rendered in the desktop column and the mobile drawer. */
 function SidebarBody() {
   const pathname = usePathname()
   const [query, setQuery] = useState("")
@@ -482,7 +482,7 @@ export function DashboardSidebar() {
 
   return (
     <>
-      {/* Mobile top bar — hamburger opens the drawer; sidebar is hidden below md */}
+      {/* Mobile top bar - hamburger opens the drawer; sidebar is hidden below md */}
       <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-sidebar-border bg-sidebar/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-sidebar/80 md:hidden">
         <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
           <SheetTrigger asChild>
@@ -509,7 +509,7 @@ export function DashboardSidebar() {
         </div>
       </header>
 
-      {/* Desktop sidebar — fixed left column */}
+      {/* Desktop sidebar - fixed left column */}
       <aside className="hidden border-sidebar-border bg-sidebar text-sidebar-foreground md:block md:min-h-dvh md:border-r">
         <SidebarBody />
       </aside>

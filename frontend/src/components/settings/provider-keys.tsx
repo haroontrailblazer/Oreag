@@ -106,7 +106,7 @@ export function ProviderKeys() {
       await api(`/api/provider-keys/${removeTarget}`, { method: "DELETE" })
       mutate()
       globalMutate("/api/models")
-      // Don't close yet — let the loader finish its current animation cycle.
+      // Don't close yet - let the loader finish its current animation cycle.
       removeDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to remove key")
@@ -264,8 +264,8 @@ export function ProviderKeys() {
             <DialogTitle>Remove your {removingProvider?.label} key?</DialogTitle>
             {!removing && (
               <DialogDescription>
-                Projects that rely on this account key — and have no key of
-                their own — will stop embedding and answering until you add a
+                Projects that rely on this account key - and have no key of
+                their own - will stop embedding and answering until you add a
                 new one.
               </DialogDescription>
             )}

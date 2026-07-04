@@ -111,7 +111,7 @@ export default function NewProjectPage() {
     },
   })
 
-  // Project names are unique per account — flag duplicates live.
+  // Project names are unique per account - flag duplicates live.
   const { data: projects } = useSWR<Project[]>("/api/projects", fetcher)
   const trimmedName = name.trim()
   const nameTaken =
@@ -167,7 +167,7 @@ export default function NewProjectPage() {
           onProgress: setProgress,
         })
       }
-      toast.success("Project created — indexing started")
+      toast.success("Project created - indexing started")
       router.push(`/projects/${project.id}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create project")
@@ -206,7 +206,7 @@ export default function NewProjectPage() {
               <div className="flex items-start justify-between gap-2">
                 {nameTaken ? (
                   <p className="text-xs text-destructive">
-                    A project named &ldquo;{trimmedName}&rdquo; already exists —
+                    A project named &ldquo;{trimmedName}&rdquo; already exists -
                     choose another name.
                   </p>
                 ) : (
@@ -297,7 +297,7 @@ export default function NewProjectPage() {
           <CardHeader>
             <CardTitle>2. RAG configuration</CardTitle>
             <CardDescription>
-              Sensible defaults — tune them if you know your documents.
+              Sensible defaults - tune them if you know your documents.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -307,7 +307,7 @@ export default function NewProjectPage() {
                 <Link href="/settings/api-keys" className="font-medium underline">
                   Settings → API keys
                 </Link>{" "}
-                — or run a local Ollama model — then pick a model here.
+                - or run a local Ollama model - then pick a model here.
               </div>
             )}
             <div className="grid grid-cols-2 gap-4">

@@ -17,9 +17,9 @@ Gives coding agents (Claude Code, Codex, Claude) **per-project memory** and
 ## Configuration
 
 Environment variables:
-- `OREAG_API_KEY` — a project API key (`oreag_sk_…`, from the project's API tab)
-- `OREAG_PROJECT_ID` — the project UUID
-- `OREAG_API_BASE` — defaults to `https://oreag.onrender.com`
+- `OREAG_API_KEY` - a project API key (`oreag_sk_…`, from the project's API tab)
+- `OREAG_PROJECT_ID` - the project UUID
+- `OREAG_API_BASE` - defaults to `https://oreag.onrender.com`
 
 ## Add to Claude Code
 
@@ -68,12 +68,12 @@ Chosen by `MCP_TRANSPORT`:
 | `stdio` (default) | stdio | Local clients launch it as a subprocess (the configs above). |
 | `http` | streamable-HTTP | Deployed remote **connector**. |
 
-Over HTTP it serves **two URL shapes** — use whichever fits:
+Over HTTP it serves **two URL shapes** - use whichever fits:
 
 | URL | project + key come from | For |
 |---|---|---|
-| `<host>/projects/<project-id>/mcp` | the **URL path** + the caller's `Authorization: Bearer <project-key>` | **Multi-tenant** — every user connects to *their own* project. No secrets on the server. |
-| `<host>/mcp` | the server's `OREAG_PROJECT_ID` + `OREAG_API_KEY` env | **Single project** — one fixed project (optionally guard with `MCP_AUTH_TOKEN`). |
+| `<host>/projects/<project-id>/mcp` | the **URL path** + the caller's `Authorization: Bearer <project-key>` | **Multi-tenant** - every user connects to *their own* project. No secrets on the server. |
+| `<host>/mcp` | the server's `OREAG_PROJECT_ID` + `OREAG_API_KEY` env | **Single project** - one fixed project (optionally guard with `MCP_AUTH_TOKEN`). |
 
 `GET /health` → `200 ok` (unauthenticated) for platform health checks.
 
@@ -83,14 +83,14 @@ Over HTTP it serves **two URL shapes** — use whichever fits:
 |---|---|---|
 | `MCP_TRANSPORT=http` | required | required |
 | `OREAG_API_BASE` | required (your backend URL) | required |
-| `OREAG_PROJECT_ID` | — (taken from the URL) | required |
-| `OREAG_API_KEY` | — (taken from the caller) | required |
-| `MCP_AUTH_TOKEN` | — | recommended (guards `/mcp`) |
+| `OREAG_PROJECT_ID` | - (taken from the URL) | required |
+| `OREAG_API_KEY` | - (taken from the caller) | required |
+| `MCP_AUTH_TOKEN` | - | recommended (guards `/mcp`) |
 | `PORT` / `HOST` | injected by host | injected by host |
 
 ## Deploy anywhere
 
-For a **multi-tenant** connector the server holds **no project keys** — set only
+For a **multi-tenant** connector the server holds **no project keys** - set only
 `MCP_TRANSPORT=http` and `OREAG_API_BASE` (your backend URL).
 
 **Docker (any host / Cloud Run / Fly / VM):**
@@ -112,7 +112,7 @@ docker run -p 8000:8000 \
 ## Connect a client (remote, multi-tenant)
 
 Each user uses **their own** project id (in the URL) and **their own** project
-API key (as the bearer token) — so accounts stay isolated, enforced by the
+API key (as the bearer token) - so accounts stay isolated, enforced by the
 backend:
 
 - **claude.ai / Claude Desktop → Connectors → Add custom connector:** paste
@@ -134,4 +134,4 @@ backend:
   http_headers = { Authorization = "Bearer <their-project-key>" }
   ```
 
-(Check each client's docs for exact remote-server flag names — they shift.)
+(Check each client's docs for exact remote-server flag names - they shift.)

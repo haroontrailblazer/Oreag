@@ -53,7 +53,7 @@ export default function SignupPage() {
       return
     }
     if (data.session) {
-      // email confirmation disabled — signed in immediately
+      // email confirmation disabled - signed in immediately
       router.push("/dashboard")
       router.refresh()
     } else {
@@ -65,7 +65,7 @@ export default function SignupPage() {
     <AuthShell active="signup">
       {emailSent ? (
         <p className="text-sm">
-          Check your inbox — we sent a confirmation link to{" "}
+          Check your inbox - we sent a confirmation link to{" "}
           <span className="font-medium">{email}</span>.
         </p>
       ) : (

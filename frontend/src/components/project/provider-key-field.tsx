@@ -149,8 +149,8 @@ export function ProviderKeyField({
       />
       <p className="text-xs text-foreground/70">
         {accountHasKey
-          ? `Optional — leave blank to keep using your account ${provider} key.`
-          : `${provider} has no account key — paste one to use it for this project.`}
+          ? `Optional - leave blank to keep using your account ${provider} key.`
+          : `${provider} has no account key - paste one to use it for this project.`}
       </p>
     </div>
   )

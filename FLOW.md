@@ -1,7 +1,7 @@
-# Oreag — System & Flow Diagrams
+# Oreag - System & Flow Diagrams
 
 > A structured redesign of the system architecture and the four core flows.
-> **Same logic as the source diagrams** — every node, branch, and path is preserved —
+> **Same logic as the source diagrams** - every node, branch, and path is preserved -
 > reorganised into a consistent visual grammar with colour-coded tiers, typed
 > connectors, and inline endpoint annotations.
 
@@ -27,7 +27,7 @@ GitLab, VS Code, Obsidian, and most Markdown viewers.
 | Data · Supabase | 🟢 green |
 | AI providers · BYOK / local | 🟪 violet |
 
-**Shapes** — `([stadium])` start/end · `[process]` · `{decision}` · `{{task}}` · `[(datastore)]` · `[[storage]]`
+**Shapes** - `([stadium])` start/end · `[process]` · `{decision}` · `{{task}}` · `[(datastore)]` · `[[storage]]`
 
 ### Contents
 
@@ -70,7 +70,7 @@ flowchart TB
 
     subgraph appt["APPLICATION TIER · Render · FastAPI"]
         API["Dashboard API<br/>/api/*"]
-        PublicAPI["Public API<br/>/v1/* — query · retrieve · memory"]
+        PublicAPI["Public API<br/>/v1/* - query · retrieve · memory"]
         subgraph services["Domain Services"]
             direction LR
             Ingest["Ingestion<br/>background tasks"]
@@ -191,7 +191,7 @@ flowchart LR
 ## 3. Query / RAG · read path
 
 A caller hits either endpoint (dashboard `/api/projects/{id}/query` or public
-`/v1/projects/{id}/query` — both run the same `run_query()`). When a
+`/v1/projects/{id}/query` - both run the same `run_query()`). When a
 `conversation_id` is present the follow-up is condensed to a standalone question;
 the CAG cache is checked first; depth is classified; a long question is decomposed
 into sub-queries and each is retrieved + merged; a sufficiency check either grounds
@@ -230,7 +230,7 @@ sequenceDiagram
     else cache miss
         Q->>AG: detect_depth(question) → short | long
         opt long question
-            AG->>L: plan_subqueries() — decompose (literal question kept)
+            AG->>L: plan_subqueries() - decompose (literal question kept)
             L-->>AG: sub-queries
         end
         loop retrieve + merge · max 2 rounds
@@ -247,7 +247,7 @@ sequenceDiagram
             AG->>L: generate depth-aware grounded answer
             L-->>AG: answer (concise short · structured long)
         else still insufficient
-            Note over AG: human-in-the-loop — clarifying questions
+            Note over AG: human-in-the-loop - clarifying questions
             AG-->>Q: needs_clarification · answer = clarification prompt
         end
         AG-->>Q: answer + sources + depth + sub_queries
@@ -259,7 +259,7 @@ sequenceDiagram
     end
     Q->>DB: write query_logs
     Q-->>-API: result
-    API-->>-C: 200 — answer · sources · depth · sub_queries · needs_clarification · conversation_id
+    API-->>-C: 200 - answer · sources · depth · sub_queries · needs_clarification · conversation_id
 ```
 
 ---
@@ -357,7 +357,7 @@ sequenceDiagram
     participant M as Memory service
     participant DB as pgvector
 
-    Note over A,DB: Session start — bootstrap
+    Note over A,DB: Session start - bootstrap
     A->>MCP: list_recent_memory()
     MCP->>API: GET /memory/recent (Bearer oreag_sk_…)
     API->>M: recent_memories (pinned first)
@@ -366,7 +366,7 @@ sequenceDiagram
     M-->>MCP: entries
     MCP-->>A: context to orient the session
 
-    Note over A,DB: During work — save & recall
+    Note over A,DB: During work - save & recall
     A->>MCP: save_memory("decision: …")
     MCP->>API: POST /memory
     API->>M: embed-on-save (resolved key)
@@ -387,4 +387,4 @@ MCP tools: `save_memory`, `search_memory`, `list_recent_memory`, `delete_memory`
 
 ---
 
-<sub>Oreag architecture — structured diagram set · logic preserved from source.</sub>
+<sub>Oreag architecture - structured diagram set · logic preserved from source.</sub>

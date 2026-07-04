@@ -84,7 +84,7 @@ function TabsContent({
       data-slot="tabs-content"
       className={cn(
         // When a panel is force-mounted (kept alive for background prefetch),
-        // Radix leaves it visible — hide it unless it's the active tab.
+        // Radix leaves it visible - hide it unless it's the active tab.
         "flex-1 outline-none data-[state=inactive]:hidden",
         className
       )}

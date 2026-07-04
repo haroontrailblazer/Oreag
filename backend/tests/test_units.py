@@ -142,7 +142,7 @@ class TestRegistry:
         assert "gemini" in CATALOG["embedding"]
         assert "gemini" in CATALOG["llm"]
         assert "anthropic" in CATALOG["llm"]
-        # Anthropic is chat-only — no embedding model
+        # Anthropic is chat-only - no embedding model
         assert "anthropic" not in CATALOG["embedding"]
 
     def test_anthropic_has_no_embedder(self):
@@ -433,7 +433,7 @@ class TestParsePdf:
         doc = pymupdf.open()
         page = doc.new_page()
         page.insert_text((72, 72), "Hello Oreag, this is page one.")
-        doc.new_page()  # blank page — should be skipped
+        doc.new_page()  # blank page - should be skipped
         page3 = doc.new_page()
         page3.insert_text((72, 72), "And this is page three.")
         data = doc.tobytes()
@@ -450,7 +450,7 @@ class TestParsePdf:
 
 class TestIngestionDeleteRace:
     """Deleting a file while it's queued/indexing must not blow up the
-    background task — an exception escaping one task aborts every queued
+    background task - an exception escaping one task aborts every queued
     ingestion behind it (the 'delete during indexing crashes the backend' bug)."""
 
     class _FakeDB:

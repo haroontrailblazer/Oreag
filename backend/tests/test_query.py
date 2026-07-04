@@ -1,4 +1,4 @@
-"""Integration tests for run_query — the shared /v1 + playground entry point —
+"""Integration tests for run_query - the shared /v1 + playground entry point -
 now driven by the agentic retrieval loop.
 
 These use a fake DB and monkeypatched retrieval/generation so no network or
@@ -113,7 +113,7 @@ class TestRunQueryWiring:
             query.generation, "generate_answer",
             lambda *a, **k: gen_calls.append(a) or "SHOULD NOT HAPPEN",
         )
-        # plan/clarify build an LLM — feed a fake so no network is touched.
+        # plan/clarify build an LLM - feed a fake so no network is touched.
         monkeypatch.setattr(query.resolver, "resolve_llm_key", lambda db, p: "k")
 
         class FakeLLM:
@@ -213,7 +213,7 @@ class TestConversationMemory:
             query.generation, "generate_answer", lambda *a, **k: "GROUNDED ANSWER"
         )
         # A short question with strong retrieval never needs the LLM for
-        # condense/plan/clarify — so if condense ran, this fake would record it.
+        # condense/plan/clarify - so if condense ran, this fake would record it.
         llm = FakeLLM("unused")
         monkeypatch.setattr(query.resolver, "resolve_llm_key", lambda db, p: "k")
         monkeypatch.setattr(query, "get_llm", lambda *a, **k: llm)

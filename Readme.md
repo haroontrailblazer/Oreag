@@ -1,8 +1,8 @@
 <div align="center">
 
-# Oreag — RAG & Memory as a Service
+# Oreag - RAG & Memory as a Service
 
-**Turn your documents into a production-ready, queryable RAG API — with a built-in memory graph — from a web dashboard.**
+**Turn your documents into a production-ready, queryable RAG API - with a built-in memory graph - from a web dashboard.**
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -20,23 +20,23 @@
 
 Oreag lets a user upload documents (PDF, DOCX, PPTX, HTML, CSV, …), tune chunking
 and embedding settings, and instantly get a **dedicated, API-key-protected RAG
-endpoint** to query that knowledge base from any application — plus an **agent
+endpoint** to query that knowledge base from any application - plus an **agent
 memory graph** derived from the same content. It is **multi-tenant** and
 **bring-your-own-key (BYOK)**: each user supplies their own OpenAI / Gemini /
 Anthropic credentials (or runs a local Ollama model), stored encrypted at rest.
 
 ## Features
 
-- **Any document to an API** — upload, auto-convert to Markdown, chunk, embed, and serve.
-- **Per-project RAG endpoint** — `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
-- **Agentic retrieval loop** — auto depth detection (short vs long), query decomposition for big/exam questions, multi-round retrieve-and-merge with a sufficiency check, and human-in-the-loop clarification instead of a dead "no reference".
-- **CAG answer cache** — repeated identical questions are served with no retrieval and no LLM call, with single-flight de-duplication and optional Redis (via `REDIS_URL`).
-- **Conversation memory** — server-side, keyed by an optional `conversation_id`, so follow-ups like "summarize that" are condensed into standalone questions before retrieval.
-- **Agent memory graph** — a queryable graph of sections and entities derived from indexed content.
-- **Agent memory (MCP)** — coding agents (Claude Code, Codex, Claude) save & recall per-project memory and pull document context through the Oreag MCP server.
-- **BYOK, multi-provider** — OpenAI, Google Gemini, Anthropic, Sarvam AI, Ollama (local), sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
-- **Secure by design** — Supabase Auth (JWT/JWKS), Row-Level Security, SHA-256-hashed API keys, Fernet-encrypted provider keys.
-- **Tunable** — chunk size/overlap (global or per-file), embedding model, LLM, top-K — with one-click re-index.
+- **Any document to an API** - upload, auto-convert to Markdown, chunk, embed, and serve.
+- **Per-project RAG endpoint** - `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
+- **Agentic retrieval loop** - auto depth detection (short vs long), query decomposition for big/exam questions, multi-round retrieve-and-merge with a sufficiency check, and human-in-the-loop clarification instead of a dead "no reference".
+- **CAG answer cache** - repeated identical questions are served with no retrieval and no LLM call, with single-flight de-duplication and optional Redis (via `REDIS_URL`).
+- **Conversation memory** - server-side, keyed by an optional `conversation_id`, so follow-ups like "summarize that" are condensed into standalone questions before retrieval.
+- **Agent memory graph** - a queryable graph of sections and entities derived from indexed content.
+- **Agent memory (MCP)** - coding agents (Claude Code, Codex, Claude) save & recall per-project memory and pull document context through the Oreag MCP server.
+- **BYOK, multi-provider** - OpenAI, Google Gemini, Anthropic, Sarvam AI, Ollama (local), sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
+- **Secure by design** - Supabase Auth (JWT/JWKS), Row-Level Security, SHA-256-hashed API keys, Fernet-encrypted provider keys.
+- **Tunable** - chunk size/overlap (global or per-file), embedding model, LLM, top-K - with one-click re-index.
 
 ---
 
@@ -56,14 +56,14 @@ flowchart TB
         MCP["Oreag MCP server<br/>memory + docs tools"]
     end
 
-    subgraph edge["PRESENTATION TIER — Vercel"]
+    subgraph edge["PRESENTATION TIER - Vercel"]
         Next["Next.js 16 · App Router<br/>React 19 · Tailwind · shadcn/ui · SWR"]
         AuthRt["Route Handlers<br/>/auth/confirm · /auth/callback"]
     end
 
-    subgraph appt["APPLICATION TIER — Render · FastAPI"]
+    subgraph appt["APPLICATION TIER - Render · FastAPI"]
         API["Dashboard API<br/>/api/*"]
-        PublicAPI["Public API<br/>/v1/* — query · retrieve · memory"]
+        PublicAPI["Public API<br/>/v1/* - query · retrieve · memory"]
         subgraph services["Domain Services"]
             Ingest["Ingestion<br/>background tasks"]
             Retrieve["Retrieval"]
@@ -75,13 +75,13 @@ flowchart TB
         Registry["Provider Registry"]
     end
 
-    subgraph datat["DATA TIER — Supabase"]
+    subgraph datat["DATA TIER - Supabase"]
         Auth["Auth<br/>JWT / JWKS"]
         PG[("Postgres + pgvector<br/>projects · files · chunks · memories<br/>provider_keys · api_keys · query_logs")]
         Store[["Storage<br/>project-files bucket"]]
     end
 
-    subgraph ai["AI PROVIDERS — BYOK / local"]
+    subgraph ai["AI PROVIDERS - BYOK / local"]
         OpenAI["OpenAI"]
         Gemini["Google Gemini"]
         Anthropic["Anthropic Claude"]
@@ -216,7 +216,7 @@ sequenceDiagram
         API->>CV: save turn (question + answer)
     end
     API->>DB: write query_logs
-    API-->>-C: 200 — answer + sources + depth + latency
+    API-->>-C: 200 - answer + sources + depth + latency
 ```
 
 ### 3. BYOK Key Resolution
@@ -297,7 +297,7 @@ sequenceDiagram
     participant M as Memory service
     participant DB as pgvector
 
-    Note over A,DB: Session start — bootstrap
+    Note over A,DB: Session start - bootstrap
     A->>MCP: list_recent_memory()
     MCP->>API: GET /memory/recent (Bearer oreag_sk_…)
     API->>M: recent_memories (pinned first)
@@ -306,7 +306,7 @@ sequenceDiagram
     M-->>MCP: entries
     MCP-->>A: context to orient the session
 
-    Note over A,DB: During work — save & recall
+    Note over A,DB: During work - save & recall
     A->>MCP: save_memory("decision: …")
     MCP->>API: POST /memory
     API->>M: embed-on-save (resolved key)
@@ -337,7 +337,7 @@ sequenceDiagram
 | **AI providers** | OpenAI · Google Gemini · Anthropic · Sarvam AI · Ollama · sentence-transformers |
 | **Ingestion** | PyMuPDF, MarkItDown, LangChain text splitters |
 | **Crypto** | `cryptography` (Fernet) for BYOK keys |
-| **Agent integration** | MCP server (Python, FastMCP) — `mcp-server/` |
+| **Agent integration** | MCP server (Python, FastMCP) - `mcp-server/` |
 | **Hosting** | Vercel (frontend) · Render (backend) · Supabase (data) |
 
 ## Repository Structure
@@ -356,7 +356,7 @@ Oreag/
 │       ├── services/         # ingestion, retrieval, generation, query, agentic, query_cache, memory, memory_graph, conversion, storage
 │       ├── crypto.py         # Fernet encrypt/decrypt for BYOK keys
 │       └── models.py, schemas.py, config.py, db.py, main.py
-├── mcp-server/               # Oreag MCP server (FastMCP) — agent memory + docs tools
+├── mcp-server/               # Oreag MCP server (FastMCP) - agent memory + docs tools
 ├── supabase/
 │   ├── migrations/           # 0001…0007 (tables, RLS, pgvector, provider_keys, memories)
 │   └── templates/            # branded auth email templates

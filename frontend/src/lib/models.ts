@@ -30,7 +30,7 @@ export function projectProvider(
 /**
  * Account-level check (no project context): does this provider need a key the
  * account doesn't have? Used by the new-project wizard. Keyless local providers
- * never "need a key" — their availability reflects whether they're reachable.
+ * never "need a key" - their availability reflects whether they're reachable.
  */
 export function needsKey(provider: string, availability: Availability): boolean {
   return !KEYLESS_PROVIDERS.has(provider) && !availability[provider]

@@ -86,7 +86,7 @@ export interface QueryResponse {
   sources: SourceChunk[]
   model: string
   latency_ms: number
-  // Agentic loop transparency (optional — older responses may omit them).
+  // Agentic loop transparency (optional - older responses may omit them).
   depth?: "short" | "long"
   sub_queries?: string[]
   // Human-in-the-loop: set when the loop couldn't ground an answer and is

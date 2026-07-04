@@ -7,7 +7,7 @@ import {
   X,
 } from "@phosphor-icons/react/dist/ssr"
 import { useTheme } from "next-themes"
-import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type ForceGraph3DComponent from "react-force-graph-3d"
 import type { ForceGraphMethods, NodeObject } from "react-force-graph-3d"
@@ -29,10 +29,10 @@ import type {
   Project,
 } from "@/lib/types"
 
-/* Colors / sizes per node kind — files are the anchors, chunks the fine grain.
+/* Colors / sizes per node kind - files are the anchors, chunks the fine grain.
    Separate palettes per theme so nodes and edges keep contrast on both
    canvases. The renderer multiplies edge colors by linkOpacity, so timid
-   values disappear — keep them bright/high-alpha. */
+   values disappear - keep them bright/high-alpha. */
 const NODE_COLORS_DARK: Record<string, string> = {
   project: "#f59e0b",
   file: "#38bdf8",
@@ -82,7 +82,7 @@ const esc = (s: string) =>
 /* Loader matching the Lottielab "Data | Ingesting" reference: a document card
    (grouped two-segment skeleton rows, one row flashing accent) streams a block
    of chunky aligned dashes into a tall 3-tier database cylinder whose rims
-   light in sequence — recolored from orange to the app's sky accent. */
+   light in sequence - recolored from orange to the app's sky accent. */
 const CARD_ROWS: { y: number; segs: [number, number][]; accent?: boolean }[] = [
   { y: 30, segs: [[36, 48]] },
   { y: 40, segs: [[36, 58], [61, 72]] },
@@ -101,11 +101,34 @@ const DB_RIMS = [
 ]
 const CYCLE = "2.1s"
 
+/** Tiny "searching the file" animation: a document with a scan line sweeping
+ * down it. Inherits the button's text color. */
+function FileScanIcon() {
+  return (
+    <svg viewBox="0 0 16 18" className="size-4" aria-hidden="true">
+      <rect
+        x="1.5"
+        y="1.5"
+        width="13"
+        height="15"
+        rx="2.5"
+        fill="none"
+        strokeWidth="1.5"
+        className="stroke-current"
+      />
+      <line x1="4.5" y1="5" x2="11.5" y2="5" strokeWidth="1.5" strokeLinecap="round" className="stroke-current">
+        <animate attributeName="y1" values="5;13;5" dur="1.1s" repeatCount="indefinite" />
+        <animate attributeName="y2" values="5;13;5" dur="1.1s" repeatCount="indefinite" />
+      </line>
+    </svg>
+  )
+}
+
 function GraphLoader() {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-8">
       <svg viewBox="0 0 240 116" className="w-72 max-w-[80%]" aria-hidden="true">
-        {/* Source document — lifted fill + brighter strokes in dark mode so
+        {/* Source document - lifted fill + brighter strokes in dark mode so
             the composition reads on the near-black canvas. */}
         <rect
           x="28"
@@ -225,7 +248,7 @@ export function VisualizeTab({ project }: { project: Project }) {
     fetcher
   )
 
-  // react-force-graph touches WebGL/window — load it on the client only. This
+  // react-force-graph touches WebGL/window - load it on the client only. This
   // state-based import (vs next/dynamic) keeps the component's ref working.
   const [ForceGraph3D, setForceGraph3D] = useState<
     typeof ForceGraph3DComponent | null
@@ -240,9 +263,13 @@ export function VisualizeTab({ project }: { project: Project }) {
     }
   }, [])
 
+  const router = useRouter()
   const fgRef = useRef<ForceGraphMethods<MemoryGraphNode> | undefined>(undefined)
   const [selected, setSelected] = useState<MemoryGraphNode | null>(null)
   const [rotating, setRotating] = useState(true)
+  // Set while navigating to the clicked file (Files tab load + scroll-to-row
+  // takes a moment) - drives the "Locating file..." state on the button.
+  const [locating, setLocating] = useState(false)
 
   // Theme-matched canvas: dark scene in dark mode, paper-light in light mode.
   const { resolvedTheme } = useTheme()
@@ -251,7 +278,7 @@ export function VisualizeTab({ project }: { project: Project }) {
   const linkColors = isDark ? LINK_COLORS_DARK : LINK_COLORS_LIGHT
   const canvasBg = isDark ? "#09090b" : "#fafafa"
 
-  // The library mutates node/link objects (adds coordinates) — feed it clones.
+  // The library mutates node/link objects (adds coordinates) - feed it clones.
   const graphData = useMemo(
     () => ({
       nodes: (data?.nodes ?? []).map((n) => ({ ...n })),
@@ -274,15 +301,29 @@ export function VisualizeTab({ project }: { project: Project }) {
   }, [ForceGraph3D])
 
   // Gentle auto-rotate until the user takes over; frame the graph on load.
+  // Requires controlType="orbit" on the graph: the default trackball controls
+  // have no autoRotate at all. Retries briefly because the graph (and its
+  // controls) mount asynchronously after the module loads.
   useEffect(() => {
-    const fg = fgRef.current
-    if (!fg) return
-    const controls = fg.controls() as {
-      autoRotate?: boolean
-      autoRotateSpeed?: number
+    let cancelled = false
+    const apply = () => {
+      if (cancelled) return
+      const fg = fgRef.current
+      if (!fg) {
+        setTimeout(apply, 200)
+        return
+      }
+      const controls = fg.controls() as {
+        autoRotate?: boolean
+        autoRotateSpeed?: number
+      }
+      controls.autoRotate = rotating
+      controls.autoRotateSpeed = 0.9
     }
-    controls.autoRotate = rotating
-    controls.autoRotateSpeed = 0.9
+    apply()
+    return () => {
+      cancelled = true
+    }
   }, [rotating, ForceGraph3D, graphData])
 
   useEffect(() => {
@@ -325,7 +366,7 @@ export function VisualizeTab({ project }: { project: Project }) {
           <div>
             <CardTitle>Knowledge graph</CardTitle>
             <CardDescription>
-              Your project&apos;s brain in 3D — files, sections, chunks and
+              Your project&apos;s brain in 3D - files, sections, chunks and
               agent memories, linked by meaning. Drag to rotate, scroll to
               zoom, click a node to inspect it.
             </CardDescription>
@@ -401,6 +442,7 @@ export function VisualizeTab({ project }: { project: Project }) {
               height={size.height}
               graphData={graphData}
               backgroundColor={canvasBg}
+              controlType="orbit"
               showNavInfo={false}
               nodeLabel={(node: GNode) =>
                 isDark
@@ -479,15 +521,26 @@ export function VisualizeTab({ project }: { project: Project }) {
               </dl>
               {fileHref(selected) && (
                 <Button
-                  asChild
                   size="sm"
                   variant="outline"
                   className="mt-3 w-full"
+                  disabled={locating}
+                  onClick={() => {
+                    setLocating(true)
+                    router.push(fileHref(selected) as string)
+                  }}
                 >
-                  <Link href={fileHref(selected) as string}>
-                    <FileText className="size-4" />
-                    Open file
-                  </Link>
+                  {locating ? (
+                    <>
+                      <FileScanIcon />
+                      <span className="font-mono text-xs">Locating file...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="size-4" />
+                      View file
+                    </>
+                  )}
                 </Button>
               )}
             </div>

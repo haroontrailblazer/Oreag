@@ -1,21 +1,21 @@
-"""CAG storage — pluggable backends, the query cache, and conversation memory.
+"""CAG storage - pluggable backends, the query cache, and conversation memory.
 
 A repeated question shouldn't re-run retrieval and the LLM, and a follow-up
 should remember the conversation. Both needs ride on a tiny string KV backend:
 
-  * ``InMemoryBackend`` — per-process dict with TTL + LRU. The local-dev/test
+  * ``InMemoryBackend`` - per-process dict with TTL + LRU. The local-dev/test
     default; cleared on restart, not shared across workers.
-  * ``RedisBackend`` — the same interface backed by Redis. Selected when
+  * ``RedisBackend`` - the same interface backed by Redis. Selected when
     ``REDIS_URL`` is configured, so the cache and conversations are shared across
     workers and survive restarts.
 
 ``make_backend`` picks one based on the URL (optional, with in-memory fallback).
 On top of a backend:
 
-  * ``QueryCache`` — CAG answer cache, keyed by project+model+top_k+content+
+  * ``QueryCache`` - CAG answer cache, keyed by project+model+top_k+content+
     question, with per-process single-flight so simultaneous identical asks
     compute once.
-  * ``ConversationStore`` — server-side chat memory keyed by ``conversation_id``.
+  * ``ConversationStore`` - server-side chat memory keyed by ``conversation_id``.
 """
 import json
 import threading
@@ -117,7 +117,7 @@ def make_backend(
 ):
     """Pick a backend: Redis when a URL is configured, else in-memory."""
     if redis_url:
-        import redis  # lazy — only required when actually configured
+        import redis  # lazy - only required when actually configured
 
         return RedisBackend(redis.from_url(redis_url))
     return InMemoryBackend(clock=clock, max_entries=max_entries)

@@ -16,7 +16,7 @@ export default async function Home() {
 
   return (
     <main className="grid min-h-dvh bg-background lg:grid-cols-2">
-      {/* Left — content */}
+      {/* Left - content */}
       <div className="flex flex-col gap-10 p-8 sm:p-12 lg:p-14">
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
@@ -55,11 +55,11 @@ export default async function Home() {
           </h1>
           <p className="max-w-md text-muted-foreground">
             Upload documents, tune chunking and embeddings, bring your own keys
-            — and ship a grounded endpoint your apps and agents can call.
+            - and ship a grounded endpoint your apps and agents can call.
           </p>
           <div className="flex items-center gap-5">
             {user ? (
-              // Already signed in — go straight to the dashboard, no sign in.
+              // Already signed in - go straight to the dashboard, no sign in.
               <Button asChild size="lg" className="group rounded-full px-6">
                 <Link href="/dashboard">
                   Go to dashboard
@@ -95,11 +95,11 @@ export default async function Home() {
         </footer>
       </div>
 
-      {/* Right — retro painting, full bleed. Only the sky/clouds swirl: a static
+      {/* Right - retro painting, full bleed. Only the sky/clouds swirl: a static
           base keeps the man, desk and documents perfectly still, while a second
           copy is displaced (#starry-motion) and masked to just the sky on top. */}
       <div className="relative hidden overflow-hidden bg-muted lg:block">
-        {/* Static base — man, desk and documents never move. */}
+        {/* Static base - man, desk and documents never move. */}
         <Image
           src="/hero.jpg"
           alt="Van Gogh Starry Night style painting of a man working through documents at a desk"
@@ -109,7 +109,7 @@ export default async function Home() {
           sizes="(min-width: 1024px) 50vw, 100vw"
           className="pointer-events-none select-none object-cover"
         />
-        {/* Swirling layer — same painting, displaced and masked to the sky only. */}
+        {/* Swirling layer - same painting, displaced and masked to the sky only. */}
         <Image
           src="/hero.jpg"
           alt=""

@@ -36,7 +36,7 @@ def parse_pdf(data: bytes) -> list[tuple[int, str]]:
 
 def recompute_project_status(db: Session, project: Project) -> None:
     # the session runs with autoflush=False, so flush pending file status
-    # changes/deletes first — otherwise this SELECT reads stale rows.
+    # changes/deletes first - otherwise this SELECT reads stale rows.
     db.flush()
     statuses = set(
         db.scalars(select(File.status).where(File.project_id == project.id)).all()
@@ -63,7 +63,7 @@ def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
     The file may have been deleted mid-ingestion; after a rollback, db.get()
     would happily return the stale identity-map object and the follow-up
     commit would explode inside the error handler. An exception escaping this
-    background task aborts every queued ingestion behind it — the "delete a
+    background task aborts every queued ingestion behind it - the "delete a
     waiting file and the backend dies" bug.
     """
     try:
@@ -71,7 +71,7 @@ def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
         db.expunge_all()  # drop stale identity-map entries so get() hits the DB
         file = db.get(File, file_id)
         if file is None:
-            logger.info("File %s was deleted during ingestion — skipping", file_id)
+            logger.info("File %s was deleted during ingestion - skipping", file_id)
             return
         file.status = "failed"
         file.error = message[:500]
@@ -104,10 +104,10 @@ def ingest_file(file_id: uuid.UUID) -> None:
         source_bytes = storage.download(file.storage_path)
         converted = convert_to_markdown(source_bytes, file.filename)
 
-        # The user may have deleted the file while we were converting — bail
+        # The user may have deleted the file while we were converting - bail
         # before uploading markdown / paying for embeddings on a ghost.
         if not _file_still_exists(db, file.id):
-            logger.info("File %s deleted during conversion — aborting", file_id)
+            logger.info("File %s deleted during conversion - aborting", file_id)
             return
 
         file.page_count = converted.page_count
@@ -188,7 +188,7 @@ def fail_stale_jobs() -> None:
             return
         for file in stale:
             file.status = "failed"
-            file.error = "Interrupted by server restart — retry from the Files tab"
+            file.error = "Interrupted by server restart - retry from the Files tab"
         for project_id in {f.project_id for f in stale}:
             project = db.get(Project, project_id)
             if project is not None:

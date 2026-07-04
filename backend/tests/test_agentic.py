@@ -2,7 +2,7 @@
 
 The loop fixes "big questions return nothing": it auto-detects when a question
 needs a long, structured answer, decomposes it into sub-queries, retrieves for
-each, and — if it still can't gather enough grounding — escalates to a human
+each, and - if it still can't gather enough grounding - escalates to a human
 clarification step instead of refusing.
 """
 import uuid
@@ -64,7 +64,7 @@ class TestParseSubqueries:
 
 
 class FakeLLM:
-    """Records prompts and returns a canned reply — no network."""
+    """Records prompts and returns a canned reply - no network."""
 
     def __init__(self, reply: str, model: str = "fake/llm"):
         self.reply = reply

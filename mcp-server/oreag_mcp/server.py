@@ -98,7 +98,7 @@ def explore_brain(query: str, hops: int = 1) -> dict:
     """Agentic retrieval over the brain. Seeds on the document chunks and saved
     memories most relevant to `query`, then expands `hops` (0-3) steps along their
     related links, returning a connected subgraph (nodes carry their text + edges)
-    to reason over and traverse — richer than flat top-k search. Prefer this over
+    to reason over and traverse - richer than flat top-k search. Prefer this over
     search_docs when you need to follow how knowledge and memory connect."""
     return _client().explore_brain(query, hops)
 

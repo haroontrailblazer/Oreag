@@ -38,5 +38,5 @@ except Exception as exc:  # noqa: BLE001
     check("delete", False, str(exc)[:200])
 
 print()
-print("STORAGE VERIFICATION:", "ALL PASS" if ok else "FAILURES — see above")
+print("STORAGE VERIFICATION:", "ALL PASS" if ok else "FAILURES - see above")
 sys.exit(0 if ok else 1)

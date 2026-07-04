@@ -50,7 +50,7 @@ export default function ProjectPage({
   }, [selectedFileId, tabParam])
 
   // Let the active (Files) tab paint and fetch first, then quietly mount the
-  // remaining tabs in the background so switching to them is instant — without
+  // remaining tabs in the background so switching to them is instant - without
   // this, each tab only fetches its data the first time it's clicked.
   const [prefetchTabs, setPrefetchTabs] = useState(false)
   useEffect(() => {
@@ -69,8 +69,8 @@ export default function ProjectPage({
   })
 
   // Push this project's live data into the dashboard's cached "/api/projects"
-  // list so any change made here — deleting files, indexing progress, indexing
-  // finishing, name/stat updates — is already reflected when the user navigates
+  // list so any change made here - deleting files, indexing progress, indexing
+  // finishing, name/stat updates - is already reflected when the user navigates
   // back, instead of showing a stale card until a manual refresh. Patches the
   // list in place (no refetch); if it isn't cached yet, the dashboard fetches
   // it normally.
@@ -87,7 +87,7 @@ export default function ProjectPage({
   // Refresh this project and the dashboard's project list together after any
   // in-project change. The list backs the Settings → API keys "Project key
   // overrides" table, so adding/removing a project-level key here shows up
-  // there immediately — no manual refresh, even if the list wasn't cached yet.
+  // there immediately - no manual refresh, even if the list wasn't cached yet.
   function handleChanged() {
     mutate()
     globalMutate("/api/projects")
@@ -120,7 +120,7 @@ export default function ProjectPage({
   return (
     // The page is a fixed frame on every screen (viewport minus the chrome
     // above/around it: mobile top bar + wrapper padding, or the desktop
-    // layout's 2rem paddings) — title, meta and the tab switcher never move;
+    // layout's 2rem paddings) - title, meta and the tab switcher never move;
     // each tab's content scrolls in its own container below them, so nothing
     // slides behind the header.
     <div className="flex h-[calc(100dvh-6.25rem)] flex-col gap-4 md:h-[calc(100dvh-4rem)] md:gap-6">
@@ -137,7 +137,7 @@ export default function ProjectPage({
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1">
-        {/* Same pill bar on every screen — compact triggers on phones so all
+        {/* Same pill bar on every screen - compact triggers on phones so all
             six fit; swipes sideways as a safety net on very narrow screens
             (the app-wide CSS hides the scrollbar). */}
         <TabsList className="w-full shrink-0 justify-start overflow-x-auto md:w-fit">

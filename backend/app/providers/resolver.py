@@ -4,7 +4,7 @@ Precedence: per-project override -> owner's account-level key -> None.
 
 Resolution is keyed on ``project.owner_id`` (NOT the request user) so it works
 identically for the dashboard (JWT) and the public ``/v1`` endpoint, which has
-no user token — only the project row.
+no user token - only the project row.
 """
 from sqlalchemy import select
 from sqlalchemy.orm import Session

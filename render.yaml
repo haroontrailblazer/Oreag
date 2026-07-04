@@ -1,4 +1,4 @@
-# Render Blueprint — deploys the FastAPI backend as a Web Service.
+# Render Blueprint - deploys the FastAPI backend as a Web Service.
 # In Render: New + → Blueprint → pick this repo. Then fill the secret env vars.
 services:
   - type: web

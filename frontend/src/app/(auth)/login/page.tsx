@@ -44,7 +44,7 @@ export default function LoginPage() {
       redirectTo: `${location.origin}/auth/callback?next=/auth/reset-password`,
     })
     if (error) toast.error(error.message)
-    else toast.success("Password reset email sent — check your inbox")
+    else toast.success("Password reset email sent - check your inbox")
   }
 
   return (

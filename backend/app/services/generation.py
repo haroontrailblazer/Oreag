@@ -4,18 +4,18 @@ from ..models import Project
 from ..providers import resolver
 from ..providers.registry import get_llm
 
-# A focused question wants a short, factual answer — and should still refuse
+# A focused question wants a short, factual answer - and should still refuse
 # rather than invent when the context truly lacks the answer.
 SHORT_SYSTEM_PROMPT = (
     "You are a helpful assistant that answers questions strictly from the provided "
     "context. If the context does not contain enough information to answer, say you "
-    "don't know — never invent facts. Cite the context blocks you used as [1], [2], "
+    "don't know - never invent facts. Cite the context blocks you used as [1], [2], "
     "etc. Keep answers concise and factual."
 )
 
 # A broad, multi-part (exam-style) question wants a long, structured answer. The
 # agentic loop has already gathered a wide context, so the model should write the
-# full answer it can support — and, crucially, NOT bail with "I don't know" when
+# full answer it can support - and, crucially, NOT bail with "I don't know" when
 # the context is only partial (that refusal is what made big questions return
 # nothing). Genuine gaps are stated, not used as an excuse to refuse outright.
 LONG_SYSTEM_PROMPT = (
@@ -26,7 +26,7 @@ LONG_SYSTEM_PROMPT = (
     "a brief summary where it helps. Ground every claim in the context and cite the "
     "blocks you used as [1], [2], etc. If the context covers the topic only "
     "partially, answer as fully as the context allows and state plainly which parts "
-    "are not covered — do NOT refuse to answer outright."
+    "are not covered - do NOT refuse to answer outright."
 )
 
 # Back-compat alias for any caller importing the old name.

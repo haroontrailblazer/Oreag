@@ -87,7 +87,7 @@ async def public_upload_files(
     """
     if not api_key.can_upload:
         raise HTTPException(
-            403, "This API key is read-only — create a key with upload permission to ingest."
+            403, "This API key is read-only - create a key with upload permission to ingest."
         )
     project = _get_project(db, project_id)
 
@@ -119,7 +119,7 @@ async def public_upload_files(
         or 0
     )
     if recent + len(uploads) > settings.upload_rate_per_minute:
-        raise HTTPException(429, "Upload rate limit exceeded — try again shortly.")
+        raise HTTPException(429, "Upload rate limit exceeded - try again shortly.")
 
     created: list[File] = []
     for upload in uploads:
@@ -166,7 +166,7 @@ def explore_brain(
 ):
     """Agentic retrieval: seed on the query's nearest document chunks AND saved
     memories, expand `hops` steps along their related links, and return a
-    connected subgraph (nodes carry their text) to reason over — richer than flat
+    connected subgraph (nodes carry their text) to reason over - richer than flat
     top-k. This is the agentic-RAG entry point; /query is the simple chat one.
     """
     project = _get_project(db, project_id)

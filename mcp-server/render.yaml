@@ -11,7 +11,7 @@ services:
     envVars:
       - key: MCP_TRANSPORT
         value: http
-      # Your backend URL — the only secret the multi-tenant server needs.
+      # Your backend URL - the only secret the multi-tenant server needs.
       # Set it in the Render dashboard (kept out of git).
       - key: OREAG_API_BASE
         sync: false

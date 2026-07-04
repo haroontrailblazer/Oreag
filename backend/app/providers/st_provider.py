@@ -1,6 +1,6 @@
 from .base import ProviderUnavailableError
 
-# loaded models are cached per process — sentence-transformers model load is slow
+# loaded models are cached per process - sentence-transformers model load is slow
 _model_cache: dict[str, object] = {}
 
 

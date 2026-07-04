@@ -3,7 +3,7 @@ import { useEffect, useId, useSyncExternalStore } from "react"
 /**
  * Shared "is this project navigating?" store.
  *
- * A project is reachable from more than one place at once — its sidebar row and
+ * A project is reachable from more than one place at once - its sidebar row and
  * its dashboard card. Each link reports its own pending state (from
  * `useLinkStatus`) here, and every link reads back whether ANY link to that
  * project is in flight. So clicking the sidebar row lights up the card's spinner

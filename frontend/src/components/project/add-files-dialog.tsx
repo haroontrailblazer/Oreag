@@ -126,8 +126,8 @@ export function AddFilesDialog({
       })
       toast.success(
         embeddingChanged
-          ? "Upload complete — re-indexing the whole project"
-          : "Upload complete — indexing started"
+          ? "Upload complete - re-indexing the whole project"
+          : "Upload complete - indexing started"
       )
       setOpen(false)
       onUploaded()

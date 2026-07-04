@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     app_encryption_key: str = ""
 
-    openai_api_key: str = ""  # deprecated — kept only so old .env files don't error
+    openai_api_key: str = ""  # deprecated - kept only so old .env files don't error
     ollama_base_url: str = "http://localhost:11434"
 
     cors_origins: str = "http://localhost:3000,http://192.168.56.1:3000"
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # Agentic query loop (run_query): decompose broad/exam-style questions, gather
     # a wide context over several rounds, and only ask the human to clarify when
-    # grounding is genuinely too thin — instead of refusing with "no reference".
+    # grounding is genuinely too thin - instead of refusing with "no reference".
     agentic_max_subqueries: int = 5        # sub-queries a broad question is split into
     agentic_max_clarifying: int = 3        # clarifying questions when escalating
     agentic_min_similarity: float = 0.2    # a source must clear this to count as grounding
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
 
     # Conversation memory (server-side, keyed by conversation_id): lets a follow-up
     # like "summarize that" be rewritten against the previous turns before retrieval.
-    conversation_ttl_seconds: int = 86400  # 24h — how long a thread is remembered
+    conversation_ttl_seconds: int = 86400  # 24h - how long a thread is remembered
     conversation_max_turns: int = 20       # turns retained per conversation
     conversation_history_turns: int = 6    # recent turns fed to the condense step
 

@@ -1,6 +1,6 @@
 """One-off DB verification helper (run from backend/: python -m tests.verify_db).
 
-Reads credentials from backend/.env — no secrets in this file.
+Reads credentials from backend/.env - no secrets in this file.
 """
 import sys
 

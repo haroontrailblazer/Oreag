@@ -10,7 +10,7 @@ import { DocsSidebar } from "./docs-sidebar"
 import { Markdown } from "./markdown"
 
 export const metadata: Metadata = {
-  title: "Documentation — Oreag",
+  title: "Documentation - Oreag",
   description:
     "Everything in Oreag: projects, uploading documents, the RAG query API, agentic retrieval, agent memory, the memory graph, the MCP server, and API keys.",
 }

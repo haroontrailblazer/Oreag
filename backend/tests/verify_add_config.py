@@ -134,5 +134,5 @@ else:
 httpx.delete(f"{API}/api/projects/{pid}", headers=auth, timeout=30)
 
 print()
-print("ADD-CONFIG VERIFICATION:", "ALL PASS" if ok else "FAILURES — see above")
+print("ADD-CONFIG VERIFICATION:", "ALL PASS" if ok else "FAILURES - see above")
 sys.exit(0 if ok else 1)

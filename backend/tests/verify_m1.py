@@ -135,5 +135,5 @@ r = httpx.delete(f"{API}/api/projects/{project['id']}", headers=auth, timeout=30
 check("delete project", r.status_code == 204, f"({r.status_code})")
 
 print()
-print("M1 VERIFICATION:", "ALL PASS" if ok else "FAILURES — see above")
+print("M1 VERIFICATION:", "ALL PASS" if ok else "FAILURES - see above")
 sys.exit(0 if ok else 1)

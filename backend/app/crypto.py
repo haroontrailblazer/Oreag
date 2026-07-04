@@ -15,7 +15,7 @@ from .config import settings
 def _fernet() -> Fernet:
     if not settings.app_encryption_key:
         raise RuntimeError(
-            "APP_ENCRYPTION_KEY is not configured — generate one with "
+            "APP_ENCRYPTION_KEY is not configured - generate one with "
             "`python -c \"from cryptography.fernet import Fernet; "
             "print(Fernet.generate_key().decode())\"` and set it in the environment."
         )

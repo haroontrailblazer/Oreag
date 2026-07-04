@@ -117,7 +117,7 @@ db.add(
 )
 db.commit()
 
-print("Ingesting (embeddings via Ollama — may take a minute)…")
+print("Ingesting (embeddings via Ollama - may take a minute)…")
 ingest_file(file_id)
 
 db.expire_all()
@@ -164,7 +164,7 @@ try:
     )
     check("public /v1 rejects bad key", r2.status_code == 401, f"({r2.status_code})")
 except httpx.ConnectError:
-    print("SKIP public /v1 checks — backend not running on :8000")
+    print("SKIP public /v1 checks - backend not running on :8000")
 
 # second file (same content) -> must auto-link to the first via similarity
 file_id2 = uuid.uuid4()
@@ -208,5 +208,5 @@ storage.delete(
 db.close()
 
 print()
-print("E2E VERIFICATION:", "ALL PASS" if ok else "FAILURES — see above")
+print("E2E VERIFICATION:", "ALL PASS" if ok else "FAILURES - see above")
 sys.exit(0 if ok else 1)

@@ -195,12 +195,12 @@ export function ApiTab({ project }: { project: Project }) {
       method: "POST" as const,
       path: `${basePath}/query`,
       description:
-        "Ask a question — grounded answer with cited sources and conversation memory",
+        "Ask a question - grounded answer with cited sources and conversation memory",
     },
     {
       method: "POST" as const,
       path: `${basePath}/retrieve`,
-      description: "Retrieval only — top-matching chunks, no LLM call",
+      description: "Retrieval only - top-matching chunks, no LLM call",
     },
     {
       method: "POST" as const,
@@ -210,7 +210,7 @@ export function ApiTab({ project }: { project: Project }) {
     {
       method: "GET" as const,
       path: `${basePath}/memory-graph`,
-      description: "Full agent memory graph — nodes and related edges",
+      description: "Full agent memory graph - nodes and related edges",
     },
   ]
 
@@ -333,7 +333,7 @@ print(data["answer"])`
         method: "DELETE",
       })
       mutate()
-      // Don't close yet — let the loader finish its current animation cycle.
+      // Don't close yet - let the loader finish its current animation cycle.
       revokeDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to revoke key")
@@ -357,7 +357,7 @@ print(data["answer"])`
         method: "DELETE",
       })
       mutate()
-      // Don't close yet — let the loader finish its current animation cycle.
+      // Don't close yet - let the loader finish its current animation cycle.
       deleteDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete key")
@@ -380,7 +380,7 @@ print(data["answer"])`
             <div>
               <CardTitle>API keys</CardTitle>
               <CardDescription>
-                Keys are shown once at creation — store them securely.
+                Keys are shown once at creation - store them securely.
               </CardDescription>
             </div>
             <Button onClick={handleCreate} disabled={creating}>
@@ -435,7 +435,7 @@ print(data["answer"])`
                     className="py-10 text-center text-muted-foreground"
                   >
                     <KeyRound className="mx-auto mb-2 size-6" />
-                    No keys yet — create one to call your RAG API.
+                    No keys yet - create one to call your RAG API.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -554,7 +554,7 @@ print(data["answer"])`
         <CardHeader>
           <CardTitle>Quickstart</CardTitle>
           <CardDescription>
-            Query this project from your app — swap in an API key and go. Pass
+            Query this project from your app - swap in an API key and go. Pass
             the same{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
               conversation_id
@@ -598,7 +598,7 @@ print(data["answer"])`
             <p className="text-xs leading-relaxed text-muted-foreground">
               Upload files programmatically with a key that has{" "}
               <span className="font-medium text-foreground">uploads</span>{" "}
-              enabled — read-only keys get a 403.
+              enabled - read-only keys get a 403.
             </p>
             <CodePanel title="Terminal" code={uploadExample} />
           </div>
@@ -610,7 +610,7 @@ print(data["answer"])`
           <CardTitle>MCP connector</CardTitle>
           <CardDescription>
             Give coding agents (Claude Code, Codex) persistent memory and
-            document search on this project — authenticate with an API key as
+            document search on this project - authenticate with an API key as
             the bearer token.
           </CardDescription>
         </CardHeader>
@@ -634,14 +634,14 @@ print(data["answer"])`
           <DialogHeader>
             <DialogTitle>API key created</DialogTitle>
             <DialogDescription>
-              Copy it now — this is the only time the full key is shown.
+              Copy it now - this is the only time the full key is shown.
             </DialogDescription>
           </DialogHeader>
           {newKey && (
             <div className="space-y-2">
               <CopyRow value={newKey.key} label="Copy API key" />
               <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                Copy this key now — for security it will{" "}
+                Copy this key now - for security it will{" "}
                 <span className="font-medium">never be shown again</span>.
               </p>
             </div>
@@ -699,7 +699,7 @@ print(data["answer"])`
                 Key{" "}
                 <span className="font-mono">{deleteTarget?.key_prefix}…</span>{" "}
                 will be permanently removed from the database. Any app or agent
-                using it stops working immediately — this cannot be undone.
+                using it stops working immediately - this cannot be undone.
               </DialogDescription>
             )}
           </DialogHeader>

@@ -5,8 +5,8 @@ import { toast as sonnerToast } from "sonner"
 
 /**
  * Drop-in replacement for sonner's `toast`. Every notification renders as the
- * same card — a solid accent icon disc, a bold title and an optional muted
- * subtitle — auto dismissing after 3s (no close button). Import `toast` from
+ * same card - a solid accent icon disc, a bold title and an optional muted
+ * subtitle - auto dismissing after 3s (no close button). Import `toast` from
  * here instead of from "sonner"; the `toast.success / error / info(message)`
  * API is unchanged. Card styling lives in the `.toast-*` classes in globals.css.
  */

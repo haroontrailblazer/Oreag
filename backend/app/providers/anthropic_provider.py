@@ -1,4 +1,4 @@
-"""Anthropic Claude provider (chat only — Anthropic has no embedding models)."""
+"""Anthropic Claude provider (chat only - Anthropic has no embedding models)."""
 from .base import ProviderUnavailableError
 
 # Big enough for the agentic loop's long exam-style answers; small enough to

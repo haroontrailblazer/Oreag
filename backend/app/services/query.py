@@ -85,7 +85,7 @@ def run_query(
     if not chunk_count and not memory_count:
         raise HTTPException(
             status_code=409,
-            detail="Project has no indexed content yet — upload files (or save memories) and wait for indexing",
+            detail="Project has no indexed content yet - upload files (or save memories) and wait for indexing",
         )
 
     top_k = min(top_k_override or project.top_k, 20)
@@ -114,7 +114,7 @@ def run_query(
                             }
                         )
             except ProviderUnavailableError:
-                pass  # no embedding key for memory search — answer from docs only
+                pass  # no embedding key for memory search - answer from docs only
         return sources
 
     def _llm():

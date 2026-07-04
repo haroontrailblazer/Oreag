@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 
-// Per-bar animation offsets — a brightness highlight travels around the ring.
+// Per-bar animation offsets - a brightness highlight travels around the ring.
 const BAR_DELAYS = [
   "0s",
   "-1.1s",

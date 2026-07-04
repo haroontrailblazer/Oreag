@@ -30,7 +30,7 @@ class ProjectUpdate(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     top_k: int | None = Field(default=None, ge=1, le=20)
-    # Changing a key (not the model) is a safe, instant edit — no reindex needed.
+    # Changing a key (not the model) is a safe, instant edit - no reindex needed.
     embedding_api_key: str | None = None
     llm_api_key: str | None = None
 
@@ -120,7 +120,7 @@ class ProviderKeyCreate(BaseModel):
 
 
 class ProviderKeyOut(BaseModel):
-    """Masked view — the raw/encrypted key is never serialized."""
+    """Masked view - the raw/encrypted key is never serialized."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -155,7 +155,7 @@ class QueryResponse(BaseModel):
     model: str
     latency_ms: int
     # Agentic loop transparency (defaults keep older clients working):
-    depth: str = "short"  # "short" or "long" — how the question was classified
+    depth: str = "short"  # "short" or "long" - how the question was classified
     sub_queries: list[str] = Field(default_factory=list)  # the loop's queries
     # Human-in-the-loop: set when the loop couldn't ground an answer and is
     # asking the caller to clarify instead of guessing.

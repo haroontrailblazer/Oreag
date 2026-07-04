@@ -32,14 +32,14 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Stale-job cleanup failed (is the database reachable?)")
     else:
-        logger.warning("DATABASE_URL is not set — only /healthz will work")
+        logger.warning("DATABASE_URL is not set - only /healthz will work")
     yield
 
 
 app = FastAPI(title="Oreag API", version="0.1.0", lifespan=lifespan)
 
 # Explicit origins from config, plus a regex that covers:
-#  (a) any Vercel deployment — the stable production domain AND the per-commit
+#  (a) any Vercel deployment - the stable production domain AND the per-commit
 #      preview URLs whose hostname changes on every deploy, and
 #  (b) localhost / any private-LAN address for local dev.
 _ALLOWED_ORIGIN_REGEX = (
@@ -74,7 +74,7 @@ app.include_router(memory_graph.public_router)
 
 
 # GET and HEAD: uptime monitors (e.g. UptimeRobot) default to HEAD, and FastAPI
-# does not auto-add HEAD to a GET route — without this a HEAD probe gets a 405.
+# does not auto-add HEAD to a GET route - without this a HEAD probe gets a 405.
 @app.api_route("/healthz", methods=["GET", "HEAD"])
 def healthz():
     return {"status": "ok"}

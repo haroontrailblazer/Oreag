@@ -3,15 +3,15 @@
 Flat RAG embeds the whole question once and answers from the top-k chunks. That
 works for a focused question ("what is deep learning") but fails a broad,
 multi-part, exam-style question ("explain deep learning, its types and
-applications — 13 marks"): one embedding matches poorly, the retrieved chunks
+applications - 13 marks"): one embedding matches poorly, the retrieved chunks
 miss whole sub-topics, and the model hits its "I don't know" guardrail.
 
 This module adds a loop:
 
-  1. detect_depth   — does this question want a short answer or a long one?
-  2. plan_subqueries — break a long question into focused retrieval queries
-  3. retrieve each, merge_sources — gather a broad, de-duplicated context
-  4. is_sufficient   — did we actually ground enough to answer?
+  1. detect_depth   - does this question want a short answer or a long one?
+  2. plan_subqueries - break a long question into focused retrieval queries
+  3. retrieve each, merge_sources - gather a broad, de-duplicated context
+  4. is_sufficient   - did we actually ground enough to answer?
   5. if yes  -> answer (depth-aware: long questions get a structured answer)
      if no   -> escalate to a human clarification step instead of refusing
 """
@@ -25,7 +25,7 @@ _LONG_DIRECTIVES = (
     "analyze", "analyse", "evaluate", "illustrate", "examine", "outline",
     "derive", "summarize", "summarise", "justify", "differentiate", "list",
 )
-# "13 marks", "13 mark", "13marks" — an exam weighting demands a full answer.
+# "13 marks", "13 mark", "13marks" - an exam weighting demands a full answer.
 _MARKS_RE = re.compile(r"\b\d{1,2}\s*marks?\b", re.IGNORECASE)
 _DIRECTIVE_RE = re.compile(
     r"\b(" + "|".join(_LONG_DIRECTIVES) + r")\b", re.IGNORECASE
@@ -74,7 +74,7 @@ def parse_subqueries(raw: str, max_n: int) -> list[str]:
 PLAN_SYSTEM_PROMPT = (
     "You are a retrieval planner. Break the user's question into a short list of "
     "focused sub-questions that, answered together, fully cover it. Output one "
-    "sub-question per line — no numbering, no commentary, no preamble."
+    "sub-question per line - no numbering, no commentary, no preamble."
 )
 
 
@@ -94,8 +94,8 @@ def plan_subqueries(llm, question: str, max_n: int = 5) -> list[str]:
 CLARIFY_SYSTEM_PROMPT = (
     "You help a retrieval system that could not find enough information to answer "
     "the user's question confidently. Ask 1-3 short clarifying questions that would "
-    "narrow it down — for example which topic, document, chapter, or scope is "
-    "meant. Output one question per line — no numbering, no commentary."
+    "narrow it down - for example which topic, document, chapter, or scope is "
+    "meant. Output one question per line - no numbering, no commentary."
 )
 
 _GENERIC_CLARIFICATION = (
@@ -119,7 +119,7 @@ CONDENSE_SYSTEM_PROMPT = (
     "Given a conversation and a follow-up message, rewrite the follow-up as a "
     "standalone question that can be understood on its own. Resolve references "
     "like 'it', 'that', 'this', 'the previous one'. If the follow-up is already "
-    "standalone, return it unchanged. Output only the rewritten question — no "
+    "standalone, return it unchanged. Output only the rewritten question - no "
     "preamble, no quotes."
 )
 
@@ -231,7 +231,7 @@ def run_agentic_query(
     writes the (depth-aware) answer, and ``clarify_fn`` produces clarifying
     questions. The loop:
 
-      * detects depth — a broad question is decomposed into sub-queries, a
+      * detects depth - a broad question is decomposed into sub-queries, a
         focused one is searched as-is;
       * retrieves every query and merges the results into a widening context;
       * answers as soon as the context is sufficient (depth threaded through);
@@ -257,7 +257,7 @@ def run_agentic_query(
                 rounds=rounds,
                 needs_clarification=False,
             )
-        # Not enough yet — broaden the net and re-query the literal question.
+        # Not enough yet - broaden the net and re-query the literal question.
         queries = [question]
         top_k = min(top_k * 2, 20)
 

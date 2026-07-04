@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
  * Authored at 200×320 and scaled by `scale`; boxes use the theme --primary and
  * the masks use --background, so it must sit on a `bg-background` surface.
  *
- * `onCycle` fires once at the end of every full animation cycle — use it to
+ * `onCycle` fires once at the end of every full animation cycle - use it to
  * defer closing until the animation has finished, even if the work ended early.
  */
 /* The scatter/drop travel paints beyond the assembled cube, and the
@@ -50,7 +50,7 @@ export function BoxLoader({
           <div
             key={i}
             className={`box box${i}`}
-            // box0's move animation is one per cycle — use it as the heartbeat.
+            // box0's move animation is one per cycle - use it as the heartbeat.
             onAnimationIteration={
               i === 0 && onCycle
                 ? (e) => {

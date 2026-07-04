@@ -48,7 +48,7 @@ export default function ResetPasswordPage() {
           <SetPasswordForm
             submitLabel="Update password"
             onSuccess={() => {
-              toast.success("Password updated — you're signed in")
+              toast.success("Password updated - you're signed in")
               router.push("/dashboard")
               router.refresh()
             }}

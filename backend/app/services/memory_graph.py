@@ -16,14 +16,14 @@ RELATED_THRESHOLD = 0.6     # min cosine similarity for a "related" edge
 RELATED_MAX_EDGES = 600     # safety cap on emitted chunk pairs
 RELATED_CHUNK_CAP = 1500    # skip the heavy pass for very large projects
 
-# Memory linking knobs — connect memories to chunks and to each other.
+# Memory linking knobs - connect memories to chunks and to each other.
 MEMORY_RELATED_K = 5
 MEMORY_RELATED_THRESHOLD = 0.6
 MEMORY_RELATED_MAX_EDGES = 400
 MEMORY_CAP = 1000           # skip the memory linking pass above this many memories
 
 # For every chunk, find its nearest chunks that live in a *different* file of the
-# same project (exact cosine scan — every project's chunks share one embedding
+# same project (exact cosine scan - every project's chunks share one embedding
 # dimension, so the operator is well defined). Returns candidate pairs with the
 # creation times needed to orient each edge from the newer file back to the older.
 RELATED_SQL = text(
@@ -184,7 +184,7 @@ def _related_edges(
 
 # Memories share the project's embedding space with chunks, so the same cosine
 # operator links a memory to its nearest document chunks and to its nearest other
-# memories — weaving the saved session memory into the document graph.
+# memories - weaving the saved session memory into the document graph.
 MEMORY_CHUNK_SQL = text(
     """
     SELECT m.id AS mem_id, c.id AS chunk_id,

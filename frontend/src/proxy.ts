@@ -27,7 +27,7 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  // refreshes the session cookie if expired — do not remove
+  // refreshes the session cookie if expired - do not remove
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -50,7 +50,7 @@ export const config = {
     // (opengraph-image, twitter-image, icon, apple-icon, sitemap, robots,
     // manifest). Those render with NO file extension, so without listing them
     // here the auth check below redirects unauthenticated social crawlers to
-    // /login — which is why the OG preview image never loaded.
+    // /login - which is why the OG preview image never loaded.
     "/((?!_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|icon|apple-icon|sitemap\\.xml|robots\\.txt|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 }

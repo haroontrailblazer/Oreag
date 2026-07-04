@@ -15,7 +15,7 @@ def _post(path: str, payload: dict, timeout: float) -> dict:
         return resp.json()
     except httpx.ConnectError:
         raise ProviderUnavailableError(
-            f"Ollama is not reachable at {settings.ollama_base_url} — is Ollama running?"
+            f"Ollama is not reachable at {settings.ollama_base_url} - is Ollama running?"
         )
     except httpx.HTTPStatusError as exc:
         raise ProviderUnavailableError(

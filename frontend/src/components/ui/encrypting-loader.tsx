@@ -14,7 +14,7 @@ function code(): string {
 }
 
 /** Lottielab "Data | Encrypting"-style loader: rows of monospace codes with a
- * single highlighted row scrambling its characters, and a mono pill label —
+ * single highlighted row scrambling its characters, and a mono pill label -
  * in the app's sky accent. Shown while provider API keys are encrypted and
  * stored (account and project level). */
 export function EncryptingLoader({

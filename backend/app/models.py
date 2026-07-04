@@ -116,7 +116,7 @@ class ProviderKey(Base):
 
 
 class Memory(Base):
-    """Agent memory entry — saved and recalled via the MCP server."""
+    """Agent memory entry - saved and recalled via the MCP server."""
 
     __tablename__ = "memories"
 

@@ -1,6 +1,6 @@
 -- BYOK provider credentials. Users supply their own OpenAI / Gemini / Anthropic
 -- keys instead of a shared server key. Keys are encrypted by the app layer
--- (Fernet) before they ever reach the database — `encrypted_key` is ciphertext,
+-- (Fernet) before they ever reach the database - `encrypted_key` is ciphertext,
 -- never plaintext. `last4` is for masked display only.
 
 -- Account-level keys: one per (owner, provider), reused across all the user's

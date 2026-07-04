@@ -19,7 +19,7 @@ import { fetcher } from "@/lib/api"
 import { useProjectNavPending } from "@/lib/nav-pending"
 import type { Project } from "@/lib/types"
 
-// Spinning glow colour per status — only the outline changes, text stays white.
+// Spinning glow colour per status - only the outline changes, text stays white.
 const STATUS_GLOW: Record<Project["status"], string> = {
   empty: "#9ca3af",
   indexing: "#eab308",

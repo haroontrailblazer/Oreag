@@ -54,7 +54,7 @@ export function SettingsTab({
   const [topK, setTopK] = useState(project.top_k)
   const [saving, setSaving] = useState(false)
 
-  // Answer model (LLM) — instant save
+  // Answer model (LLM) - instant save
   const [llm, setLlm] = useState(`${project.llm_provider}/${project.llm_model}`)
   const [llmKeyInput, setLlmKeyInput] = useState("")
   const [llmEditingKey, setLlmEditingKey] = useState(false)
@@ -63,7 +63,7 @@ export function SettingsTab({
   // encrypting animation; plain model changes keep the quiet button spinner).
   const [encryptingLlm, setEncryptingLlm] = useState(false)
 
-  // Indexing + embedding — key-only change is instant; model/chunk change re-indexes
+  // Indexing + embedding - key-only change is instant; model/chunk change re-indexes
   const [chunkSize, setChunkSize] = useState(project.chunk_size)
   const [chunkOverlap, setChunkOverlap] = useState(project.chunk_overlap)
   const [embedding, setEmbedding] = useState(
@@ -253,7 +253,7 @@ export function SettingsTab({
         method: "POST",
         body: JSON.stringify(body),
       })
-      toast.success("Re-indexing started — all files will be processed again")
+      toast.success("Re-indexing started - all files will be processed again")
       setConfirmReindex(false)
       setEmbKeyInput("")
       setEmbEditingKey(false)
@@ -277,7 +277,7 @@ export function SettingsTab({
         (list) => list?.filter((p) => p.id !== project.id),
         { revalidate: false }
       )
-      // Don't navigate yet — let the loader finish its current animation cycle.
+      // Don't navigate yet - let the loader finish its current animation cycle.
       deleteDone.current = true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed")
@@ -340,7 +340,7 @@ export function SettingsTab({
           <CardTitle>Answer model (LLM)</CardTitle>
           <CardDescription>
             The chat model used to write answers. Only providers you have a key
-            for appear — add more in{" "}
+            for appear - add more in{" "}
             <a href="/settings/api-keys" className="underline">
               Settings → API keys
             </a>

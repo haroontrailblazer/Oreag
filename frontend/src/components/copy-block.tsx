@@ -6,7 +6,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 
 /**
- * Multi-line copyable code block — a <pre> with a one-click copy button in the
+ * Multi-line copyable code block - a <pre> with a one-click copy button in the
  * corner. The single-line sibling is CopyField; this preserves newlines for
  * snippets (curl, fetch, the `claude mcp add` command, etc.).
  */

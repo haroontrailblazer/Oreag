@@ -5,7 +5,7 @@ import { useDocsToc } from "./use-docs-toc"
 /**
  * Left navigation: a flat list of the documentation topics. The topic you're
  * currently scrolled into is highlighted (scroll-spy). Sub-topics are NOT shown
- * here — they live in the right-hand "On this page" panel so the left rail stays
+ * here - they live in the right-hand "On this page" panel so the left rail stays
  * a clean, scannable topic list.
  */
 export function DocsSidebar() {

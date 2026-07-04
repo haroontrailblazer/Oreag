@@ -1,5 +1,5 @@
 # Remote (HTTP) deployment of the Oreag MCP server. Builds the package and
-# serves the streamable-HTTP transport on $PORT so it can run anywhere —
+# serves the streamable-HTTP transport on $PORT so it can run anywhere -
 # Render, Railway, Fly, Cloud Run, a plain VM, etc.
 FROM python:3.12-slim
 
@@ -18,7 +18,7 @@ ENV MCP_TRANSPORT=http \
 EXPOSE 8000
 
 # Runtime env (set as platform env / secrets, not baked in):
-#   Multi-tenant (recommended): OREAG_API_BASE only — each caller connects to
+#   Multi-tenant (recommended): OREAG_API_BASE only - each caller connects to
 #     <host>/projects/<project-id>/mcp with their own `Authorization: Bearer <key>`.
 #   Single-project: also set OREAG_API_KEY + OREAG_PROJECT_ID (+ MCP_AUTH_TOKEN
 #     to guard the fixed /mcp URL).

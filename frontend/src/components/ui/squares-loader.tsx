@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 
-// (delay ms, alternate?) per square — the original 3×3 staggered fade wave.
+// (delay ms, alternate?) per square - the original 3×3 staggered fade wave.
 const SQUARES = [
   { delay: 0, alternate: true },
   { delay: 75, alternate: true },
@@ -15,7 +15,7 @@ const SQUARES = [
 
 /**
  * A 3×3 grid of squares that fade in and out in sequence. Fully contained (no
- * movement) — colour follows currentColor; `size` is the square edge in px, so
+ * movement) - colour follows currentColor; `size` is the square edge in px, so
  * the whole loader is `size * 3 + 2`px. Uses the `fade-in` keyframe.
  */
 export function SquaresLoader({

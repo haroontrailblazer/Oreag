@@ -3,7 +3,7 @@
 //
 // Design: the real Oreag logo inside the 3D "app-icon" badge (matching the
 // .brand-mark treatment in globals.css), an Oreag wordmark, the amber/sky accent
-// tagline from the landing hero, and feature pills — on a dark canvas with a soft
+// tagline from the landing hero, and feature pills - on a dark canvas with a soft
 // brand-coloured glow.
 import { readFileSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -29,7 +29,7 @@ let logoSvg = readFileSync(join(here, "..", "public", "logo.svg"), "utf8")
 logoSvg = logoSvg.replace(/fill="#[0-9a-fA-F]+"/g, 'fill="#ffffff"')
 const logoSrc = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString("base64")}`
 
-// The 3D badge — same gradient + layered shadows as `.brand-mark` (light), with a
+// The 3D badge - same gradient + layered shadows as `.brand-mark` (light), with a
 // child gloss overlay standing in for the CSS ::after (satori has no pseudos).
 const badge = h(
   "div",
@@ -68,7 +68,7 @@ const badge = h(
   })
 )
 
-// Accent tagline (amber "documents", sky "RAG API") — built as coloured word
+// Accent tagline (amber "documents", sky "RAG API") - built as coloured word
 // chips so satori lays them out inline without inline-text quirks.
 const phrase = [
   ["Turn your", "#a1a1aa"],

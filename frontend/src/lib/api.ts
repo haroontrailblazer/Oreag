@@ -7,7 +7,7 @@ const LOCAL_HOSTS = ["localhost", "127.0.0.1"]
  * Resolve the FastAPI base URL.
  *
  * - Honors NEXT_PUBLIC_API_BASE_URL when it points at a real (non-localhost)
- *   host — e.g. a deployed API domain.
+ *   host - e.g. a deployed API domain.
  * - Otherwise follows the browser's current hostname, so the app works whether
  *   it's opened at http://localhost:3000 or http://<lan-ip>:3000. A hardcoded
  *   "localhost" would otherwise resolve to the *client's* machine over the LAN
@@ -112,7 +112,7 @@ export async function uploadWithProgress<T>(
     if (session) {
       xhr.setRequestHeader("Authorization", `Bearer ${session.access_token}`)
     }
-    // Intentionally no Content-Type — the browser sets the multipart boundary.
+    // Intentionally no Content-Type - the browser sets the multipart boundary.
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {

@@ -86,7 +86,7 @@ export function ProjectKeys() {
                   colSpan={4}
                   className="pl-6 pr-6 text-sm text-muted-foreground"
                 >
-                  No project-level keys — every project uses your account keys
+                  No project-level keys - every project uses your account keys
                   above.
                 </TableCell>
               </TableRow>

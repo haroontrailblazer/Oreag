@@ -127,7 +127,7 @@
   }
 }
 
-/* Drawer (Sheet) enter/leave — referenced via arbitrary `animate-[...]` classes
+/* Drawer (Sheet) enter/leave - referenced via arbitrary `animate-[...]` classes
    in components/ui/sheet.tsx. Radix keeps the element mounted for the duration
    of these so the close animation can play. */
 @keyframes fade-in {
@@ -179,7 +179,7 @@
   }
 }
 
-/* Bouncing-dots loader — see components/ui/loader.tsx (LoaderOne). */
+/* Bouncing-dots loader - see components/ui/loader.tsx (LoaderOne). */
 @keyframes loader-one-bounce {
   0%,
   100% {
@@ -192,7 +192,7 @@
   }
 }
 
-/* 12-bar fade spinner — see components/ui/spinner.tsx */
+/* 12-bar fade spinner - see components/ui/spinner.tsx */
 @keyframes spinner-fade {
   from {
     opacity: 1;
@@ -202,7 +202,7 @@
   }
 }
 
-/* Ticker-tape marquee — two copies translated -50% loop seamlessly (each copy
+/* Ticker-tape marquee - two copies translated -50% loop seamlessly (each copy
    carries its own trailing gap via pr-*). Used on the dashboard project cards. */
 @keyframes marquee {
   from {
@@ -232,7 +232,7 @@
   );
 }
 
-/* Banter loader — a 3×3 of boxes shuffling around an empty slot. The component
+/* Banter loader - a 3×3 of boxes shuffling around an empty slot. The component
    (components/ui/banter-loader.tsx) scales this 72px loader to fit; squares use
    currentColor so they can be tinted. */
 .banter-loader {
@@ -415,7 +415,7 @@
   100% { transform: translate(0px, 0); }
 }
 
-/* "Building boxes" 3D loader — see components/ui/box-loader.tsx. Boxes use the
+/* "Building boxes" 3D loader - see components/ui/box-loader.tsx. Boxes use the
    theme --primary; the masks use --background so the boxes rise from behind the
    surface. */
 .box-build {
@@ -533,7 +533,7 @@
   --b: 1.4;
 }
 /* Scatter offsets kept compact (≤ ~90px) so the full fly-in happens inside
-   the BoxLoader's clipped frame — large offsets left the frame empty for most
+   the BoxLoader's clipped frame - large offsets left the frame empty for most
    of the cycle once clipping was added (boxes travelled outside the box). */
 .box-build .box.box0 { --x: -70px; --y: -40px; left: 58px; top: 108px; }
 .box-build .box.box1 { --x: -85px; --y: 40px; left: 25px; top: 120px; }
@@ -663,7 +663,7 @@
   66%, 100% { opacity: 1; }
 }
 
-/* Project status chip — a dark pill with a glow border that spins around it,
+/* Project status chip - a dark pill with a glow border that spins around it,
    tinted by --glow (with a white highlight). Only the glow colour changes per
    status; the label text stays white. See the dashboard StatusButton. */
 .status-btn {
@@ -780,14 +780,14 @@
   -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent 44%);
   mask-image: linear-gradient(to bottom, #000 30%, transparent 44%);
 }
-/* Respect users who prefer less motion — drop the swirling layer entirely. */
+/* Respect users who prefer less motion - drop the swirling layer entirely. */
 @media (prefers-reduced-motion: reduce) {
   .starry-sky {
     display: none;
   }
 }
 
-/* Toast cards — custom sonner toasts (see lib/toast.tsx): a card with a soft
+/* Toast cards - custom sonner toasts (see lib/toast.tsx): a card with a soft
    coloured left glow, a solid accent icon disc (white glyph), a bold title and
    a muted subtitle. No close button. Dark theme below matches the reference
    design; each variant only changes the accent + glow colour vars. */
@@ -824,7 +824,7 @@
   --toast-accent: #ef4444;
   --toast-glow: rgba(239, 68, 68, 0.16);
 }
-/* Mobile — sonner (≤600px, its own breakpoint) stretches each toast slot to
+/* Mobile - sonner (≤600px, its own breakpoint) stretches each toast slot to
    the full viewport width, so the fixed-width card sat flush left. Center it
    inside the slot; desktop (>600px) keeps the bottom-right layout untouched. */
 @media (max-width: 600px) {
@@ -832,7 +832,7 @@
     margin-inline: auto;
   }
 }
-/* Dark theme — the dark notification card from the reference design. */
+/* Dark theme - the dark notification card from the reference design. */
 .dark .toast-card {
   background-color: rgba(28, 31, 38, 0.94);
   border-color: rgba(255, 255, 255, 0.07);

@@ -1,4 +1,4 @@
-# Backend container — works on Render, Railway, Fly.io, Cloud Run, etc.
+# Backend container - works on Render, Railway, Fly.io, Cloud Run, etc.
 FROM python:3.13-slim
 
 WORKDIR /app

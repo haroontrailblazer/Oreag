@@ -3,7 +3,7 @@ import type { CSSProperties } from "react"
 import { cn } from "@/lib/utils"
 
 /**
- * Three dots that bounce in sequence — a drop-in loading indicator used in
+ * Three dots that bounce in sequence - a drop-in loading indicator used in
  * place of "…" button labels and ad-hoc dot rows. Colour follows currentColor,
  * so it reads correctly on a dark button (white) or muted text (grey).
  * Animation keyframe `loader-one-bounce` lives in globals.css.
