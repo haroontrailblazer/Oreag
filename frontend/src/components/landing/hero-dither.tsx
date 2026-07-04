@@ -28,14 +28,10 @@ export function HeroDither() {
 
   return (
     <Dither
-      waveColor={[0.5, 0.5, 0.5]}
-      disableAnimation={reducedMotion}
-      enableMouseInteraction={!reducedMotion}
-      mouseRadius={0.3}
+      src="/hero.jpg"
       colorNum={4}
-      waveAmplitude={0.3}
-      waveFrequency={3}
-      waveSpeed={0.05}
+      pixelSize={2}
+      disableAnimation={reducedMotion}
     />
   )
 }

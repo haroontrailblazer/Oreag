@@ -1,15 +1,18 @@
 "use client"
 
-import { useEffect, useMemo, useRef } from "react"
-import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import { EffectComposer, wrapEffect } from "@react-three/postprocessing"
 import { Effect } from "postprocessing"
 import * as THREE from "three"
 
-// Animated dithered waves (react-bits "Dither"): fbm noise waves rendered on a
-// full-screen plane, then quantized through an ordered 8x8 Bayer dither pass.
+// The landing hero painting, dithered: hero.jpg is drawn cover-fit on a
+// full-bleed plane with the Starry Night sky band swirled by animated perlin
+// noise (the same motion the old SVG displacement filter gave it), then the
+// whole frame is quantized through an ordered 8x8 Bayer dither for the retro
+// look. Tuned against CPU-rendered previews of the exact same math.
 
-const waveVertexShader = `
+const vertexShader = `
 precision highp float;
 varying vec2 vUv;
 void main() {
@@ -20,17 +23,15 @@ void main() {
 }
 `
 
-const waveFragmentShader = `
+const paintingFragmentShader = `
 precision highp float;
+uniform sampler2D map;
 uniform vec2 resolution;
+uniform vec2 texResolution;
 uniform float time;
-uniform float waveSpeed;
-uniform float waveFrequency;
-uniform float waveAmplitude;
-uniform vec3 waveColor;
-uniform vec2 mousePos;
-uniform int enableMouseInteraction;
-uniform float mouseRadius;
+uniform float swirlStrength;
+uniform float swirlFrequency;
+varying vec2 vUv;
 
 vec4 mod289(vec4 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
 vec4 permute(vec4 x) { return mod289(((x * 34.0) + 1.0) * x); }
@@ -65,38 +66,27 @@ float cnoise(vec2 P) {
   return 2.3 * mix(n_x.x, n_x.y, fade_xy.y);
 }
 
-const int OCTAVES = 4;
-float fbm(vec2 p) {
-  float value = 0.0;
-  float amp = 1.0;
-  float freq = waveFrequency;
-  for (int i = 0; i < OCTAVES; i++) {
-    value += amp * abs(cnoise(p));
-    p *= freq;
-    amp *= waveAmplitude;
-  }
-  return value;
-}
-
-float pattern(vec2 p) {
-  vec2 p2 = p - time * waveSpeed;
-  return fbm(p + fbm(p2));
-}
-
 void main() {
-  vec2 uv = gl_FragCoord.xy / resolution.xy;
-  uv -= 0.5;
-  uv.x *= resolution.x / resolution.y;
-  float f = pattern(uv);
-  if (enableMouseInteraction == 1) {
-    vec2 mouseNDC = (mousePos / resolution - 0.5) * vec2(1.0, -1.0);
-    mouseNDC.x *= resolution.x / resolution.y;
-    float dist = length(uv - mouseNDC);
-    float effect = 1.0 - smoothstep(0.0, mouseRadius, dist);
-    f -= 0.5 * effect;
-  }
-  vec3 col = mix(vec3(0.0), waveColor, f);
-  gl_FragColor = vec4(col, 1.0);
+  // object-fit: cover - crop the texture to the panel without distortion.
+  float canvasAspect = resolution.x / max(resolution.y, 1.0);
+  float texAspect = texResolution.x / max(texResolution.y, 1.0);
+  vec2 scale = canvasAspect > texAspect
+    ? vec2(1.0, texAspect / canvasAspect)
+    : vec2(canvasAspect / texAspect, 1.0);
+  vec2 uv = (vUv - 0.5) * scale + 0.5;
+
+  // Sky band of the PANEL swirls: full above 70% height, fading in from 56%
+  // (the old CSS mask ran "solid to 30% from the top, transparent by 44%").
+  float m = smoothstep(0.56, 0.70, vUv.y);
+
+  vec2 p = uv * swirlFrequency;
+  vec2 flow = vec2(
+    cnoise(p + vec2(time * 0.30, 0.0)),
+    cnoise(p + vec2(19.19, 7.3) - vec2(0.0, time * 0.24))
+  );
+  vec2 displaced = uv + flow * swirlStrength * m;
+
+  gl_FragColor = texture2D(map, displaced);
 }
 `
 
@@ -122,7 +112,7 @@ vec3 dither(vec2 uv, vec3 color) {
   float threshold = bayerMatrix8x8[y * 8 + x] - 0.25;
   float step = 1.0 / (colorNum - 1.0);
   color += threshold * step;
-  float bias = 0.2;
+  float bias = 0.08;
   color = clamp(color - bias, 0.0, 1.0);
   return floor(color * (colorNum - 1.0) + 0.5) / (colorNum - 1.0);
 }
@@ -131,7 +121,11 @@ void mainImage(in vec4 inputColor, in vec2 uv, out vec4 outputColor) {
   vec2 normalizedPixelSize = pixelSize / resolution;
   vec2 uvPixel = normalizedPixelSize * floor(uv / normalizedPixelSize);
   vec4 color = texture2D(inputBuffer, uvPixel);
-  color.rgb = dither(uv, color.rgb);
+  // Quantize in gamma space so the levels are perceptually even (the composer
+  // buffer is linear; the final pass re-encodes to sRGB after this effect).
+  vec3 srgb = pow(max(color.rgb, vec3(0.0)), vec3(1.0/2.2));
+  srgb = dither(uv, srgb);
+  color.rgb = pow(srgb, vec3(2.2));
   outputColor = color;
 }
 `
@@ -162,62 +156,70 @@ class RetroEffectImpl extends Effect {
 
 const RetroEffect = wrapEffect(RetroEffectImpl)
 
+interface PaintingUniforms {
+  [uniform: string]: THREE.IUniform
+  map: THREE.IUniform<THREE.Texture>
+  resolution: THREE.IUniform<THREE.Vector2>
+  texResolution: THREE.IUniform<THREE.Vector2>
+  time: THREE.IUniform<number>
+  swirlStrength: THREE.IUniform<number>
+  swirlFrequency: THREE.IUniform<number>
+}
+
 interface DitherProps {
-  waveSpeed?: number
-  waveFrequency?: number
-  waveAmplitude?: number
-  waveColor?: [number, number, number]
+  src: string
   colorNum?: number
   pixelSize?: number
+  swirlStrength?: number
+  swirlFrequency?: number
   disableAnimation?: boolean
-  enableMouseInteraction?: boolean
-  mouseRadius?: number
 }
 
-interface WaveUniforms {
-  [uniform: string]: THREE.IUniform
-  time: THREE.IUniform<number>
-  resolution: THREE.IUniform<THREE.Vector2>
-  waveSpeed: THREE.IUniform<number>
-  waveFrequency: THREE.IUniform<number>
-  waveAmplitude: THREE.IUniform<number>
-  waveColor: THREE.IUniform<THREE.Color>
-  mousePos: THREE.IUniform<THREE.Vector2>
-  enableMouseInteraction: THREE.IUniform<number>
-  mouseRadius: THREE.IUniform<number>
-}
-
-function DitheredWaves({
-  waveSpeed,
-  waveFrequency,
-  waveAmplitude,
-  waveColor,
+function DitheredPainting({
+  src,
   colorNum,
   pixelSize,
+  swirlStrength,
+  swirlFrequency,
   disableAnimation,
-  enableMouseInteraction,
-  mouseRadius,
 }: Required<DitherProps>) {
   const materialRef = useRef<THREE.ShaderMaterial>(null)
-  const mouseRef = useRef(new THREE.Vector2())
   const { viewport, size, gl } = useThree()
+  const [texture, setTexture] = useState<THREE.Texture | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let loaded: THREE.Texture | null = null
+    new THREE.TextureLoader().load(src, (tex) => {
+      if (cancelled) {
+        tex.dispose()
+        return
+      }
+      tex.colorSpace = THREE.SRGBColorSpace
+      loaded = tex
+      setTexture(tex)
+    })
+    return () => {
+      cancelled = true
+      loaded?.dispose()
+      setTexture(null)
+    }
+  }, [src])
 
   // Initial uniform objects for material creation; every later update goes
   // through materialRef (three mutates uniform .value in place each frame).
-  const initialUniforms = useMemo<WaveUniforms>(
-    () => ({
-      time: new THREE.Uniform(0),
+  const initialUniforms = useMemo<PaintingUniforms | null>(() => {
+    if (!texture) return null
+    const image = texture.image as { width: number; height: number }
+    return {
+      map: new THREE.Uniform(texture),
       resolution: new THREE.Uniform(new THREE.Vector2(0, 0)),
-      waveSpeed: new THREE.Uniform(0),
-      waveFrequency: new THREE.Uniform(0),
-      waveAmplitude: new THREE.Uniform(0),
-      waveColor: new THREE.Uniform(new THREE.Color(0, 0, 0)),
-      mousePos: new THREE.Uniform(new THREE.Vector2(0, 0)),
-      enableMouseInteraction: new THREE.Uniform(0),
-      mouseRadius: new THREE.Uniform(0),
-    }),
-    []
-  )
+      texResolution: new THREE.Uniform(new THREE.Vector2(image.width, image.height)),
+      time: new THREE.Uniform(0),
+      swirlStrength: new THREE.Uniform(0),
+      swirlFrequency: new THREE.Uniform(0),
+    }
+  }, [texture])
 
   useEffect(() => {
     const material = materialRef.current
@@ -225,87 +227,52 @@ function DitheredWaves({
     const dpr = gl.getPixelRatio()
     const w = Math.floor(size.width * dpr)
     const h = Math.floor(size.height * dpr)
-    const res = (material.uniforms as unknown as WaveUniforms).resolution.value
+    const res = (material.uniforms as unknown as PaintingUniforms).resolution.value
     if (res.x !== w || res.y !== h) {
       res.set(w, h)
     }
-  }, [size, gl])
+  }, [size, gl, texture])
 
-  // Starts unset so the first frame always writes the real wave color.
-  const prevColor = useRef<[number, number, number]>([-1, -1, -1])
   useFrame(({ clock }) => {
     const material = materialRef.current
     if (!material) return
-    const u = material.uniforms as unknown as WaveUniforms
+    const u = material.uniforms as unknown as PaintingUniforms
 
     if (!disableAnimation) {
       u.time.value = clock.getElapsedTime()
     }
-
-    if (u.waveSpeed.value !== waveSpeed) u.waveSpeed.value = waveSpeed
-    if (u.waveFrequency.value !== waveFrequency) u.waveFrequency.value = waveFrequency
-    if (u.waveAmplitude.value !== waveAmplitude) u.waveAmplitude.value = waveAmplitude
-
-    if (!prevColor.current.every((v, i) => v === waveColor[i])) {
-      u.waveColor.value.setRGB(waveColor[0], waveColor[1], waveColor[2])
-      prevColor.current = [...waveColor]
-    }
-
-    u.enableMouseInteraction.value = enableMouseInteraction ? 1 : 0
-    u.mouseRadius.value = mouseRadius
-
-    if (enableMouseInteraction) {
-      u.mousePos.value.copy(mouseRef.current)
-    }
+    if (u.swirlStrength.value !== swirlStrength) u.swirlStrength.value = swirlStrength
+    if (u.swirlFrequency.value !== swirlFrequency) u.swirlFrequency.value = swirlFrequency
   })
-
-  const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
-    if (!enableMouseInteraction) return
-    const rect = gl.domElement.getBoundingClientRect()
-    const dpr = gl.getPixelRatio()
-    mouseRef.current.set((e.clientX - rect.left) * dpr, (e.clientY - rect.top) * dpr)
-  }
 
   return (
     <>
-      <mesh scale={[viewport.width, viewport.height, 1]}>
-        <planeGeometry args={[1, 1]} />
-        <shaderMaterial
-          ref={materialRef}
-          vertexShader={waveVertexShader}
-          fragmentShader={waveFragmentShader}
-          uniforms={initialUniforms}
-        />
-      </mesh>
+      {texture && initialUniforms && (
+        <mesh scale={[viewport.width, viewport.height, 1]}>
+          <planeGeometry args={[1, 1]} />
+          <shaderMaterial
+            ref={materialRef}
+            vertexShader={vertexShader}
+            fragmentShader={paintingFragmentShader}
+            uniforms={initialUniforms}
+          />
+        </mesh>
+      )}
 
       <EffectComposer>
         <RetroEffect colorNum={colorNum} pixelSize={pixelSize} />
       </EffectComposer>
-
-      {/* Invisible overlay that feeds pointer coords to the wave shader. */}
-      <mesh
-        onPointerMove={handlePointerMove}
-        position={[0, 0, 0.01]}
-        scale={[viewport.width, viewport.height, 1]}
-        visible={false}
-      >
-        <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial transparent opacity={0} />
-      </mesh>
     </>
   )
 }
 
 export default function Dither({
-  waveSpeed = 0.05,
-  waveFrequency = 3,
-  waveAmplitude = 0.3,
-  waveColor = [0.5, 0.5, 0.5],
+  src,
   colorNum = 4,
   pixelSize = 2,
+  swirlStrength = 0.015,
+  swirlFrequency = 9,
   disableAnimation = false,
-  enableMouseInteraction = true,
-  mouseRadius = 1,
 }: DitherProps) {
   return (
     <Canvas
@@ -314,16 +281,13 @@ export default function Dither({
       dpr={1}
       gl={{ antialias: true, preserveDrawingBuffer: true }}
     >
-      <DitheredWaves
-        waveSpeed={waveSpeed}
-        waveFrequency={waveFrequency}
-        waveAmplitude={waveAmplitude}
-        waveColor={waveColor}
+      <DitheredPainting
+        src={src}
         colorNum={colorNum}
         pixelSize={pixelSize}
+        swirlStrength={swirlStrength}
+        swirlFrequency={swirlFrequency}
         disableAnimation={disableAnimation}
-        enableMouseInteraction={enableMouseInteraction}
-        mouseRadius={mouseRadius}
       />
     </Canvas>
   )

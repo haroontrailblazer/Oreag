@@ -95,10 +95,15 @@ export default async function Home() {
         </footer>
       </div>
 
-      {/* Right - animated dither waves, full bleed: fbm noise quantized through
-          an ordered Bayer dither, in the app's monochrome palette. Reacts to
-          the pointer. Rendered client-only (three.js) at lg+ breakpoints. */}
-      <div className="relative hidden overflow-hidden bg-[#09090b] lg:block">
+      {/* Right - the retro painting, dithered: hero.jpg on a full-bleed plane
+          with the sky band swirling (perlin displacement, same motion as the
+          old SVG filter), quantized through an ordered Bayer dither. Rendered
+          client-only (three.js) at lg+ breakpoints. */}
+      <div
+        role="img"
+        aria-label="Dithered Van Gogh Starry Night style painting of a man working through documents at a desk, the sky slowly swirling"
+        className="relative hidden overflow-hidden bg-[#09090b] lg:block"
+      >
         <HeroDither />
       </div>
     </main>
