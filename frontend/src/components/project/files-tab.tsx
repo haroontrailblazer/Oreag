@@ -90,10 +90,10 @@ const CARD_LINES = [
  * Pure SVG/SMIL in the app palette — no animation runtime. */
 function BundlingLoader() {
   return (
-    // viewBox is cropped to the artwork (no leading dead space) so the deck's
-    // left edge lines up with the file icons below; the incoming card slides
-    // in from the crop edge.
-    <svg viewBox="14 0 98 48" className="h-10 w-auto shrink-0" aria-hidden="true">
+    // viewBox is cropped to the deck itself — no slide runway — so the
+    // artwork's left edge sits exactly where the file icons below start; the
+    // incoming card materialises through the left clip edge onto the stack.
+    <svg viewBox="76 0 36 48" className="h-9 w-auto shrink-0" aria-hidden="true">
       {/* The deck: cards already bundled, peeking out behind. */}
       {[6, 3].map((offset, i) => (
         <rect
@@ -108,12 +108,12 @@ function BundlingLoader() {
           opacity={0.55 + i * 0.25}
         />
       ))}
-      {/* The incoming document: slides from the left onto the stack. */}
+      {/* The incoming document: fades in sliding through the clip edge. */}
       <g>
         <animateTransform
           attributeName="transform"
           type="translate"
-          values="-62 0; 0 0; 0 0"
+          values="-22 0; 0 0; 0 0"
           keyTimes="0; 0.55; 1"
           dur="1.8s"
           repeatCount="indefinite"
@@ -121,7 +121,7 @@ function BundlingLoader() {
         <animate
           attributeName="opacity"
           values="0; 1; 1; 1"
-          keyTimes="0; 0.25; 0.9; 1"
+          keyTimes="0; 0.3; 0.9; 1"
           dur="1.8s"
           repeatCount="indefinite"
         />
@@ -341,7 +341,11 @@ export function FilesTab({
 
       {inFlight > 0 && (
         <div className="flex items-center gap-4 border-b bg-muted/30 px-6 py-2.5">
-          <BundlingLoader />
+          {/* size-9 slot mirrors the rows' icon box, so the artwork's left
+              edge AND the text column line up with the file rows below. */}
+          <span className="flex size-9 shrink-0 items-center">
+            <BundlingLoader />
+          </span>
           <div className="min-w-0">
             <p className="font-mono text-xs font-medium text-sky-600 dark:text-sky-400">
               Bundling...
@@ -470,7 +474,7 @@ export function FilesTab({
             )}
           </DialogHeader>
           {deleting ? (
-            <div className="flex flex-col items-center gap-6 px-6 py-6">
+            <div className="flex flex-col items-center gap-3 py-4">
               <BoxLoader scale={0.5} onCycle={handleDeleteCycle} />
               <p className="text-xs text-muted-foreground">
                 Permanently deleting…

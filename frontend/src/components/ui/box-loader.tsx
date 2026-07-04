@@ -11,11 +11,13 @@ import { cn } from "@/lib/utils"
  * defer closing until the animation has finished, even if the work ended early.
  */
 /* The composition paints beyond its authored 200×320 box: the ground plane
-   reaches ~120px below it and the background-colored mask rects swing out the
-   sides. Reserve the real bounds and clip, so nothing overlaps content that
-   sits under the loader (e.g. dialog captions). */
+   reaches below it and the background-colored mask rects swing out the sides.
+   Reserve the visible bounds and clip, so nothing overlaps content around the
+   loader — and crop the artwork's empty top band so the reserved box hugs the
+   visuals and dialog spacing stays proportionate. */
 const PAD_X = 50
-const PAD_BOTTOM = 125
+const PAD_BOTTOM = 90
+const CROP_TOP = 45
 
 export function BoxLoader({
   scale = 0.5,
@@ -33,13 +35,13 @@ export function BoxLoader({
       className={cn("relative overflow-hidden", className)}
       style={{
         width: (200 + PAD_X * 2) * scale,
-        height: (320 + PAD_BOTTOM) * scale,
+        height: (320 + PAD_BOTTOM - CROP_TOP) * scale,
       }}
     >
       <div
         className="box-build"
         style={{
-          transform: `translateX(${PAD_X * scale}px) scale(${scale})`,
+          transform: `translate(${PAD_X * scale}px, ${-CROP_TOP * scale}px) scale(${scale})`,
           transformOrigin: "top left",
         }}
       >

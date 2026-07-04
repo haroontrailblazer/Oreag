@@ -271,7 +271,7 @@ export function ProviderKeys() {
             )}
           </DialogHeader>
           {removing ? (
-            <div className="flex flex-col items-center gap-2 py-4">
+            <div className="flex flex-col items-center gap-3 py-4">
               <BoxLoader scale={0.5} onCycle={handleRemoveCycle} />
               <p className="text-sm text-muted-foreground">Removing key…</p>
             </div>
