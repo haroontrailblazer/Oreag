@@ -10,13 +10,6 @@ import { MemoryTab } from "@/components/project/memory-tab"
 import { PlaygroundTab } from "@/components/project/playground-tab"
 import { SettingsTab } from "@/components/project/settings-tab"
 import { VisualizeTab } from "@/components/project/visualize-tab"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -144,25 +137,16 @@ export default function ProjectPage({
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1">
-        {/* Phones: six tabs don't fit, so the section switcher becomes a
-            full-width dropdown. Desktop keeps the classic tab pills. */}
-        <div className="shrink-0 md:hidden">
-          <Select value={tab} onValueChange={setTab}>
-            <SelectTrigger className="w-full" aria-label="Project section">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TABS.map((t) => (
-                <SelectItem key={t.value} value={t.value}>
-                  {t.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <TabsList className="hidden md:inline-flex md:shrink-0">
+        {/* Same pill bar on every screen — compact triggers on phones so all
+            six fit; swipes sideways as a safety net on very narrow screens
+            (the app-wide CSS hides the scrollbar). */}
+        <TabsList className="w-full shrink-0 justify-start overflow-x-auto md:w-fit">
           {TABS.map((t) => (
-            <TabsTrigger key={t.value} value={t.value}>
+            <TabsTrigger
+              key={t.value}
+              value={t.value}
+              className="px-1.5 text-xs sm:px-2 sm:text-sm"
+            >
               {t.label}
             </TabsTrigger>
           ))}
