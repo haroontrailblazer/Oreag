@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
+    "@react-three/fiber": "^9.6.1",
+    "@react-three/postprocessing": "^3.0.4",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.1",
     "@tailwindcss/typography": "^0.5.20",
@@ -17,6 +19,7 @@
     "clsx": "^2.1.1",
     "next": "16.2.9",
     "next-themes": "^0.4.6",
+    "postprocessing": "^6.39.2",
     "radix-ui": "^1.5.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -25,13 +28,15 @@
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
     "swr": "^2.4.1",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "^0.185.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
