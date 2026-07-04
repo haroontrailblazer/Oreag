@@ -1,7 +1,7 @@
 import { ArrowRight, GithubLogo } from "@phosphor-icons/react/dist/ssr"
+import Image from "next/image"
 import Link from "next/link"
 
-import { HeroDither } from "@/components/landing/hero-dither"
 import { BrandMark } from "@/components/ui/brand-mark"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/server"
@@ -95,16 +95,55 @@ export default async function Home() {
         </footer>
       </div>
 
-      {/* Right - the retro painting, dithered: hero.jpg on a full-bleed plane
-          with the sky band swirling (perlin displacement, same motion as the
-          old SVG filter), quantized through an ordered Bayer dither. Rendered
-          client-only (three.js) at lg+ breakpoints. */}
-      <div
-        role="img"
-        aria-label="Dithered Van Gogh Starry Night style painting of a man working through documents at a desk, the sky slowly swirling"
-        className="relative hidden overflow-hidden bg-[#09090b] lg:block"
-      >
-        <HeroDither />
+      {/* Right - retro painting, full bleed. Only the sky/clouds swirl: a static
+          base keeps the man, desk and documents perfectly still, while a second
+          copy is displaced (#starry-motion) and masked to just the sky on top. */}
+      <div className="relative hidden overflow-hidden bg-muted lg:block">
+        {/* Static base - man, desk and documents never move. */}
+        <Image
+          src="/hero.jpg"
+          alt="Van Gogh Starry Night style painting of a man working through documents at a desk"
+          fill
+          priority
+          draggable={false}
+          sizes="(min-width: 1024px) 50vw, 100vw"
+          className="pointer-events-none select-none object-cover"
+        />
+        {/* Swirling layer - same painting, displaced and masked to the sky only. */}
+        <Image
+          src="/hero.jpg"
+          alt=""
+          fill
+          draggable={false}
+          sizes="(min-width: 1024px) 50vw, 100vw"
+          className="starry-sky pointer-events-none select-none object-cover"
+        />
+        {/* Animated displacement field driving the swirl. */}
+        <svg aria-hidden="true" className="absolute size-0">
+          <filter id="starry-motion" x="-20%" y="-20%" width="140%" height="140%">
+            <feTurbulence
+              type="turbulence"
+              baseFrequency="0.011 0.015"
+              numOctaves={2}
+              seed={7}
+              result="noise"
+            >
+              <animate
+                attributeName="baseFrequency"
+                dur="24s"
+                values="0.011 0.015;0.014 0.019;0.009 0.013;0.011 0.015"
+                repeatCount="indefinite"
+              />
+            </feTurbulence>
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="noise"
+              scale={12}
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+        </svg>
       </div>
     </main>
   )
