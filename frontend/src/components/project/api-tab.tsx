@@ -9,11 +9,12 @@ import {
   Prohibit,
   Trash,
 } from "@phosphor-icons/react/dist/ssr"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState, useSyncExternalStore } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { Badge } from "@/components/ui/badge"
+import { BestPractices } from "@/components/ui/best-practices"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
 import {
@@ -160,6 +161,39 @@ function EndpointRow({
 /* API tab                                                             */
 /* ------------------------------------------------------------------ */
 
+const BEST_PRACTICE_TIPS = [
+  {
+    title: "Keys are shown once",
+    detail:
+      "The full oreag_sk_ key appears only at creation - store it in a secret manager immediately. Only the last 4 characters are kept for display.",
+  },
+  {
+    title: "Never ship keys to browsers",
+    detail:
+      "Call /v1 from your server or agent backend. A key embedded in client-side code is public.",
+  },
+  {
+    title: "One key per consumer",
+    detail:
+      "Give each app, agent, or teammate its own key so usage is attributable and revoking one does not break the others.",
+  },
+  {
+    title: "Use conversation_id for chat",
+    detail:
+      "Pass any stable string and follow-ups are rewritten with context server-side. Omit it for stateless one-off queries.",
+  },
+  {
+    title: "Read the cache fields",
+    detail:
+      "Responses include cache_layer (l1 exact, l2 semantic, null fresh) and cache_similarity - useful for logging cost savings on your side.",
+  },
+]
+
+// Static-value "store" plumbing for useSyncExternalStore: the API base never
+// changes after load, so subscribing is a no-op.
+const subscribeNoop = () => () => {}
+const getServerApiBase = () => ""
+
 export function ApiTab({ project }: { project: Project }) {
   const { data: keys, mutate } = useSWR<ApiKey[]>(
     `/api/projects/${project.id}/keys`,
@@ -184,8 +218,9 @@ export function ApiTab({ project }: { project: Project }) {
 
   // Resolve the public base URL on the client so the copyable endpoint reflects
   // the host the dashboard is actually open on (localhost or a LAN IP).
-  const [apiBase, setApiBase] = useState("")
-  useEffect(() => setApiBase(getApiBase()), [])
+  // useSyncExternalStore keeps the server render ("") hydration-safe without
+  // setting state inside an effect.
+  const apiBase = useSyncExternalStore(subscribeNoop, getApiBase, getServerApiBase)
 
   const basePath = `/v1/projects/${project.id}`
   const endpoint = `${apiBase}${basePath}/query`
@@ -383,15 +418,18 @@ print(data["answer"])`
                 Keys are shown once at creation - store them securely.
               </CardDescription>
             </div>
-            <Button onClick={handleCreate} disabled={creating}>
-              {creating ? (
-                <LoaderOne />
-              ) : (
-                <>
-                  <Plus className="size-4" /> Create key
-                </>
-              )}
-            </Button>
+            <div className="flex items-center gap-2">
+              <BestPractices tips={BEST_PRACTICE_TIPS} />
+              <Button onClick={handleCreate} disabled={creating}>
+                {creating ? (
+                  <LoaderOne />
+                ) : (
+                  <>
+                    <Plus className="size-4" /> Create key
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">

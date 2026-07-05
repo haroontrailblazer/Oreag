@@ -6,6 +6,7 @@ import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { Badge } from "@/components/ui/badge"
+import { BestPractices } from "@/components/ui/best-practices"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -18,6 +19,34 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, fetcher } from "@/lib/api"
 import type { Memory, Project } from "@/lib/types"
+
+const BEST_PRACTICE_TIPS = [
+  {
+    title: "One fact per memory",
+    detail:
+      "Short, self-contained memories retrieve better than long notes - they embed into a single clean vector, like a good chunk.",
+  },
+  {
+    title: "Tag for humans, not for search",
+    detail:
+      "Search is semantic (meaning-based). Tags help YOU filter and audit this list - they do not boost retrieval.",
+  },
+  {
+    title: "Pin what must persist",
+    detail:
+      "Pinned memories are protected from bulk cleanup - use pins for decisions and constraints agents must never lose.",
+  },
+  {
+    title: "Memories join RAG answers",
+    detail:
+      "Relevant memories are blended into /query answers alongside document chunks (shown as memory sources), and they live in the same vector space as your files.",
+  },
+  {
+    title: "Unembedded memories are invisible",
+    detail:
+      "A memory saved while no embedding key was available has no vector and cannot be searched - re-save it (or change models) to embed it.",
+  },
+]
 
 export function MemoryTab({ project }: { project: Project }) {
   const { data: memories, error, mutate } = useSWR<Memory[]>(
@@ -43,11 +72,16 @@ export function MemoryTab({ project }: { project: Project }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Agent memory</CardTitle>
-        <CardDescription>
-          Notes your connected agents (via the MCP server) have saved for this
-          project.
-        </CardDescription>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>Agent memory</CardTitle>
+            <CardDescription>
+              Notes your connected agents (via the MCP server) have saved for
+              this project.
+            </CardDescription>
+          </div>
+          <BestPractices tips={BEST_PRACTICE_TIPS} />
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="relative">

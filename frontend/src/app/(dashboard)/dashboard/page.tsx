@@ -105,9 +105,12 @@ export default function DashboardPage() {
     preload("/api/provider-keys", fetcher)
   }, [])
 
+  // Fixed frame like the project and API keys pages: the heading row never
+  // moves, only the cards area scrolls (mobile chrome ~6.25rem, desktop
+  // p-8 = 4rem).
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="flex h-[calc(100dvh-6.25rem)] flex-col gap-6 md:h-[calc(100dvh-4rem)]">
+      <div className="flex shrink-0 items-center justify-between">
         <h1 className="text-2xl font-semibold">Projects</h1>
         <Button asChild>
           <Link href="/projects/new">
@@ -117,13 +120,13 @@ export default function DashboardPage() {
       </div>
 
       {error && (
-        <p className="text-sm text-destructive">
+        <p className="shrink-0 text-sm text-destructive">
           Could not load projects: {error.message}
         </p>
       )}
 
       {isLoading && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-4 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-36" />
           ))}
@@ -131,21 +134,25 @@ export default function DashboardPage() {
       )}
 
       {projects && projects.length === 0 && (
-        <Card className="py-16 text-center">
-          <CardContent className="space-y-3">
-            <FileText className="mx-auto size-10 text-muted-foreground" />
-            <p className="text-muted-foreground">
-              No projects yet. Create one to turn your documents into an API.
-            </p>
-            <Button asChild>
-              <Link href="/projects/new">Create your first project</Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {/* my-auto (not justify-center) so the card centers in the free
+              space but can still scroll from the top on short viewports. */}
+          <Card className="my-auto py-16 text-center">
+            <CardContent className="space-y-3">
+              <FileText className="mx-auto size-10 text-muted-foreground" />
+              <p className="text-muted-foreground">
+                No projects yet. Create one to turn your documents into an API.
+              </p>
+              <Button asChild>
+                <Link href="/projects/new">Create your first project</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {projects && projects.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-4 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
             <Link
               key={project.id}

@@ -15,6 +15,7 @@ import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { AddFilesDialog } from "@/components/project/add-files-dialog"
+import { BestPractices } from "@/components/ui/best-practices"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
@@ -181,10 +182,14 @@ export function FilesTab({
   project,
   onChanged,
   selectedFileId,
+  focusToken = 0,
 }: {
   project: Project
   onChanged: () => void
   selectedFileId?: string | null
+  // Bumped by the page when "View file" targets the SAME file again, so the
+  // scroll + highlight re-run even though selectedFileId didn't change.
+  focusToken?: number
 }) {
   const [highlightId, setHighlightId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<FileRecord | null>(null)
@@ -203,16 +208,22 @@ export function FilesTab({
     }
   )
 
-  // Scroll to and briefly highlight the file targeted by a ?file=<id> link.
+  // Scroll to and briefly highlight the file targeted by a ?file=<id> link or
+  // the Visualize tab's "View file" button (focusToken re-arms same-file hits).
   useEffect(() => {
     if (!selectedFileId || !files) return
     const el = document.getElementById(`file-${selectedFileId}`)
     if (!el) return
     el.scrollIntoView({ behavior: "smooth", block: "center" })
-    setHighlightId(selectedFileId)
+    // Defer the highlight to the next frame so the effect body doesn't set
+    // state synchronously (react-hooks/set-state-in-effect).
+    const raf = requestAnimationFrame(() => setHighlightId(selectedFileId))
     const timer = setTimeout(() => setHighlightId(null), 2200)
-    return () => clearTimeout(timer)
-  }, [selectedFileId, files])
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(timer)
+    }
+  }, [selectedFileId, files, focusToken])
 
   async function confirmDelete() {
     if (!deleteTarget) return
@@ -312,6 +323,35 @@ export function FilesTab({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <BestPractices
+            tips={[
+              {
+                title: "Mind the 50 MB limit",
+                detail:
+                  "About 30 file types are supported (PDF, DOCX, PPTX, XLSX, HTML, images, audio...). Everything is converted to Markdown before chunking, so clean source documents index best.",
+              },
+              {
+                title: "Chunk size: start at 1000 / 200",
+                detail:
+                  "The defaults suit most documents. Use smaller chunks (300-500) for FAQs and short facts, larger (1500-2000) for narrative or legal text where context matters. Overlap of ~20% protects facts that straddle a cut.",
+              },
+              {
+                title: "Per-file overrides are free",
+                detail:
+                  "Chunking set in the upload dialog applies only to those files - no need to reindex the whole project to experiment.",
+              },
+              {
+                title: "Retry beats re-upload",
+                detail:
+                  "A failed file keeps its stored original - fix the cause (usually a provider key) and hit Retry instead of uploading again.",
+              },
+              {
+                title: "Re-indexing costs embeddings",
+                detail:
+                  "Changing the project's chunking or embedding model re-embeds every chunk. Exception: shrinking the same Matryoshka model's dimensions is instant and free.",
+              },
+            ]}
+          />
           <AddFilesDialog
             project={project}
             onUploaded={() => {

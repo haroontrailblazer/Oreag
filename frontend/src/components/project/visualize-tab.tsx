@@ -7,13 +7,13 @@ import {
   X,
 } from "@phosphor-icons/react/dist/ssr"
 import { useTheme } from "next-themes"
-import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type ForceGraph3DComponent from "react-force-graph-3d"
 import type { ForceGraphMethods, NodeObject } from "react-force-graph-3d"
 import useSWR from "swr"
 
 import { Badge } from "@/components/ui/badge"
+import { BestPractices } from "@/components/ui/best-practices"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -73,6 +73,115 @@ const LEGEND = [
   { type: "chunk", label: "Chunks" },
   { type: "memory", label: "Memories" },
 ] as const
+
+const BEST_PRACTICE_TIPS = [
+  {
+    title: "Read the clusters",
+    detail:
+      "Nodes that huddle together are semantically similar. A file whose chunks sit far from everything else may be off-topic for this project - or a unique source worth keeping.",
+  },
+  {
+    title: "Edges are relationships",
+    detail:
+      "Structural edges connect files to their chunks; similarity edges link related content across files and memories. Dense cross-file linking means your documents reinforce each other.",
+  },
+  {
+    title: "Hover, then click",
+    detail:
+      "Hover shows a quick tooltip; clicking opens the details panel with a View file shortcut that jumps straight to the document.",
+  },
+  {
+    title: "Watch it after big uploads",
+    detail:
+      "Re-open this view after indexing new files to sanity-check where they landed in the knowledge space.",
+  },
+]
+
+/* Dot clusters for the dimensions illustration: the same three clusters drawn
+   twice - well separated at 3072d, pulled together (outlines overlapping) at
+   768d. One cluster takes the sky accent so the pairing reads at a glance. */
+const DIM_CLUSTERS: {
+  outline: [number, number, number]
+  dots: [number, number][]
+  accent?: boolean
+}[][] = [
+  [
+    { outline: [34, 34, 13], dots: [[28, 30], [38, 28], [32, 40], [41, 37]], accent: true },
+    { outline: [96, 30, 11], dots: [[91, 26], [101, 28], [95, 36]] },
+    { outline: [62, 66, 12], dots: [[56, 63], [66, 61], [61, 71], [69, 69]] },
+  ],
+  [
+    { outline: [198, 42, 13], dots: [[192, 38], [202, 36], [196, 48], [205, 45]], accent: true },
+    { outline: [219, 37, 11], dots: [[214, 33], [224, 35], [218, 43]] },
+    { outline: [209, 58, 12], dots: [[203, 55], [213, 53], [208, 63], [216, 61]] },
+  ],
+]
+
+/** Theme-aware mini illustration: the same clusters at 3072 vs 768 dimensions -
+ * fewer numbers, and the clusters pull closer until their borders overlap. */
+function DimensionsIllustration() {
+  return (
+    <svg
+      viewBox="0 0 280 96"
+      className="w-full text-muted-foreground"
+      aria-hidden="true"
+    >
+      <line
+        x1="140"
+        y1="8"
+        x2="140"
+        y2="78"
+        strokeWidth="1"
+        strokeDasharray="3 3"
+        className="stroke-current opacity-25"
+      />
+      {DIM_CLUSTERS.map((panel, p) => (
+        <g key={p}>
+          {panel.map((cluster, c) => (
+            <g key={c}>
+              <circle
+                cx={cluster.outline[0]}
+                cy={cluster.outline[1]}
+                r={cluster.outline[2]}
+                fill="none"
+                strokeWidth="1"
+                strokeDasharray="3 3"
+                className="stroke-current opacity-40"
+              />
+              {cluster.dots.map(([x, y]) => (
+                <circle
+                  key={`${x}-${y}`}
+                  cx={x}
+                  cy={y}
+                  r="3"
+                  className={
+                    cluster.accent ? "fill-sky-500" : "fill-current opacity-70"
+                  }
+                />
+              ))}
+            </g>
+          ))}
+        </g>
+      ))}
+      <text
+        x="66"
+        y="92"
+        textAnchor="middle"
+        className="fill-current font-mono text-[9px]"
+      >
+        3072d
+      </text>
+      <text
+        x="210"
+        y="92"
+        textAnchor="middle"
+        className="fill-current font-mono text-[9px]"
+      >
+        768d
+      </text>
+    </svg>
+  )
+}
 
 type GNode = NodeObject<MemoryGraphNode>
 
@@ -242,7 +351,13 @@ function GraphLoader() {
 /** Interactive 3D view of the project's brain: files, sections, chunks and
  * agent memories as a force-directed graph. Drag to rotate, scroll to zoom,
  * right-drag to pan; hover for the label, click a node for its details. */
-export function VisualizeTab({ project }: { project: Project }) {
+export function VisualizeTab({
+  project,
+  onViewFile,
+}: {
+  project: Project
+  onViewFile: (fileId: string) => void
+}) {
   const { data, isLoading } = useSWR<MemoryGraphResponse>(
     `/api/projects/${project.id}/memory-graph`,
     fetcher
@@ -263,7 +378,6 @@ export function VisualizeTab({ project }: { project: Project }) {
     }
   }, [])
 
-  const router = useRouter()
   const fgRef = useRef<ForceGraphMethods<MemoryGraphNode> | undefined>(undefined)
   const [selected, setSelected] = useState<MemoryGraphNode | null>(null)
   const [rotating, setRotating] = useState(true)
@@ -354,10 +468,8 @@ export function VisualizeTab({ project }: { project: Project }) {
   // A brain with just the project node has nothing to show yet.
   const isEmpty = !isLoading && data && data.nodes.length <= 1
 
-  const fileHref = (node: MemoryGraphNode) =>
-    node.type === "file"
-      ? `/projects/${project.id}?file=${node.id.slice("file:".length)}`
-      : null
+  const fileIdOf = (node: MemoryGraphNode) =>
+    node.type === "file" ? node.id.slice("file:".length) : null
 
   return (
     <Card>
@@ -395,6 +507,21 @@ export function VisualizeTab({ project }: { project: Project }) {
               <CornersOut className="size-4" />
               <span className="hidden sm:inline">Reset view</span>
             </Button>
+            <BestPractices tips={BEST_PRACTICE_TIPS}>
+              <div className="space-y-1.5 border-t pt-3">
+                <p className="text-xs font-medium">Dimensions & this space</p>
+                <DimensionsIllustration />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Embedding dimensions set how finely this space separates
+                  meanings. More dimensions keep near-duplicate topics
+                  distinguishable; shrinking (Matryoshka) packs the same
+                  meaning into fewer numbers - clusters pull closer and
+                  borderline matches blur first. Shrinking the same model is
+                  instant in Settings -&gt; Indexing &amp; embedding; growing
+                  back needs a full re-index.
+                </p>
+              </div>
+            </BestPractices>
           </div>
         </div>
       </CardHeader>
@@ -519,15 +646,19 @@ export function VisualizeTab({ project }: { project: Project }) {
                     </div>
                   ))}
               </dl>
-              {fileHref(selected) && (
+              {fileIdOf(selected) && (
                 <Button
                   size="sm"
                   variant="outline"
                   className="mt-3 w-full"
                   disabled={locating}
                   onClick={() => {
+                    // Switch tabs via the page's client state - NOT
+                    // router.push: pushing an unchanged ?file= URL is a no-op
+                    // the second time and stranded this button on
+                    // "Locating file...".
                     setLocating(true)
-                    router.push(fileHref(selected) as string)
+                    onViewFile(fileIdOf(selected) as string)
                   }}
                 >
                   {locating ? (

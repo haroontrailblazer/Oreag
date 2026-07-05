@@ -77,7 +77,7 @@ flowchart TB
             Retrieve["Retrieval"]
             Generate["Generation"]
             Agentic["Agentic query loop<br/>depth · sub-queries · clarify"]
-            QCache["Query cache (CAG)"]
+            QCache["Answer cache<br/>L1 exact + L2 semantic"]
             Memory["Memory<br/>save · search · recent"]
             MemGraph["Memory Graph"]
         end
@@ -88,18 +88,15 @@ flowchart TB
     subgraph datat["DATA TIER · Supabase"]
         direction LR
         Auth["Auth<br/>JWT / JWKS"]
-        PG[("Postgres + pgvector<br/>projects · files · chunks · memories<br/>provider_keys · api_keys · query_logs")]
+        PG[("Postgres + pgvector<br/>projects · files · chunks · memories<br/>provider_keys · api_keys · query_logs<br/>semantic_query_cache")]
         Store[["Storage<br/>project-files bucket"]]
-        Redis[("Redis · optional<br/>CAG cache + conversation memory<br/>falls back to in-memory")]
+        Redis[("Redis · optional<br/>L1 exact answer cache + conversation memory<br/>falls back to in-memory")]
     end
 
     subgraph ai["AI PROVIDERS · BYOK / local"]
         direction LR
-        OpenAI["OpenAI"]
-        Gemini["Google Gemini"]
-        Anthropic["Anthropic Claude"]
-        Sarvam["Sarvam AI"]
-        Ollama["Ollama · local"]
+        Keyed["16 keyed providers<br/>OpenAI · Gemini · Anthropic · Azure OpenAI<br/>Mistral · Cohere · Together · Fireworks · xAI Grok · Groq<br/>DeepSeek · OpenRouter · Perplexity · Voyage · Jina · Sarvam"]
+        Local["Keyless local<br/>Ollama · LM Studio · sentence-transformers"]
     end
 
     %% --- primary request paths ---
@@ -118,20 +115,21 @@ flowchart TB
     API --> Ingest & Retrieve & Generate & Agentic & Memory & MemGraph
     PublicAPI --> Retrieve & Generate & Agentic & Memory & MemGraph
 
-    %% --- agentic query loop + CAG cache ---
+    %% --- agentic query loop + answer cache ---
     Agentic --> QCache & Retrieve & Generate
-    QCache -->|"cache + conversation"| Redis
+    QCache -->|"L1 exact + conversation"| Redis
+    QCache -->|"L2 semantic · cosine >= 0.75"| PG
 
     %% --- BYOK resolution & provider calls ---
     Ingest & Retrieve & Generate & Memory --> Resolver
     Resolver -->|"decrypt keys"| PG
     Resolver --> Registry
-    Registry --> OpenAI & Gemini & Anthropic & Sarvam & Ollama
+    Registry --> Keyed & Local
 
     %% --- data reads / writes ---
     Ingest   -->|"raw + markdown"| Store
     Ingest   -->|"chunks + vectors"| PG
-    Retrieve -->|"cosine search"| PG
+    Retrieve -->|"hybrid: cosine + full-text · RRF"| PG
     Generate --> PG
     Memory   -->|"embed-on-save · search"| PG
     MemGraph --> PG
@@ -148,7 +146,7 @@ flowchart TB
     class Next,AuthRt tEdge
     class API,PublicAPI,Ingest,Retrieve,Generate,Agentic,QCache,Memory,MemGraph,Resolver,Registry tApp
     class Auth,PG,Store,Redis tData
-    class OpenAI,Gemini,Anthropic,Sarvam,Ollama tAI
+    class Keyed,Local tAI
 ```
 
 ---
@@ -156,8 +154,9 @@ flowchart TB
 ## 2. Document Ingestion · write path
 
 An uploaded file is stored, a row is created, then a background task
-**converts → chunks → embeds → writes vectors**. Any exception during embedding
-flips the file to `failed`.
+**converts → chunks → embeds → writes vectors**. Embedding batches are sized
+per provider (OpenAI / Gemini 100 · Ollama 32 · sentence-transformers 64).
+Any exception during embedding flips the file to `failed`.
 
 ```mermaid
 flowchart LR
@@ -166,7 +165,7 @@ flowchart LR
     C --> D{{"Background task<br/>ingest_file()"}}
     D --> E["Convert to Markdown<br/>PyMuPDF · MarkItDown"]
     E --> F["Chunk<br/>RecursiveCharacterTextSplitter"]
-    F --> G["Embed in batches<br/>resolved BYOK key"]
+    F --> G["Embed in provider-sized batches<br/>OpenAI/Gemini 100 · Ollama 32 · ST 64<br/>resolved BYOK key"]
     G --> H[("pgvector chunks<br/>content + embedding")]
     H --> I(["status: indexed<br/>project status recomputed"])
     G -.->|exception| J(["status: failed<br/>error shown in Files tab"])
@@ -186,6 +185,12 @@ flowchart LR
     class J bad
 ```
 
+**Re-indexing** - shrinking a Matryoshka-capable model to a smaller dimension
+truncates stored vectors **in place** (chunks and memories) instantly, with zero
+re-embedding. Growing the dimension or switching models triggers a full
+re-embed: memory embeddings are cleared and queued for re-embedding with the new
+model first, then every file is re-ingested in the background.
+
 ---
 
 ## 3. Query / RAG · read path
@@ -193,10 +198,17 @@ flowchart LR
 A caller hits either endpoint (dashboard `/api/projects/{id}/query` or public
 `/v1/projects/{id}/query` - both run the same `run_query()`). When a
 `conversation_id` is present the follow-up is condensed to a standalone question;
-the CAG cache is checked first; depth is classified; a long question is decomposed
-into sub-queries and each is retrieved + merged; a sufficiency check either grounds
-a depth-aware answer or returns a human clarification (with a retry/broaden loop);
-then the answer is cached, the conversation turn appended, and `query_logs` written.
+the L1 exact-match cache is checked first, then the L2 semantic cache (a cached
+question with cosine similarity >= 0.75 answers the new one for the cost of a
+single embedding call); on a double miss depth is classified; a long question is
+decomposed into sub-queries and each is retrieved with **hybrid search**
+(semantic pgvector + lexical full-text, rankings fused with Reciprocal Rank
+Fusion, k=60 - degrades to semantic-only if the lexical column is missing) and
+blended with relevant memories; a sufficiency check either grounds a depth-aware
+answer or returns a human clarification (with a retry/broaden loop); then the
+answer is stored back to **both** L1 and L2, the conversation turn appended, and
+`query_logs` written. Responses carry `cache_layer` (`"l1"` · `"l2"` · `null`)
+and `cache_similarity`; sources still report cosine similarity - RRF only orders.
 
 ```mermaid
 sequenceDiagram
@@ -205,7 +217,8 @@ sequenceDiagram
     participant API as FastAPI · /query
     participant Q as run_query
     participant AG as Agentic loop
-    participant CC as Redis · cache + conversation
+    participant CC as Redis · L1 cache + conversation
+    participant SC as pgvector · L2 semantic cache
     participant R as Retrieval
     participant DB as pgvector
     participant L as LLM
@@ -224,34 +237,40 @@ sequenceDiagram
         L-->>Q: standalone question
     end
 
-    Q->>CC: CAG cache lookup (project · models · top_k · content sig · question)
-    alt cache hit
-        CC-->>Q: cached answer (no retrieval · no LLM)
-    else cache miss
-        Q->>AG: detect_depth(question) → short | long
-        opt long question
-            AG->>L: plan_subqueries() - decompose (literal question kept)
-            L-->>AG: sub-queries
-        end
-        loop retrieve + merge · max 2 rounds
-            AG->>R: retrieve each sub-query (top_k)
-            R->>DB: nearest-neighbour search
-            DB-->>R: top-k chunks
-            R-->>AG: sources
-            Note over AG: merge + de-dup (best similarity) · is_sufficient?
-            alt grounding too thin
-                Note over AG: broaden & retry
+    Q->>CC: L1 exact lookup (project · models · top_k · content sig · normalized question)
+    alt L1 hit
+        CC-->>Q: cached answer (no retrieval · no LLM · single-flight de-dup)
+    else L1 miss
+        Q->>SC: L2 semantic lookup - embed question · cosine vs cached questions
+        alt L2 hit · similarity >= 0.75
+            SC-->>Q: cached answer (one embedding call · no retrieval · no LLM)
+        else double miss
+            Q->>AG: detect_depth(question) → short | long
+            opt long question
+                AG->>L: plan_subqueries() - decompose (literal question kept)
+                L-->>AG: sub-queries
             end
+            loop retrieve + merge · max 2 rounds
+                AG->>R: retrieve each sub-query (top_k)
+                R->>DB: hybrid search - pgvector cosine + full-text tsvector · RRF fusion (k=60)
+                DB-->>R: top-k chunks
+                R-->>AG: sources
+                Note over AG: merge + de-dup (best similarity) · blend relevant memories · is_sufficient?
+                alt grounding too thin
+                    Note over AG: broaden & retry
+                end
+            end
+            alt sufficient
+                AG->>L: generate depth-aware grounded answer
+                L-->>AG: answer (concise short · structured long)
+            else still insufficient
+                Note over AG: human-in-the-loop - clarifying questions
+                AG-->>Q: needs_clarification · answer = clarification prompt
+            end
+            AG-->>Q: answer + sources + depth + sub_queries
+            Q->>CC: store in L1 (TTL 5 min)
+            Q->>SC: store question embedding + answer in L2 (TTL 1 h)
         end
-        alt sufficient
-            AG->>L: generate depth-aware grounded answer
-            L-->>AG: answer (concise short · structured long)
-        else still insufficient
-            Note over AG: human-in-the-loop - clarifying questions
-            AG-->>Q: needs_clarification · answer = clarification prompt
-        end
-        AG-->>Q: answer + sources + depth + sub_queries
-        Q->>CC: store in CAG cache (TTL)
     end
 
     opt conversation_id present
@@ -259,7 +278,7 @@ sequenceDiagram
     end
     Q->>DB: write query_logs
     Q-->>-API: result
-    API-->>-C: 200 - answer · sources · depth · sub_queries · needs_clarification · conversation_id
+    API-->>-C: 200 - answer · sources · depth · sub_queries · needs_clarification · cache_layer · cache_similarity · conversation_id
 ```
 
 ---

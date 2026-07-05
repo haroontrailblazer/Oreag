@@ -6,6 +6,7 @@ import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
 
 import { ProviderKeyField } from "@/components/project/provider-key-field"
+import { BestPractices } from "@/components/ui/best-practices"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
 import {
@@ -323,8 +324,41 @@ export function SettingsTab({
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>General</CardTitle>
-          <CardDescription>These take effect immediately.</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1.5">
+              <CardTitle>General</CardTitle>
+              <CardDescription>These take effect immediately.</CardDescription>
+            </div>
+            <BestPractices
+              tips={[
+                {
+                  title: "Model switches re-embed everything",
+                  detail:
+                    "Chunks are wiped and re-ingested, and memory embeddings are re-embedded with the new model. Budget embedding cost before switching on a large project.",
+                },
+                {
+                  title: "Shrinking dimensions is free",
+                  detail:
+                    "Same Matryoshka model at a smaller size (e.g. 3072 to 1024) truncates stored vectors in place - instant, no API calls. Growing back requires a full re-index.",
+                },
+                {
+                  title: "Key changes are instant",
+                  detail:
+                    "Replacing a provider key never re-indexes anything - only model and chunking changes do.",
+                },
+                {
+                  title: "Project keys override account keys",
+                  detail:
+                    "A key set here wins over the account-level key for this project only - handy for separate billing or rate limits.",
+                },
+                {
+                  title: "top_k trades recall for noise",
+                  detail:
+                    "More retrieved chunks catch more facts but dilute the context. 5 suits focused questions; raise it for broad, multi-part ones.",
+                },
+              ]}
+            />
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">

@@ -22,21 +22,26 @@ Oreag lets a user upload documents (PDF, DOCX, PPTX, HTML, CSV, …), tune chunk
 and embedding settings, and instantly get a **dedicated, API-key-protected RAG
 endpoint** to query that knowledge base from any application - plus an **agent
 memory graph** derived from the same content. It is **multi-tenant** and
-**bring-your-own-key (BYOK)**: each user supplies their own OpenAI / Gemini /
-Anthropic credentials (or runs a local Ollama model), stored encrypted at rest.
+**bring-your-own-key (BYOK)**: each user supplies their own credentials for any
+of 16 keyed providers (OpenAI, Gemini, Anthropic, Azure OpenAI, Mistral, Cohere,
+and more) or runs a keyless local model (Ollama, LM Studio,
+sentence-transformers), stored encrypted at rest.
 
 ## Features
 
 - **Any document to an API** - upload, auto-convert to Markdown, chunk, embed, and serve.
 - **Per-project RAG endpoint** - `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
 - **Agentic retrieval loop** - auto depth detection (short vs long), query decomposition for big/exam questions, multi-round retrieve-and-merge with a sufficiency check, and human-in-the-loop clarification instead of a dead "no reference".
-- **CAG answer cache** - repeated identical questions are served with no retrieval and no LLM call, with single-flight de-duplication and optional Redis (via `REDIS_URL`).
+- **Hybrid retrieval** - semantic pgvector search and lexical Postgres full-text search run together and are fused with Reciprocal Rank Fusion (RRF), so exact terms (error codes, IDs, names) embeddings fumble are still caught. Degrades to semantic-only automatically if the lexical column is missing.
+- **Two-layer answer cache** - used by every query surface (playground, `/v1` API, MCP). L1 is an exact-match CAG cache in Redis (in-memory fallback, single-flight de-duplication, 5 min TTL); L2 is a semantic cache in Postgres/pgvector - a new question whose cosine similarity to an answered one is >= 0.75 is served from cache at the cost of one embedding call (1 h TTL). Both layers are scoped by project, models, top-K, and content signature, so new content or model changes invalidate automatically. Responses report `cache_layer` and `cache_similarity`.
 - **Conversation memory** - server-side, keyed by an optional `conversation_id`, so follow-ups like "summarize that" are condensed into standalone questions before retrieval.
 - **Agent memory graph** - a queryable graph of sections and entities derived from indexed content.
 - **Agent memory (MCP)** - coding agents (Claude Code, Codex, Claude) save & recall per-project memory and pull document context through the Oreag MCP server.
-- **BYOK, multi-provider** - OpenAI, Google Gemini, Anthropic, Sarvam AI, Ollama (local), sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
+- **Visualize tab** - a 3D interactive knowledge graph inside each project: the project, its files, chunks, and memories as nodes with structural and similarity edges - orbit/zoom, hover tooltips, and a click-through details panel with a "View file" action.
+- **BYOK, multi-provider** - 16 keyed providers (OpenAI, Google Gemini, Anthropic, Azure OpenAI, Mistral, Cohere, Together AI, Fireworks AI, xAI Grok, Groq, DeepSeek, OpenRouter, Perplexity, Voyage AI, Jina AI, Sarvam) plus keyless local Ollama, LM Studio, and sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
 - **Secure by design** - Supabase Auth (JWT/JWKS), Row-Level Security, SHA-256-hashed API keys, Fernet-encrypted provider keys.
 - **Tunable** - chunk size/overlap (global or per-file), embedding model, LLM, top-K - with one-click re-index.
+- **Matryoshka (MRL) dimensions** - MRL-capable embedding models (OpenAI text-embedding-3, gemini-embedding-001, Cohere embed-v4.0, Jina v3) offer multiple sizes; shrinking the same model truncates stored vectors (chunks **and** memories) in place instantly with zero re-embedding, while growing or switching models re-embeds everything.
 
 ---
 
@@ -77,16 +82,13 @@ flowchart TB
 
     subgraph datat["DATA TIER - Supabase"]
         Auth["Auth<br/>JWT / JWKS"]
-        PG[("Postgres + pgvector<br/>projects · files · chunks · memories<br/>provider_keys · api_keys · query_logs")]
+        PG[("Postgres + pgvector<br/>projects · files · chunks · memories<br/>provider_keys · api_keys · query_logs<br/>semantic_query_cache")]
         Store[["Storage<br/>project-files bucket"]]
     end
 
     subgraph ai["AI PROVIDERS - BYOK / local"]
-        OpenAI["OpenAI"]
-        Gemini["Google Gemini"]
-        Anthropic["Anthropic Claude"]
-        Sarvam["Sarvam AI"]
-        Ollama["Ollama · local"]
+        Keyed["16 keyed providers<br/>OpenAI · Gemini · Anthropic · Azure OpenAI<br/>Mistral · Cohere · Together · Fireworks · xAI Grok · Groq<br/>DeepSeek · OpenRouter · Perplexity · Voyage · Jina · Sarvam"]
+        Local["Keyless local<br/>Ollama · LM Studio · sentence-transformers"]
     end
 
     Browser ==>|HTTPS| Next
@@ -104,11 +106,11 @@ flowchart TB
     Ingest & Retrieve & Generate & Memory --> Resolver
     Resolver -->|decrypt keys| PG
     Resolver --> Registry
-    Registry --> OpenAI & Gemini & Anthropic & Sarvam & Ollama
+    Registry --> Keyed & Local
 
     Ingest -->|raw + markdown| Store
     Ingest -->|chunks + vectors| PG
-    Retrieve -->|cosine search| PG
+    Retrieve -->|"hybrid: cosine + full-text · RRF"| PG
     Generate --> PG
     Memory -->|embed-on-save · search| PG
     MemGraph --> PG
@@ -125,7 +127,7 @@ flowchart TB
     class Next,AuthRt tEdge
     class API,PublicAPI,Ingest,Retrieve,Generate,Memory,MemGraph,Resolver,Registry tApp
     class Auth,PG,Store tData
-    class OpenAI,Gemini,Anthropic,Sarvam,Ollama tAI
+    class Keyed,Local tAI
 ```
 
 ---
@@ -141,7 +143,7 @@ flowchart LR
     C --> D{{"Background task<br/>ingest_file()"}}
     D --> E["Convert to Markdown<br/>PyMuPDF / MarkItDown"]
     E --> F["Chunk<br/>RecursiveCharacterTextSplitter"]
-    F --> G["Embed in batches<br/>resolved BYOK key"]
+    F --> G["Embed in provider-sized batches<br/>OpenAI/Gemini 100 · Ollama 32 · ST 64<br/>resolved BYOK key"]
     G --> H[("pgvector chunks<br/>content + embedding")]
     H --> I(["status: indexed<br/>project status recomputed"])
     G -.->|exception| J(["status: failed<br/>error shown in Files tab"])
@@ -169,7 +171,7 @@ sequenceDiagram
     actor C as Caller
     participant API as FastAPI · /v1
     participant CV as Conversation memory
-    participant QC as Query cache (CAG)
+    participant QC as Answer cache (L1 + L2)
     participant AG as Agentic loop
     participant R as Retrieval
     participant DB as pgvector
@@ -187,17 +189,17 @@ sequenceDiagram
         API->>L: condense_question() → standalone question
     end
 
-    API->>QC: cache lookup (project · models · top_k · content sig · question)
-    alt cache hit
+    API->>QC: L1 exact lookup, then L2 semantic (cosine >= 0.75)<br/>scoped by project · models · top_k · content sig
+    alt cache hit (L1 or L2)
         QC-->>API: cached answer (no retrieval, no LLM)
-    else cache miss (single-flight)
+    else double miss (single-flight)
         API->>AG: detect_depth(question) → short | long
         opt long
             AG->>L: plan_subqueries() (literal question kept)
         end
         loop up to agentic_max_rounds
             AG->>R: retrieve every sub-query
-            R->>DB: nearest-neighbour search (top_k)
+            R->>DB: hybrid search - pgvector + full-text, fused with RRF
             DB-->>R: top-k chunks
             R-->>AG: sources
             AG->>AG: merge + de-duplicate · is_sufficient()
@@ -209,14 +211,14 @@ sequenceDiagram
             AG-->>API: needs_clarification + clarification_questions
         end
         AG-->>API: answer or clarification
-        API->>QC: store answer in cache
+        API->>QC: store answer in L1 + L2 (question embedding)
     end
 
     opt conversation_id present
         API->>CV: save turn (question + answer)
     end
     API->>DB: write query_logs
-    API-->>-C: 200 - answer + sources + depth + latency
+    API-->>-C: 200 - answer + sources + depth + cache_layer + latency
 ```
 
 ### 3. BYOK Key Resolution
@@ -333,8 +335,8 @@ sequenceDiagram
 | **Database** | Supabase Postgres + `pgvector` |
 | **Auth** | Supabase Auth (JWT / JWKS) |
 | **Storage** | Supabase Storage (private bucket) |
-| **Cache / conversation memory** | Redis (optional, via `REDIS_URL`) with in-memory fallback |
-| **AI providers** | OpenAI · Google Gemini · Anthropic · Sarvam AI · Ollama · sentence-transformers |
+| **Cache / conversation memory** | L1: Redis (optional, via `REDIS_URL`) with in-memory fallback · L2: semantic cache in Postgres + `pgvector` |
+| **AI providers** | 16 keyed: OpenAI · Google Gemini · Anthropic · Azure OpenAI · Mistral · Cohere · Together AI · Fireworks AI · xAI Grok · Groq · DeepSeek · OpenRouter · Perplexity · Voyage AI · Jina AI · Sarvam · keyless local: Ollama · LM Studio · sentence-transformers |
 | **Ingestion** | PyMuPDF, MarkItDown, LangChain text splitters |
 | **Crypto** | `cryptography` (Fernet) for BYOK keys |
 | **Agent integration** | MCP server (Python, FastMCP) - `mcp-server/` |
@@ -352,13 +354,13 @@ Oreag/
 ├── backend/                  # FastAPI service (Render)
 │   └── app/
 │       ├── routers/          # projects, files, keys, provider_keys, account, memory, meta, playground, rag_v1, memory_graph
-│       ├── providers/        # registry, resolver, openai/gemini/anthropic/sarvam/ollama/st
-│       ├── services/         # ingestion, retrieval, generation, query, agentic, query_cache, memory, memory_graph, conversion, storage
+│       ├── providers/        # registry, resolver, openai/gemini/anthropic/sarvam/ollama/st + openai_compat (Azure, Mistral, Cohere, Together, xAI, Groq, …)
+│       ├── services/         # ingestion, retrieval, generation, query, agentic, query_cache, semantic_cache, explore, memory, memory_graph, conversion, storage
 │       ├── crypto.py         # Fernet encrypt/decrypt for BYOK keys
 │       └── models.py, schemas.py, config.py, db.py, main.py
 ├── mcp-server/               # Oreag MCP server (FastMCP) - agent memory + docs tools
 ├── supabase/
-│   ├── migrations/           # 0001…0007 (tables, RLS, pgvector, provider_keys, memories)
+│   ├── migrations/           # 0001…0012 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search)
 │   └── templates/            # branded auth email templates
 ├── render.yaml               # backend blueprint
 ├── FLOW.md                   # architecture + flow diagrams

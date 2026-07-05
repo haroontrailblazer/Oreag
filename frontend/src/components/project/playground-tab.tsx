@@ -12,6 +12,7 @@ import { useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
+import { BestPractices } from "@/components/ui/best-practices"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -331,16 +332,47 @@ export function PlaygroundTab({ project }: { project: Project }) {
               Follow-ups remember the conversation.
             </CardDescription>
           </div>
-          {turns.length > 0 ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleNewChat}
-            >
-              New chat
-            </Button>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-2">
+            <BestPractices
+              tips={[
+                {
+                  title: "Follow-ups keep context",
+                  detail:
+                    'Asking "summarize that" works - the server rewrites follow-ups into standalone questions using the conversation. Use New chat to reset context.',
+                },
+                {
+                  title: "Watch the cache badges",
+                  detail:
+                    "Cached - exact means the same question was asked before (L1). Cached - similar means a semantically close question was answered (L2, similarity shown). Fresh answers have no badge and cost retrieval + an LLM call.",
+                },
+                {
+                  title: "Click the reference chips",
+                  detail:
+                    "Each chip is a chunk that grounded the answer - click to read the exact passage and its match score. Memory chips (brain icon) are agent memories blended in.",
+                },
+                {
+                  title: "Exact terms are caught too",
+                  detail:
+                    "Retrieval is hybrid: meaning-based vector search plus full-text keyword search, so error codes and IDs match even when embeddings miss them.",
+                },
+                {
+                  title: "This is exactly the /v1 pipeline",
+                  detail:
+                    "The playground calls the same code path as your public API and MCP tools - what you see here is what your consumers get.",
+                },
+              ]}
+            />
+            {turns.length > 0 ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleNewChat}
+              >
+                New chat
+              </Button>
+            ) : null}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-5">

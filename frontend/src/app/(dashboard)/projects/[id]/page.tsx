@@ -44,10 +44,33 @@ export default function ProjectPage({
       : "files"
   )
 
-  useEffect(() => {
-    if (selectedFileId) setTab("files")
-    else if (tabParam && TAB_VALUES.includes(tabParam)) setTab(tabParam)
-  }, [selectedFileId, tabParam])
+  // Sync the tab with URL deep links (?file=<id> opens Files; ?tab=<name>
+  // opens that tab). State is adjusted during render when the URL target
+  // changes - React's "adjusting state when props change" pattern - instead
+  // of a setState-in-effect.
+  const urlTarget = selectedFileId
+    ? "files"
+    : tabParam && TAB_VALUES.includes(tabParam)
+      ? tabParam
+      : null
+  const [lastUrlTarget, setLastUrlTarget] = useState(urlTarget)
+  if (urlTarget !== lastUrlTarget) {
+    setLastUrlTarget(urlTarget)
+    if (urlTarget) setTab(urlTarget)
+  }
+
+  // "View file" from the Visualize tab switches tabs in CLIENT state - going
+  // through router.push(?file=...) broke on the second click (same URL = no
+  // param change = no navigation, the button hung on "Locating file...").
+  // The token re-triggers the scroll/highlight even for the same file.
+  const [fileFocus, setFileFocus] = useState<string | null>(null)
+  const [focusToken, setFocusToken] = useState(0)
+
+  function handleViewFile(fileId: string) {
+    setFileFocus(fileId)
+    setFocusToken((t) => t + 1)
+    setTab("files")
+  }
 
   // Let the active (Files) tab paint and fetch first, then quietly mount the
   // remaining tabs in the background so switching to them is instant - without
@@ -155,7 +178,8 @@ export default function ProjectPage({
           <FilesTab
             project={project}
             onChanged={handleChanged}
-            selectedFileId={selectedFileId}
+            selectedFileId={fileFocus ?? selectedFileId}
+            focusToken={focusToken}
           />
         </TabsContent>
         <TabsContent value="memory" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
@@ -169,7 +193,7 @@ export default function ProjectPage({
         </TabsContent>
         {/* No forceMount: the 3D canvas (WebGL) only spins up when opened. */}
         <TabsContent value="visualize" className="mt-4 min-h-0 overflow-y-auto">
-          <VisualizeTab project={project} />
+          <VisualizeTab project={project} onViewFile={handleViewFile} />
         </TabsContent>
         <TabsContent value="settings" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
           <SettingsTab project={project} onChanged={handleChanged} />
