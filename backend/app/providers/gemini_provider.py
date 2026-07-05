@@ -3,8 +3,6 @@ import math
 
 from .base import ProviderUnavailableError
 
-EMBED_BATCH_SIZE = 100
-
 
 def l2_normalize(values: list[float]) -> list[float]:
     """Scale a vector to unit length (safe no-op for the zero vector).
@@ -34,6 +32,9 @@ def _client(api_key: str | None):
 
 
 class GeminiEmbedder:
+    # Gemini's embedding endpoint caps at 100 contents per request.
+    batch_size = 100
+
     def __init__(self, model: str, dimensions: int, api_key: str | None = None):
         self.model = model
         self.dimensions = dimensions
@@ -44,10 +45,10 @@ class GeminiEmbedder:
 
         config = types.EmbedContentConfig(output_dimensionality=self.dimensions)
         out: list[list[float]] = []
-        for i in range(0, len(texts), EMBED_BATCH_SIZE):
+        for i in range(0, len(texts), self.batch_size):
             resp = self.client.models.embed_content(
                 model=self.model,
-                contents=texts[i : i + EMBED_BATCH_SIZE],
+                contents=texts[i : i + self.batch_size],
                 config=config,
             )
             out.extend(l2_normalize(e.values) for e in resp.embeddings)

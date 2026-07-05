@@ -17,7 +17,16 @@ from .conversion import convert_to_markdown, markdown_path_for
 
 logger = logging.getLogger(__name__)
 
-EMBED_BATCH_SIZE = 64
+
+def embed_batch_size(embedder) -> int:
+    """How many chunks to embed (and commit) per round for this provider.
+
+    Each provider declares its own comfortable request size (hosted APIs take
+    big batches, local Ollama prefers small ones); fall back conservatively
+    for embedders that don't declare one.
+    """
+    size = getattr(embedder, "batch_size", 0)
+    return size if isinstance(size, int) and size > 0 else 64
 
 
 def parse_pdf(data: bytes) -> list[tuple[int, str]]:
@@ -148,8 +157,9 @@ def ingest_file(file_id: uuid.UUID) -> None:
         db.execute(sql_delete(Chunk).where(Chunk.file_id == file.id))
         db.commit()
 
-        for i in range(0, len(chunks), EMBED_BATCH_SIZE):
-            batch = chunks[i : i + EMBED_BATCH_SIZE]
+        batch_size = embed_batch_size(embedder)
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i : i + batch_size]
             vectors = embedder.embed_texts([content for _, _, content in batch])
             db.execute(
                 insert(Chunk),

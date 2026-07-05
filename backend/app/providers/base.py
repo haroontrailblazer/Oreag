@@ -7,6 +7,9 @@ class ProviderUnavailableError(Exception):
 
 class EmbeddingProvider(Protocol):
     dimensions: int
+    # How many texts this provider comfortably embeds per request - callers
+    # (ingestion) batch by this, so each batch is exactly one API call.
+    batch_size: int
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]: ...
 

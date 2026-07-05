@@ -3,8 +3,6 @@ import httpx
 from ..config import settings
 from .base import ProviderUnavailableError
 
-EMBED_BATCH_SIZE = 64
-
 
 def _post(path: str, payload: dict, timeout: float) -> dict:
     try:
@@ -32,16 +30,21 @@ def is_available() -> bool:
 
 
 class OllamaEmbedder:
+    # Local inference: one model instance serves the whole queue, so oversized
+    # batches just stretch a single request toward the timeout on modest
+    # hardware. Smaller batches keep progress (and DB commits) steady.
+    batch_size = 32
+
     def __init__(self, model: str, dimensions: int):
         self.model = model
         self.dimensions = dimensions
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
-        for i in range(0, len(texts), EMBED_BATCH_SIZE):
+        for i in range(0, len(texts), self.batch_size):
             data = _post(
                 "/api/embed",
-                {"model": self.model, "input": texts[i : i + EMBED_BATCH_SIZE]},
+                {"model": self.model, "input": texts[i : i + self.batch_size]},
                 timeout=300,
             )
             out.extend(data["embeddings"])

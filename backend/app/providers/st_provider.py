@@ -27,6 +27,10 @@ def _load_model(model_name: str):
 
 
 class SentenceTransformersEmbedder:
+    # In-process encoding (sentence-transformers mini-batches internally); this
+    # only sets how many chunks are embedded + committed per ingestion round.
+    batch_size = 64
+
     def __init__(self, model: str, dimensions: int):
         self.model = model
         self.dimensions = dimensions

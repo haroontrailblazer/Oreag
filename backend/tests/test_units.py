@@ -353,6 +353,44 @@ class TestPlanEmbeddingChange:
             _plan_embedding_change(self._project(), None, None, 123)
 
 
+class TestEmbedBatchSizes:
+    """Batch size is per provider: hosted APIs take big batches, local Ollama
+    prefers small ones. Ingestion batches (and commits) by the embedder's own
+    declared size, so each batch is exactly one embedding request."""
+
+    def test_each_provider_declares_its_size(self):
+        # class attributes - no instantiation, so no keys/SDKs/model downloads
+        from app.providers.gemini_provider import GeminiEmbedder
+        from app.providers.ollama_provider import OllamaEmbedder
+        from app.providers.openai_provider import OpenAIEmbedder
+        from app.providers.st_provider import SentenceTransformersEmbedder
+
+        assert OpenAIEmbedder.batch_size == 100
+        assert GeminiEmbedder.batch_size == 100
+        assert OllamaEmbedder.batch_size == 32
+        assert SentenceTransformersEmbedder.batch_size == 64
+
+    def test_ingestion_uses_the_embedders_size(self):
+        from app.services.ingestion import embed_batch_size
+
+        class _Declared:
+            batch_size = 25
+
+        assert embed_batch_size(_Declared()) == 25
+
+    def test_ingestion_falls_back_conservatively(self):
+        from app.services.ingestion import embed_batch_size
+
+        class _Silent:
+            pass
+
+        class _Broken:
+            batch_size = 0
+
+        assert embed_batch_size(_Silent()) == 64
+        assert embed_batch_size(_Broken()) == 64
+
+
 class TestVectorMigration:
     """Memory vectors must follow chunk vectors through every embedding change:
     truncated in place on a same-model MRL shrink, cleared and re-embedded with

@@ -2,8 +2,6 @@ from openai import OpenAI
 
 from .base import ProviderUnavailableError
 
-EMBED_BATCH_SIZE = 100
-
 
 def _client(api_key: str | None) -> OpenAI:
     if not api_key:
@@ -15,6 +13,10 @@ def _client(api_key: str | None) -> OpenAI:
 
 
 class OpenAIEmbedder:
+    # OpenAI accepts up to 2048 inputs per embeddings request; 100 keeps each
+    # request fast and the blast radius of a failed call small.
+    batch_size = 100
+
     def __init__(self, model: str, dimensions: int, api_key: str | None = None):
         self.model = model
         self.dimensions = dimensions
@@ -26,9 +28,9 @@ class OpenAIEmbedder:
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         params: dict = {"dimensions": self.dimensions} if self._sized else {}
         out: list[list[float]] = []
-        for i in range(0, len(texts), EMBED_BATCH_SIZE):
+        for i in range(0, len(texts), self.batch_size):
             resp = self.client.embeddings.create(
-                model=self.model, input=texts[i : i + EMBED_BATCH_SIZE], **params
+                model=self.model, input=texts[i : i + self.batch_size], **params
             )
             out.extend(item.embedding for item in resp.data)
         return out
