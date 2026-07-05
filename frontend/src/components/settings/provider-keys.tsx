@@ -154,8 +154,10 @@ export function ProviderKeys() {
   const removingProvider = PROVIDERS.find((p) => p.id === removeTarget)
 
   return (
-    <Card>
-      <CardHeader>
+    // Fills the page's leftover height; only the table rows scroll (the card
+    // title and the table header row stay pinned).
+    <Card className="flex min-h-0 flex-1 flex-col">
+      <CardHeader className="shrink-0">
         <CardTitle>Provider API keys</CardTitle>
         <CardDescription>
           Bring your own keys. They&apos;re encrypted at rest and used for this
@@ -169,9 +171,9 @@ export function ProviderKeys() {
           </Link>
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead className="pl-6">Provider</TableHead>
               <TableHead>Key</TableHead>

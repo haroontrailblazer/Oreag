@@ -46,7 +46,9 @@ export function ProjectKeys() {
   )
 
   return (
-    <Card>
+    // Sits below the (stretchy) provider card; its own rows scroll past a cap
+    // so it can never push the page beyond the viewport.
+    <Card className="shrink-0">
       <CardHeader>
         <CardTitle>Project key overrides</CardTitle>
         <CardDescription>
@@ -54,9 +56,9 @@ export function ProjectKeys() {
           keys above. Manage these in each project&apos;s Settings.
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="max-h-[28dvh] overflow-y-auto p-0">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead className="pl-6">Project</TableHead>
               <TableHead>Embedding key</TableHead>
