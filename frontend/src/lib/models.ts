@@ -1,7 +1,12 @@
-import type { Project } from "@/lib/types"
+import type { EmbeddingModelEntry, Project } from "@/lib/types"
 
 export type Availability = Record<string, boolean>
 export type ModelRole = "llm" | "embedding"
+
+/** Vector sizes a model can produce (MRL prefixes, or just its native size). */
+export function dimensionOptions(entry: EmbeddingModelEntry): number[] {
+  return entry.dimension_options ?? [entry.dimensions]
+}
 
 /** Providers that run locally and never need an API key. */
 export const KEYLESS_PROVIDERS = new Set(["ollama", "sentence_transformers"])

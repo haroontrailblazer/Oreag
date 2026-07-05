@@ -15,6 +15,8 @@ class ProjectCreate(BaseModel):
     chunk_overlap: int = Field(default=200, ge=0)
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
+    # None = the model's default size; MRL models also accept smaller prefixes.
+    embedding_dimensions: int | None = None
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o-mini"
     top_k: int = Field(default=5, ge=1, le=20)
@@ -36,12 +38,17 @@ class ProjectUpdate(BaseModel):
 
 
 class ReindexRequest(BaseModel):
-    """Optional new config; project chunks are wiped and all files re-ingested."""
+    """Optional new config; project chunks are wiped and all files re-ingested.
+
+    Exception: shrinking the SAME Matryoshka model's dimensions truncates the
+    stored vectors in place - instant, no re-embedding.
+    """
 
     chunk_size: int | None = Field(default=None, ge=100, le=8000)
     chunk_overlap: int | None = Field(default=None, ge=0)
     embedding_provider: str | None = None
     embedding_model: str | None = None
+    embedding_dimensions: int | None = None
     embedding_api_key: str | None = None
 
 

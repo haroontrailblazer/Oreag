@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import logging
 import time
 import uuid
 
@@ -18,6 +19,8 @@ from . import generation
 from . import memory as memory_service
 from . import query_cache
 from . import retrieval
+
+logger = logging.getLogger(__name__)
 
 # Storage for CAG + conversation memory. Redis when REDIS_URL is set (shared
 # across workers, survives restarts), else per-process in-memory. The cache and
@@ -115,6 +118,18 @@ def run_query(
                         )
             except ProviderUnavailableError:
                 pass  # no embedding key for memory search - answer from docs only
+            except Exception:
+                # Memory blending is an enrichment - it must never take the
+                # whole query down (e.g. a stale-dimension vector from before
+                # a model switch aborts the transaction with a pgvector
+                # "different vector dimensions" error). Roll back so the
+                # session is usable again and answer from documents only.
+                logger.exception(
+                    "Memory blending failed for project %s; answering from "
+                    "documents only",
+                    project.id,
+                )
+                db.rollback()
         return sources
 
     def _llm():

@@ -138,7 +138,10 @@ def ingest_file(file_id: uuid.UUID) -> None:
 
         api_key = resolver.resolve_embedding_key(db, project)
         embedder = get_embedder(
-            project.embedding_provider, project.embedding_model, api_key
+            project.embedding_provider,
+            project.embedding_model,
+            api_key,
+            dimensions=project.embedding_dimensions,
         )
 
         # idempotent re-runs: drop anything from a previous attempt

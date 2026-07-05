@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher, uploadWithProgress } from "@/lib/api"
-import { providerOf } from "@/lib/models"
+import { dimensionOptions, providerOf } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 const MAX_FILE_MB = 50
@@ -88,6 +88,9 @@ export default function NewProjectPage() {
   const [chunkSize, setChunkSize] = useState(1000)
   const [chunkOverlap, setChunkOverlap] = useState(200)
   const [embedding, setEmbedding] = useState("openai/text-embedding-3-small")
+  // null = the model's default size. Derived below against the current model's
+  // options, so a model switch (manual or auto) can never leave a stale size.
+  const [embDimensions, setEmbDimensions] = useState<number | null>(null)
   const [llm, setLlm] = useState("openai/gpt-4o-mini")
   const [topK, setTopK] = useState(5)
   const [submitting, setSubmitting] = useState(false)
@@ -154,6 +157,7 @@ export default function NewProjectPage() {
           chunk_overlap: chunkOverlap,
           embedding_provider: embeddingProvider,
           embedding_model: embeddingModel,
+          embedding_dimensions: effectiveDims ?? undefined,
           llm_provider: llmProvider,
           llm_model: llmModel,
           top_k: topK,
@@ -179,6 +183,14 @@ export default function NewProjectPage() {
   const availability = models?.availability ?? { openai: true }
   const embAvailable = Boolean(availability[providerOf(embedding)])
   const llmAvailable = Boolean(availability[providerOf(llm)])
+  const embEntry = models?.catalog.embedding[providerOf(embedding)]?.find(
+    (entry) => `${providerOf(embedding)}/${entry.model}` === embedding
+  )
+  const embDimOptions = embEntry ? dimensionOptions(embEntry) : []
+  const effectiveDims =
+    embDimensions !== null && embDimOptions.includes(embDimensions)
+      ? embDimensions
+      : (embEntry?.dimensions ?? null)
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -379,6 +391,32 @@ export default function NewProjectPage() {
                 without re-indexing.
               </p>
             </div>
+
+            {embDimOptions.length > 1 && effectiveDims !== null && (
+              <div className="space-y-2">
+                <Label>Vector dimensions</Label>
+                <Select
+                  value={String(effectiveDims)}
+                  onValueChange={(v) => setEmbDimensions(Number(v))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {embDimOptions.map((d) => (
+                      <SelectItem key={d} value={String(d)}>
+                        {d}d{d === embEntry?.dimensions ? " (default)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  This model supports smaller Matryoshka sizes: faster search
+                  and less storage for a small accuracy trade-off. You can
+                  shrink later instantly without re-embedding.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Answer model (LLM)</Label>

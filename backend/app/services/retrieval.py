@@ -21,7 +21,10 @@ SEARCH_SQL = text(
 def retrieve(db: Session, project: Project, question: str, top_k: int) -> list[dict]:
     api_key = resolver.resolve_embedding_key(db, project)
     embedder = get_embedder(
-        project.embedding_provider, project.embedding_model, api_key
+        project.embedding_provider,
+        project.embedding_model,
+        api_key,
+        dimensions=project.embedding_dimensions,
     )
     query_vector = embedder.embed_query(question)
     qvec = "[" + ",".join(repr(v) for v in query_vector) + "]"

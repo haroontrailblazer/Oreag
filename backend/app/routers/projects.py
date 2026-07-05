@@ -8,7 +8,7 @@ from .. import crypto
 from ..auth.jwt import get_current_user
 from ..db import get_db
 from ..models import File, Project, QueryLog
-from ..providers.registry import embedding_dimensions, validate_llm
+from ..providers.registry import resolve_embedding_dimensions, validate_llm
 from ..schemas import ProjectCreate, ProjectOut, ProjectUpdate
 from ..services import storage
 from .deps import get_owned_project
@@ -99,7 +99,9 @@ def create_project(
     if body.chunk_overlap >= body.chunk_size:
         raise HTTPException(422, "chunk_overlap must be smaller than chunk_size")
     try:
-        dimensions = embedding_dimensions(body.embedding_provider, body.embedding_model)
+        dimensions = resolve_embedding_dimensions(
+            body.embedding_provider, body.embedding_model, body.embedding_dimensions
+        )
         validate_llm(body.llm_provider, body.llm_model)
     except ValueError as exc:
         raise HTTPException(422, str(exc))

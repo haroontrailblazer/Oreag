@@ -10,10 +10,14 @@ from app.auth.api_keys import KEY_PREFIX, generate_api_key, hash_key
 from app.main import app
 from app.models import Memory, Project, ProviderKey
 from app.providers import resolver
+from app.providers.gemini_provider import l2_normalize
 from app.providers.registry import (
     CATALOG,
+    embedding_change_plan,
+    embedding_dimension_options,
     embedding_dimensions,
     get_embedder,
+    resolve_embedding_dimensions,
     validate_llm,
 )
 from app.schemas import ProjectCreate, ProjectOut, ProviderKeyOut
@@ -206,6 +210,267 @@ class TestRegistry:
     def test_sarvam_chat_models_are_current(self):
         # Verified against docs.sarvam.ai: these are the two current chat ids.
         assert CATALOG["llm"]["sarvam"] == ["sarvam-30b", "sarvam-105b"]
+
+
+class TestMatryoshkaDimensions:
+    def test_options_default_to_single_size(self):
+        assert embedding_dimension_options("ollama", "nomic-embed-text") == [768]
+        assert embedding_dimension_options("gemini", "text-embedding-004") == [768]
+
+    def test_mrl_models_offer_prefix_sizes(self):
+        assert embedding_dimension_options("openai", "text-embedding-3-small") == [
+            512,
+            1536,
+        ]
+        assert embedding_dimension_options("openai", "text-embedding-3-large") == [
+            256,
+            1024,
+            3072,
+        ]
+        assert embedding_dimension_options("gemini", "gemini-embedding-001") == [
+            768,
+            1536,
+            3072,
+        ]
+
+    def test_resolve_defaults_and_validates(self):
+        assert (
+            resolve_embedding_dimensions("openai", "text-embedding-3-small", None)
+            == 1536
+        )
+        assert (
+            resolve_embedding_dimensions("openai", "text-embedding-3-large", 1024)
+            == 1024
+        )
+        with pytest.raises(ValueError):
+            resolve_embedding_dimensions("openai", "text-embedding-3-small", 999)
+        with pytest.raises(ValueError):
+            # non-MRL models accept only their native size
+            resolve_embedding_dimensions("ollama", "nomic-embed-text", 512)
+
+    def test_change_plan_keep_when_nothing_changed(self):
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-small", 1536,
+                "openai", "text-embedding-3-small", 1536,
+            )
+            == "keep"
+        )
+
+    def test_change_plan_truncate_for_same_model_shrink(self):
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-large", 3072,
+                "openai", "text-embedding-3-large", 1024,
+            )
+            == "truncate"
+        )
+        assert (
+            embedding_change_plan(
+                "gemini", "gemini-embedding-001", 3072,
+                "gemini", "gemini-embedding-001", 768,
+            )
+            == "truncate"
+        )
+
+    def test_change_plan_grow_requires_reembed(self):
+        # the truncated tail was never stored - growing needs a full re-embed
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-large", 1024,
+                "openai", "text-embedding-3-large", 3072,
+            )
+            == "reembed"
+        )
+
+    def test_change_plan_model_switch_requires_reembed(self):
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-small", 1536,
+                "gemini", "gemini-embedding-001", 3072,
+            )
+            == "reembed"
+        )
+        # matching dimension COUNT is not a matching vector space
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-small", 1536,
+                "gemini", "gemini-embedding-001", 1536,
+            )
+            == "reembed"
+        )
+
+    def test_l2_normalize(self):
+        assert l2_normalize([3.0, 4.0]) == pytest.approx([0.6, 0.8])
+        assert l2_normalize([0.0, 0.0]) == [0.0, 0.0]
+        length = sum(v * v for v in l2_normalize([0.2, -1.7, 5.0])) ** 0.5
+        assert length == pytest.approx(1.0)
+
+
+class TestPlanEmbeddingChange:
+    """The files-router helper that turns a request into a migration plan."""
+
+    def _project(self) -> Project:
+        return Project(
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-large",
+            embedding_dimensions=3072,
+        )
+
+    def test_same_model_shrink_truncates(self):
+        from app.routers.files import _plan_embedding_change
+
+        provider, model, dims, plan = _plan_embedding_change(
+            self._project(), None, None, 1024
+        )
+        assert (provider, model, dims, plan) == (
+            "openai",
+            "text-embedding-3-large",
+            1024,
+            "truncate",
+        )
+
+    def test_model_switch_defaults_to_new_models_native_size(self):
+        from app.routers.files import _plan_embedding_change
+
+        provider, model, dims, plan = _plan_embedding_change(
+            self._project(), "gemini", "gemini-embedding-001", None
+        )
+        assert (dims, plan) == (3072, "reembed")
+
+    def test_no_change_keeps(self):
+        from app.routers.files import _plan_embedding_change
+
+        *_, plan = _plan_embedding_change(self._project(), None, None, None)
+        assert plan == "keep"
+
+    def test_invalid_dimensions_rejected(self):
+        from fastapi import HTTPException
+
+        from app.routers.files import _plan_embedding_change
+
+        with pytest.raises(HTTPException):
+            _plan_embedding_change(self._project(), None, None, 123)
+
+
+class TestVectorMigration:
+    """Memory vectors must follow chunk vectors through every embedding change:
+    truncated in place on a same-model MRL shrink, cleared and re-embedded with
+    the new model on a model switch."""
+
+    class _RecordingDB:
+        def __init__(self, fail: bool = False):
+            self.fail = fail
+            self.statements: list[str] = []
+            self.rollbacks = 0
+
+        def execute(self, statement, params=None):
+            if self.fail:
+                raise RuntimeError("no subvector on this postgres")
+            self.statements.append(str(statement))
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    def test_truncate_updates_chunks_and_memories(self):
+        from app.routers.files import _truncate_vectors_in_place
+
+        db = self._RecordingDB()
+        assert _truncate_vectors_in_place(db, Project(id=uuid.uuid4()), 1024) is True
+        joined = "\n".join(db.statements).lower()
+        assert "update chunks" in joined
+        assert "update memories" in joined
+        # both tables go through the same MRL prefix + re-normalize
+        assert joined.count("subvector") == 2
+        assert joined.count("l2_normalize") == 2
+
+    def test_truncate_falls_back_cleanly_on_db_error(self):
+        from app.routers.files import _truncate_vectors_in_place
+
+        db = self._RecordingDB(fail=True)
+        assert _truncate_vectors_in_place(db, Project(id=uuid.uuid4()), 512) is False
+        assert db.rollbacks == 1  # transaction cleaned up for the full-reembed path
+
+    def test_reembed_memories_uses_the_projects_current_model(self, monkeypatch):
+        from app.services import memory as memory_service
+
+        project = Project(
+            id=uuid.uuid4(),
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-large",
+            embedding_dimensions=1024,
+        )
+        memories = [
+            Memory(project_id=project.id, content="alpha"),
+            Memory(project_id=project.id, content="beta"),
+        ]
+
+        class _FakeScalars:
+            def all(self):
+                return memories
+
+        class _FakeSession:
+            def __init__(self):
+                self.commits = 0
+                self.closed = False
+
+            def get(self, model, key):
+                return project if model is Project else None
+
+            def scalars(self, stmt):
+                return _FakeScalars()
+
+            def commit(self):
+                self.commits += 1
+
+            def rollback(self):
+                pass
+
+            def close(self):
+                self.closed = True
+
+        session = _FakeSession()
+        monkeypatch.setattr(memory_service, "SessionLocal", lambda: session)
+        embedded_with: list[tuple] = []
+
+        def fake_embed(db, proj, content):
+            embedded_with.append(
+                (proj.embedding_model, proj.embedding_dimensions, content)
+            )
+            return [0.1, 0.2]
+
+        monkeypatch.setattr(memory_service, "_embed", fake_embed)
+
+        memory_service.reembed_project_memories(project.id)
+
+        assert [m.embedding for m in memories] == [[0.1, 0.2], [0.1, 0.2]]
+        assert embedded_with == [
+            ("text-embedding-3-large", 1024, "alpha"),
+            ("text-embedding-3-large", 1024, "beta"),
+        ]
+        assert session.commits == 1
+        assert session.closed
+
+    def test_reembed_survives_missing_project(self, monkeypatch):
+        from app.services import memory as memory_service
+
+        class _FakeSession:
+            def __init__(self):
+                self.closed = False
+
+            def get(self, model, key):
+                return None
+
+            def rollback(self):
+                pass
+
+            def close(self):
+                self.closed = True
+
+        session = _FakeSession()
+        monkeypatch.setattr(memory_service, "SessionLocal", lambda: session)
+        memory_service.reembed_project_memories(uuid.uuid4())  # must not raise
+        assert session.closed
 
 
 class TestAnthropicProviderCompat:

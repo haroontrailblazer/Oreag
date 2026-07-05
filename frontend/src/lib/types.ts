@@ -122,6 +122,9 @@ export interface MemoryGraphResponse {
 export interface EmbeddingModelEntry {
   model: string
   dimensions: number
+  // Matryoshka (MRL) models can serve these smaller prefix sizes too; the
+  // backend truncates stored vectors in place when shrinking within a model.
+  dimension_options?: number[]
 }
 
 export interface ModelsResponse {

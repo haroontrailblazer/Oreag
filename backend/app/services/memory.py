@@ -1,8 +1,10 @@
 import logging
+import uuid
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from ..db import SessionLocal
 from ..models import Memory, Project
 from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
@@ -18,11 +20,49 @@ def _embed(db: Session, project: Project, content: str) -> list[float] | None:
     if resolver.requires_key(project.embedding_provider) and not key:
         return None
     try:
-        embedder = get_embedder(project.embedding_provider, project.embedding_model, key)
+        embedder = get_embedder(
+            project.embedding_provider,
+            project.embedding_model,
+            key,
+            dimensions=project.embedding_dimensions,
+        )
         return embedder.embed_texts([content])[0]
     except Exception:
         logger.exception("Memory embedding failed; storing without embedding")
         return None
+
+
+def reembed_project_memories(project_id: uuid.UUID) -> None:
+    """Background task: re-embed every memory with the project's CURRENT model.
+
+    Runs after an embedding model switch - old-model memory vectors live in an
+    incompatible space (the caller nulls them out first so search never mixes
+    spaces). Best-effort per memory: a failure leaves that one unembedded
+    rather than aborting the rest. Owns its DB session (threadpool task).
+    """
+    db = SessionLocal()
+    try:
+        project = db.get(Project, project_id)
+        if project is None:
+            return
+        memories = db.scalars(
+            select(Memory).where(Memory.project_id == project_id)
+        ).all()
+        for memory in memories:
+            memory.embedding = _embed(db, project, memory.content)
+        db.commit()
+        logger.info(
+            "Re-embedded %d memories for project %s with %s/%s",
+            len(memories),
+            project_id,
+            project.embedding_provider,
+            project.embedding_model,
+        )
+    except Exception:
+        logger.exception("Memory re-embedding failed for project %s", project_id)
+        db.rollback()
+    finally:
+        db.close()
 
 
 def save_memory(db: Session, project: Project, body: MemoryCreate) -> Memory:
@@ -59,7 +99,12 @@ def search_memories(
         raise ProviderUnavailableError(
             "Memory search needs an embedding key. Add one in Settings → API keys."
         )
-    embedder = get_embedder(project.embedding_provider, project.embedding_model, key)
+    embedder = get_embedder(
+        project.embedding_provider,
+        project.embedding_model,
+        key,
+        dimensions=project.embedding_dimensions,
+    )
     qvec = "[" + ",".join(repr(v) for v in embedder.embed_query(query)) + "]"
     rows = db.execute(
         _SEARCH_SQL, {"qvec": qvec, "project_id": str(project.id), "top_k": top_k}

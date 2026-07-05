@@ -30,6 +30,7 @@ class FakeDB:
         self._scalars = list(scalars)
         self.added = []
         self.committed = False
+        self.rollbacks = 0
 
     def scalar(self, *args, **kwargs):
         return self._scalars.pop(0) if self._scalars else 0
@@ -39,6 +40,9 @@ class FakeDB:
 
     def commit(self):
         self.committed = True
+
+    def rollback(self):
+        self.rollbacks += 1
 
 
 class TestQueryResponseSchema:
@@ -98,6 +102,34 @@ class TestRunQueryWiring:
         assert resp.sub_queries == ["what is X"]
         assert len(resp.sources) == 2
         assert gen and gen[0][1] == "short"  # depth threaded into generation
+
+    def test_memory_blend_failure_answers_from_documents(self, monkeypatch):
+        """A stale-dimension memory vector (from a pre-fix model switch) aborts
+        pgvector with "different vector dimensions"; blending must be skipped
+        and the transaction rolled back - never a 500 for the whole query."""
+        from app.services import query
+
+        monkeypatch.setattr(
+            query.retrieval, "retrieve",
+            lambda db, p, q, k: [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+        )
+
+        def exploding_search(db, p, q, k):
+            raise RuntimeError("different vector dimensions 1536 and 768")
+
+        monkeypatch.setattr(query.memory_service, "search_memories", exploding_search)
+        monkeypatch.setattr(query.settings, "rag_memory_blend_k", 3)
+        monkeypatch.setattr(
+            query.generation, "generate_answer",
+            lambda db, p, question, sources, depth="short": "DOCS ONLY",
+        )
+
+        db = FakeDB([10, 3])  # chunks present AND embedded memories present
+        resp = query.run_query(db, _project(), "what is X", None, api_key_id=None)
+
+        assert resp.answer == "DOCS ONLY"
+        assert all(s.filename != "memory" for s in resp.sources)
+        assert db.rollbacks >= 1  # the aborted transaction was cleaned up
 
     def test_weak_retrieval_escalates_to_human(self, monkeypatch):
         from app.services import query

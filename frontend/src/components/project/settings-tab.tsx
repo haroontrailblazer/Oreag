@@ -35,7 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { api, fetcher } from "@/lib/api"
-import { providerOf, providerUsable } from "@/lib/models"
+import { dimensionOptions, providerOf, providerUsable } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 export function SettingsTab({
@@ -69,6 +69,7 @@ export function SettingsTab({
   const [embedding, setEmbedding] = useState(
     `${project.embedding_provider}/${project.embedding_model}`
   )
+  const [embDimensions, setEmbDimensions] = useState(project.embedding_dimensions)
   const [embKeyInput, setEmbKeyInput] = useState("")
   const [embEditingKey, setEmbEditingKey] = useState(false)
   const [savingEmbKey, setSavingEmbKey] = useState(false)
@@ -105,7 +106,19 @@ export function SettingsTab({
     embedding !== `${project.embedding_provider}/${project.embedding_model}`
   const chunkChanged =
     chunkSize !== project.chunk_size || chunkOverlap !== project.chunk_overlap
-  const reindexNeeded = embModelChanged || chunkChanged
+  const embEntry = models?.catalog.embedding[embProvider]?.find(
+    (entry) => `${embProvider}/${entry.model}` === embedding
+  )
+  const embDimOptions = embEntry ? dimensionOptions(embEntry) : [embDimensions]
+  const embDimsChanged = embDimensions !== project.embedding_dimensions
+  // Same MRL model at a smaller size: the backend truncates stored vectors in
+  // place - instant, nothing is re-embedded.
+  const instantShrink =
+    !embModelChanged &&
+    !chunkChanged &&
+    embDimsChanged &&
+    embDimensions < project.embedding_dimensions
+  const reindexNeeded = embModelChanged || chunkChanged || embDimsChanged
   const embKeyOnly = !reindexNeeded && Boolean(embKeyInput.trim())
   const embForcedInput = !embAccountHasKey && !embOverrideLast4
 
@@ -117,6 +130,15 @@ export function SettingsTab({
 
   function changeEmbedding(value: string) {
     setEmbedding(value)
+    const [prov, mod] = value.split("/", 2)
+    // Back to the project's model -> its saved size; otherwise the new
+    // model's default size.
+    if (prov === project.embedding_provider && mod === project.embedding_model) {
+      setEmbDimensions(project.embedding_dimensions)
+    } else {
+      const entry = models?.catalog.embedding[prov]?.find((e) => e.model === mod)
+      setEmbDimensions(entry?.dimensions ?? project.embedding_dimensions)
+    }
     setEmbKeyInput("")
     setEmbEditingKey(false)
   }
@@ -236,6 +258,7 @@ export function SettingsTab({
       chunk_overlap: chunkOverlap,
       embedding_provider: embeddingProvider,
       embedding_model: embeddingModel,
+      embedding_dimensions: embDimensions,
     }
     if (embKeyInput.trim()) {
       body.embedding_api_key = embKeyInput.trim()
@@ -253,7 +276,11 @@ export function SettingsTab({
         method: "POST",
         body: JSON.stringify(body),
       })
-      toast.success("Re-indexing started - all files will be processed again")
+      toast.success(
+        instantShrink
+          ? "Vector size updated - existing vectors reused, nothing re-embedded"
+          : "Re-indexing started - all files will be processed again"
+      )
       setConfirmReindex(false)
       setEmbKeyInput("")
       setEmbEditingKey(false)
@@ -481,6 +508,32 @@ export function SettingsTab({
               </SelectContent>
             </Select>
           </div>
+          {embDimOptions.length > 1 && (
+            <div className="space-y-2">
+              <Label>Vector dimensions</Label>
+              <Select
+                value={String(embDimensions)}
+                onValueChange={(v) => setEmbDimensions(Number(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {embDimOptions.map((d) => (
+                    <SelectItem key={d} value={String(d)}>
+                      {d}d{d === embEntry?.dimensions ? " (default)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {instantShrink && (
+                <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                  Same model, smaller size: applied instantly by truncating the
+                  stored vectors (Matryoshka) - nothing is re-embedded.
+                </p>
+              )}
+            </div>
+          )}
           {encryptingEmb ? (
             <EncryptingLoader rows={3} />
           ) : (
@@ -547,11 +600,17 @@ export function SettingsTab({
       <Dialog open={confirmReindex} onOpenChange={setConfirmReindex}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Re-index all files?</DialogTitle>
+            <DialogTitle>
+              {instantShrink ? "Shrink vector dimensions?" : "Re-index all files?"}
+            </DialogTitle>
             <DialogDescription>
-              All {project.file_count} file(s) will be re-chunked and
-              re-embedded with the new configuration. Queries may return
-              incomplete results until indexing finishes.
+              {instantShrink
+                ? `Existing vectors are truncated to ${embDimensions} dimensions ` +
+                  "and reused instantly (Matryoshka) - nothing is re-embedded. " +
+                  "Growing back later requires a full re-index."
+                : `All ${project.file_count} file(s) will be re-chunked and ` +
+                  "re-embedded with the new configuration. Queries may return " +
+                  "incomplete results until indexing finishes."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -559,7 +618,7 @@ export function SettingsTab({
               Cancel
             </Button>
             <Button onClick={handleReindex} disabled={reindexing}>
-              {reindexing ? <LoaderOne /> : "Re-index"}
+              {reindexing ? <LoaderOne /> : instantShrink ? "Apply" : "Re-index"}
             </Button>
           </DialogFooter>
         </DialogContent>

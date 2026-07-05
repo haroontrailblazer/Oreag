@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { fetcher, uploadWithProgress } from "@/lib/api"
-import { providerUsable } from "@/lib/models"
+import { dimensionOptions, providerUsable } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 const ACCEPTED_FILE_TYPES = [
@@ -57,14 +57,34 @@ export function AddFilesDialog({
   const [embedding, setEmbedding] = useState(
     `${project.embedding_provider}/${project.embedding_model}`
   )
+  const [embDimensions, setEmbDimensions] = useState(project.embedding_dimensions)
   const [submitting, setSubmitting] = useState(false)
   const [progress, setProgress] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
 
   const projectEmbedding = `${project.embedding_provider}/${project.embedding_model}`
   const embeddingChanged = embedding !== projectEmbedding
+  const [embProvider] = embedding.split("/", 1)
+  const embEntry = models?.catalog.embedding[embProvider]?.find(
+    (entry) => `${embProvider}/${entry.model}` === embedding
+  )
+  const embDimOptions = embEntry ? dimensionOptions(embEntry) : [embDimensions]
+  // Same MRL model at a smaller size: instant in-place truncation, no re-embed.
+  const instantShrink =
+    !embeddingChanged && embDimensions < project.embedding_dimensions
   const availability = models?.availability ?? {
     [project.embedding_provider]: true,
+  }
+
+  function changeEmbedding(value: string) {
+    setEmbedding(value)
+    const [prov, mod] = value.split("/", 2)
+    if (value === projectEmbedding) {
+      setEmbDimensions(project.embedding_dimensions)
+    } else {
+      const entry = models?.catalog.embedding[prov]?.find((e) => e.model === mod)
+      setEmbDimensions(entry?.dimensions ?? project.embedding_dimensions)
+    }
   }
 
   function onOpenChange(next: boolean) {
@@ -78,6 +98,7 @@ export function AddFilesDialog({
       setChunkOverlap(project.chunk_overlap)
       setTopK(project.top_k)
       setEmbedding(projectEmbedding)
+      setEmbDimensions(project.embedding_dimensions)
     }
   }
 
@@ -115,6 +136,7 @@ export function AddFilesDialog({
     form.append("top_k", String(topK))
     form.append("embedding_provider", embeddingProvider)
     form.append("embedding_model", embeddingModel)
+    form.append("embedding_dimensions", String(embDimensions))
     const controller = new AbortController()
     abortRef.current = controller
     setProgress(0)
@@ -127,7 +149,9 @@ export function AddFilesDialog({
       toast.success(
         embeddingChanged
           ? "Upload complete - re-indexing the whole project"
-          : "Upload complete - indexing started"
+          : instantShrink
+            ? "Upload complete - vector size applied instantly, indexing new files"
+            : "Upload complete - indexing started"
       )
       setOpen(false)
       onUploaded()
@@ -236,7 +260,7 @@ export function AddFilesDialog({
 
           <div className="space-y-2">
             <Label>Embedding model</Label>
-            <Select value={embedding} onValueChange={setEmbedding}>
+            <Select value={embedding} onValueChange={changeEmbedding}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -276,6 +300,33 @@ export function AddFilesDialog({
               </p>
             )}
           </div>
+
+          {embDimOptions.length > 1 && (
+            <div className="space-y-2">
+              <Label>Vector dimensions</Label>
+              <Select
+                value={String(embDimensions)}
+                onValueChange={(v) => setEmbDimensions(Number(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {embDimOptions.map((d) => (
+                    <SelectItem key={d} value={String(d)}>
+                      {d}d{d === embEntry?.dimensions ? " (default)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {instantShrink && (
+                <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                  Same model, smaller size: existing vectors are truncated in
+                  place (Matryoshka) - instant, nothing is re-embedded.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="add-topk">Top-K results: {topK}</Label>

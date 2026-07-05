@@ -1,15 +1,31 @@
 from .base import EmbeddingProvider, LLMProvider
 
 # Single source of truth for what the wizard offers and what the backend accepts.
+# "dimensions" is the model's default; "dimension_options" lists the sizes a
+# Matryoshka-trained (MRL) model supports - its vectors can be truncated to any
+# listed prefix and re-normalized without re-embedding. Models without options
+# have exactly one valid size.
 CATALOG: dict = {
     "embedding": {
         "openai": [
-            {"model": "text-embedding-3-small", "dimensions": 1536},
-            {"model": "text-embedding-3-large", "dimensions": 3072},
+            {
+                "model": "text-embedding-3-small",
+                "dimensions": 1536,
+                "dimension_options": [512, 1536],
+            },
+            {
+                "model": "text-embedding-3-large",
+                "dimensions": 3072,
+                "dimension_options": [256, 1024, 3072],
+            },
         ],
         "gemini": [
             {"model": "text-embedding-004", "dimensions": 768},
-            {"model": "gemini-embedding-001", "dimensions": 3072},
+            {
+                "model": "gemini-embedding-001",
+                "dimensions": 3072,
+                "dimension_options": [768, 1536, 3072],
+            },
         ],
         "ollama": [
             {"model": "nomic-embed-text", "dimensions": 768},
@@ -51,12 +67,65 @@ CATALOG: dict = {
 }
 
 
-def embedding_dimensions(provider: str, model: str) -> int:
-    """Validates the provider/model pair and returns its dimensions."""
+def _embedding_entry(provider: str, model: str) -> dict:
     for entry in CATALOG["embedding"].get(provider, []):
         if entry["model"] == model:
-            return entry["dimensions"]
+            return entry
     raise ValueError(f"Unknown embedding model: {provider}/{model}")
+
+
+def embedding_dimensions(provider: str, model: str) -> int:
+    """Validates the provider/model pair and returns its default dimensions."""
+    return _embedding_entry(provider, model)["dimensions"]
+
+
+def embedding_dimension_options(provider: str, model: str) -> list[int]:
+    """Every vector size this model can produce (MRL prefixes + the default)."""
+    entry = _embedding_entry(provider, model)
+    return list(entry.get("dimension_options", [entry["dimensions"]]))
+
+
+def resolve_embedding_dimensions(
+    provider: str, model: str, requested: int | None = None
+) -> int:
+    """Validate a requested vector size (None means the model default)."""
+    entry = _embedding_entry(provider, model)
+    if requested is None:
+        return entry["dimensions"]
+    options = entry.get("dimension_options", [entry["dimensions"]])
+    if requested not in options:
+        raise ValueError(
+            f"{provider}/{model} supports dimensions {options}, not {requested}"
+        )
+    return requested
+
+
+def embedding_change_plan(
+    current_provider: str,
+    current_model: str,
+    current_dimensions: int,
+    provider: str,
+    model: str,
+    dimensions: int,
+) -> str:
+    """How to migrate a project's vectors to a new embedding config.
+
+    - "keep":     nothing about the vector space changed.
+    - "truncate": same MRL model at a smaller size - existing vectors can be
+                  cut to the prefix and re-normalized in place, no API calls.
+    - "reembed":  a different model (incompatible space) or a larger size (the
+                  extra numbers were never stored) - everything must be
+                  re-embedded from the text.
+    """
+    if (provider, model) != (current_provider, current_model):
+        return "reembed"
+    if dimensions == current_dimensions:
+        return "keep"
+    if dimensions < current_dimensions and dimensions in embedding_dimension_options(
+        provider, model
+    ):
+        return "truncate"
+    return "reembed"
 
 
 def validate_llm(provider: str, model: str) -> None:
@@ -65,9 +134,12 @@ def validate_llm(provider: str, model: str) -> None:
 
 
 def get_embedder(
-    provider: str, model: str, api_key: str | None = None
+    provider: str,
+    model: str,
+    api_key: str | None = None,
+    dimensions: int | None = None,
 ) -> EmbeddingProvider:
-    dimensions = embedding_dimensions(provider, model)
+    dimensions = resolve_embedding_dimensions(provider, model, dimensions)
     if provider == "openai":
         from .openai_provider import OpenAIEmbedder
 
