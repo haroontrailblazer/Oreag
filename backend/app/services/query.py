@@ -19,6 +19,7 @@ from . import generation
 from . import memory as memory_service
 from . import query_cache
 from . import retrieval
+from . import semantic_cache
 
 logger = logging.getLogger(__name__)
 
@@ -169,16 +170,46 @@ def run_query(
                 max_rounds=settings.agentic_max_rounds,
             )
 
-        # CAG: serve a repeated question (same project, model, top_k and content)
-        # from cache, and single-flight simultaneous identical asks. New
-        # files/memories change the signature, so a stale answer is never served.
-        if settings.query_cache_enabled:
-            key = query_cache.cache_key(
-                project, agentic_question, top_k, f"{chunk_count}:{memory_count}"
+        # Two cache layers, cheapest first. L1 (Redis/in-memory) hits when the
+        # normalized question repeats EXACTLY. L2 (pgvector) hits when a
+        # SIMILAR question was already answered - cosine similarity above the
+        # threshold reuses the cached answer, below it the query runs for real.
+        # Both are scoped by models + top_k + content signature, so new
+        # files/memories or a model change can never serve a stale answer.
+        signature = f"{chunk_count}:{memory_count}"
+        semantic_vector: list[float] | None = None
+        cache_layer: str | None = None
+        cache_similarity: float | None = None
+
+        def compute_and_remember() -> agentic.AgenticResult:
+            fresh = compute()
+            semantic_cache.store(
+                db, project, agentic_question, top_k, signature, fresh, semantic_vector
             )
-            result = _cache.get_or_compute(key, compute)
+            return fresh
+
+        key = (
+            query_cache.cache_key(project, agentic_question, top_k, signature)
+            if settings.query_cache_enabled
+            else None
+        )
+        result = _cache.get(key) if key is not None else None
+        if result is not None:
+            cache_layer = "l1"
         else:
-            result = compute()
+            hit, semantic_vector, cache_similarity = semantic_cache.lookup(
+                db, project, agentic_question, top_k, signature
+            )
+            if hit is not None:
+                result = hit
+                cache_layer = "l2"
+                if key is not None:
+                    _cache.set(key, hit)  # promote to the exact-match L1
+            elif key is not None:
+                # single-flight: simultaneous identical asks compute once
+                result = _cache.get_or_compute(key, compute_and_remember)
+            else:
+                result = compute_and_remember()
     except ProviderUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     latency_ms = int((time.perf_counter() - started) * 1000)
@@ -215,4 +246,6 @@ def run_query(
         needs_clarification=result.needs_clarification,
         clarification_questions=result.clarification_questions,
         conversation_id=conversation_id,
+        cache_layer=cache_layer,
+        cache_similarity=cache_similarity,
     )

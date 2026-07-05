@@ -1,6 +1,13 @@
 "use client"
 
-import { ArrowUp, Plus, Square } from "@phosphor-icons/react/dist/ssr"
+import {
+  ArrowUp,
+  Brain,
+  FileText,
+  Lightning,
+  Plus,
+  Square,
+} from "@phosphor-icons/react/dist/ssr"
 import { useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
@@ -24,7 +31,13 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher } from "@/lib/api"
 import { providerUsable } from "@/lib/models"
-import type { ModelsResponse, Project, QueryResponse } from "@/lib/types"
+import type {
+  ModelsResponse,
+  Project,
+  QueryResponse,
+  SourceChunk,
+} from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 const ACCEPTED_FILE_TYPES = [
   ".pdf",
@@ -60,6 +73,98 @@ const ACCEPTED_FILE_TYPES = [
 
 type Turn = { question: string; result: QueryResponse }
 
+/** Reference chips: file icon + name; clicking one reveals the chunk text. */
+function SourceChips({ sources }: { sources: SourceChunk[] }) {
+  const [open, setOpen] = useState<number | null>(null)
+  const active = open !== null ? sources[open] : null
+  return (
+    <div className="space-y-2 pt-1">
+      <div className="flex flex-wrap gap-1.5">
+        {sources.map((source, i) => {
+          const isMemory = source.filename === "memory"
+          const Icon = isMemory ? Brain : FileText
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setOpen(open === i ? null : i)}
+              aria-expanded={open === i}
+              title={
+                isMemory
+                  ? "Agent memory - click to read"
+                  : `${source.filename} - click to read this passage`
+              }
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted",
+                open === i && "border-foreground/40 bg-muted"
+              )}
+            >
+              <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="max-w-40 truncate">
+                {isMemory ? "Memory" : source.filename}
+              </span>
+              {source.page_number != null ? (
+                <span className="text-muted-foreground">p.{source.page_number}</span>
+              ) : null}
+              <span className="text-[10px] tabular-nums text-muted-foreground">
+                {(source.similarity * 100).toFixed(0)}%
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      {active ? (
+        <div className="rounded-lg border bg-muted/40 p-3">
+          <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+            <span className="flex min-w-0 items-center gap-1.5 font-medium">
+              {active.filename === "memory" ? (
+                <Brain className="size-3.5 shrink-0" />
+              ) : (
+                <FileText className="size-3.5 shrink-0" />
+              )}
+              <span className="truncate">
+                {active.filename === "memory" ? "Agent memory" : active.filename}
+                {active.page_number != null && ` · page ${active.page_number}`}
+              </span>
+            </span>
+            <span className="shrink-0 text-muted-foreground">
+              {(active.similarity * 100).toFixed(0)}% match
+            </span>
+          </div>
+          <p className="max-h-48 overflow-y-auto break-words whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+            {active.content}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** Badge showing which cache layer answered (exact, semantic, or nothing). */
+function CacheBadge({ result }: { result: QueryResponse }) {
+  if (!result.cache_layer) return null
+  const label =
+    result.cache_layer === "l1"
+      ? "Cached · exact"
+      : `Cached · similar${
+          result.cache_similarity != null
+            ? ` ${(result.cache_similarity * 100).toFixed(0)}%`
+            : ""
+        }`
+  return (
+    <span
+      title={
+        result.cache_layer === "l1"
+          ? "Served from the exact-match cache (L1) - no retrieval, no LLM call"
+          : "A semantically similar question was answered before (L2) - reused at the cost of one embedding call"
+      }
+      className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400"
+    >
+      {label}
+    </span>
+  )
+}
+
 /** One question + its grounded answer (depth badge, search plan, references). */
 function TurnView({ question, result }: Turn) {
   return (
@@ -80,6 +185,7 @@ function TurnView({ question, result }: Turn) {
                 Detailed
               </span>
             ) : null}
+            <CacheBadge result={result} />
           </div>
           <div className="text-xs text-muted-foreground">
             {result.model} / {result.latency_ms} ms
@@ -102,27 +208,7 @@ function TurnView({ question, result }: Turn) {
             </ul>
           </details>
         ) : null}
-        {result.sources.length ? (
-          <div className="space-y-1.5 pt-1">
-            {result.sources.map((source, i) => (
-              <details
-                key={i}
-                className="overflow-hidden rounded-lg border px-3 py-2 text-sm"
-              >
-                <summary className="cursor-pointer break-words">
-                  [{i + 1}] {source.filename}
-                  {source.page_number != null && ` - page ${source.page_number}`}{" "}
-                  <span className="text-muted-foreground">
-                    ({(source.similarity * 100).toFixed(0)}% match)
-                  </span>
-                </summary>
-                <p className="mt-2 break-words whitespace-pre-wrap text-muted-foreground">
-                  {source.content}
-                </p>
-              </details>
-            ))}
-          </div>
-        ) : null}
+        {result.sources.length ? <SourceChips sources={result.sources} /> : null}
       </div>
     </div>
   )
@@ -142,6 +228,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher)
   const availability = models?.availability ?? { [project.llm_provider]: true }
+  const cachedTurns = turns.filter((t) => t.result.cache_layer).length
 
   function handleStop() {
     abortRef.current?.abort()
@@ -283,6 +370,20 @@ export function PlaygroundTab({ project }: { project: Project }) {
             </div>
           ) : null}
         </div>
+
+        {turns.length > 0 ? (
+          <div
+            className="-mt-3 flex items-center justify-end gap-1.5 text-xs text-muted-foreground"
+            title="Answers served from the exact (L1) or semantic (L2) cache this session - cached answers skip retrieval and the LLM"
+          >
+            <Lightning
+              className={cn("size-3.5", cachedTurns > 0 && "text-emerald-500")}
+              weight={cachedTurns > 0 ? "fill" : "regular"}
+            />
+            Cache hit rate {Math.round((cachedTurns / turns.length) * 100)}% (
+            {cachedTurns}/{turns.length} answers)
+          </div>
+        ) : null}
 
         <div className="rounded-xl border bg-background p-1.5 shadow-xs focus-within:border-foreground">
           <Textarea

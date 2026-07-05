@@ -177,6 +177,82 @@ class TestRunQueryWiring:
         assert exc.value.status_code == 409
 
 
+class TestSemanticCacheWiring:
+    """run_query consults the semantic (L2) cache before computing, and
+    remembers fresh answers - the layer every surface (playground, /v1, MCP)
+    goes through."""
+
+    def test_similar_question_served_without_touching_the_llm(self, monkeypatch):
+        from app.services import query
+        from app.services.agentic import AgenticResult
+
+        cached = AgenticResult(
+            answer="SEMANTIC HIT",
+            sources=[],
+            depth="short",
+            sub_queries=[],
+            rounds=1,
+            needs_clarification=False,
+        )
+        monkeypatch.setattr(
+            query.semantic_cache, "lookup", lambda db, p, q, k, s: (cached, [0.1], 0.82)
+        )
+        llm_calls = []
+        monkeypatch.setattr(
+            query.generation,
+            "generate_answer",
+            lambda *a, **k: llm_calls.append(1) or "FRESH",
+        )
+        monkeypatch.setattr(query.retrieval, "retrieve", lambda db, p, q, k: [])
+        monkeypatch.setattr(
+            query.memory_service, "search_memories", lambda db, p, q, k: []
+        )
+
+        resp = query.run_query(
+            FakeDB([10, 0]), _project(), "explain deep learning to me", None,
+            api_key_id=None,
+        )
+        assert resp.answer == "SEMANTIC HIT"
+        assert llm_calls == []  # retrieval + generation entirely skipped
+        assert resp.cache_layer == "l2"
+        assert resp.cache_similarity == 0.82
+
+    def test_fresh_answers_are_remembered_with_the_lookup_vector(self, monkeypatch):
+        from app.services import query
+
+        monkeypatch.setattr(
+            query.semantic_cache, "lookup", lambda db, p, q, k, s: (None, [0.1], None)
+        )
+        stored = []
+        monkeypatch.setattr(
+            query.semantic_cache,
+            "store",
+            lambda db, p, q, k, s, result, vector: stored.append(
+                (vector, result.answer)
+            ),
+        )
+        monkeypatch.setattr(
+            query.retrieval, "retrieve", lambda db, p, q, k: [_src("alpha", 0.9, 0)]
+        )
+        monkeypatch.setattr(
+            query.memory_service, "search_memories", lambda db, p, q, k: []
+        )
+        monkeypatch.setattr(
+            query.generation,
+            "generate_answer",
+            lambda db, p, q, srcs, depth="short": "FRESH ANSWER",
+        )
+
+        resp = query.run_query(
+            FakeDB([10, 0]), _project(), "a brand new semantic question", None,
+            api_key_id=None,
+        )
+        assert resp.answer == "FRESH ANSWER"
+        assert resp.cache_layer is None  # computed fresh
+        # stored once, reusing the vector from lookup (no second embed call)
+        assert stored == [([0.1], "FRESH ANSWER")]
+
+
 class TestQueryCaching:
     def _wire(self, monkeypatch, gen_calls):
         from app.services import query
@@ -207,6 +283,8 @@ class TestQueryCaching:
 
         assert r1.answer == r2.answer == "GROUNDED ANSWER"
         assert len(gen_calls) == 1  # the second ask did not re-run the LLM
+        assert r1.cache_layer is None  # computed fresh
+        assert r2.cache_layer == "l1"  # served by the exact-match layer
 
     def test_content_change_bypasses_cache(self, monkeypatch):
         gen_calls = []

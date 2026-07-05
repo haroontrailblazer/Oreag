@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     query_cache_ttl_seconds: int = 300     # 5 minutes
     query_cache_max_entries: int = 512     # in-memory LRU cap across all projects
 
+    # Semantic cache (L2, pgvector): also serve SIMILAR questions from cache,
+    # not just exact repeats - "what is deep learning" answers "explain deep
+    # learning to me" without re-running retrieval + the LLM. A cached answer
+    # is reused when cosine similarity clears the threshold; below it, the
+    # query runs for real. Scoped per project + models + content signature.
+    semantic_cache_enabled: bool = True
+    semantic_cache_min_similarity: float = 0.75
+    semantic_cache_ttl_seconds: int = 3600  # 1 hour
+
     # Optional Redis: when set, the CAG cache AND conversation memory use Redis
     # (shared across workers, survives restarts); otherwise they fall back to an
     # in-memory store, so local dev needs no Redis running.

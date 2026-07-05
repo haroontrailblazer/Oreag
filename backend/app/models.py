@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ARRAY, BigInteger, Boolean, DateTime, ForeignKey, Integer, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -133,6 +133,30 @@ class Memory(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class SemanticQueryCache(Base):
+    """L2 answer cache: similar (not just identical) questions hit by cosine
+    similarity on the cached question's embedding. Scoped to everything that
+    could change the answer; rows expire by TTL."""
+
+    __tablename__ = "semantic_query_cache"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    question: Mapped[str] = mapped_column(Text)
+    embedding = mapped_column(Vector)  # dimension varies per project
+    content_signature: Mapped[str] = mapped_column(Text)
+    embedding_provider: Mapped[str] = mapped_column(Text)
+    embedding_model: Mapped[str] = mapped_column(Text)
+    llm_provider: Mapped[str] = mapped_column(Text)
+    llm_model: Mapped[str] = mapped_column(Text)
+    top_k: Mapped[int] = mapped_column(Integer)
+    result: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class QueryLog(Base):

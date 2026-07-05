@@ -111,6 +111,10 @@ export interface QueryResponse {
   clarification_questions?: string[]
   // Echoed back for a conversational query (server-side memory).
   conversation_id?: string | null
+  // Which cache served this answer: "l1" exact match, "l2" semantically
+  // similar question, or null/undefined when computed fresh.
+  cache_layer?: "l1" | "l2" | null
+  cache_similarity?: number | null
 }
 
 /** Node in the project "brain" graph (files, sections, chunks, memories). */

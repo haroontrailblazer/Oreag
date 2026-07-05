@@ -189,6 +189,11 @@ class QueryResponse(BaseModel):
     clarification_questions: list[str] = Field(default_factory=list)
     # Echoed back when the query was part of a conversation (else null).
     conversation_id: str | None = None
+    # Which cache served this answer: "l1" (exact match), "l2" (semantically
+    # similar question), or null when it was computed fresh. cache_similarity
+    # is the L2 cosine similarity that cleared the threshold.
+    cache_layer: Literal["l1", "l2"] | None = None
+    cache_similarity: float | None = None
 
 
 class ProjectInfo(BaseModel):
