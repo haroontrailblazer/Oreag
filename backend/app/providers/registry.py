@@ -27,9 +27,61 @@ CATALOG: dict = {
                 "dimension_options": [768, 1536, 3072],
             },
         ],
+        # Azure OpenAI: the "model" is the DEPLOYMENT name. Oreag expects
+        # deployments named after the underlying model (the common default).
+        "azure": [
+            {
+                "model": "text-embedding-3-small",
+                "dimensions": 1536,
+                "dimension_options": [512, 1536],
+            },
+            {
+                "model": "text-embedding-3-large",
+                "dimensions": 3072,
+                "dimension_options": [256, 1024, 3072],
+            },
+            {"model": "text-embedding-ada-002", "dimensions": 1536},
+        ],
+        "mistral": [
+            {"model": "mistral-embed", "dimensions": 1024},
+        ],
+        "voyage": [
+            {"model": "voyage-3.5", "dimensions": 1024},
+            {"model": "voyage-3.5-lite", "dimensions": 1024},
+            {"model": "voyage-3-large", "dimensions": 1024},
+        ],
+        "jina": [
+            # jina-embeddings-v3 is Matryoshka-trained and takes the standard
+            # `dimensions` parameter.
+            {
+                "model": "jina-embeddings-v3",
+                "dimensions": 1024,
+                "dimension_options": [256, 512, 1024],
+            },
+        ],
+        "together": [
+            {"model": "BAAI/bge-large-en-v1.5", "dimensions": 1024},
+        ],
+        "fireworks": [
+            {"model": "nomic-ai/nomic-embed-text-v1.5", "dimensions": 768},
+        ],
+        "cohere": [
+            # embed-v4.0 is Matryoshka-trained; Cohere's OpenAI-compatible
+            # endpoint accepts the standard `dimensions` parameter for it.
+            {
+                "model": "embed-v4.0",
+                "dimensions": 1536,
+                "dimension_options": [256, 512, 1024, 1536],
+            },
+            {"model": "embed-multilingual-v3.0", "dimensions": 1024},
+        ],
         "ollama": [
             {"model": "nomic-embed-text", "dimensions": 768},
             {"model": "mxbai-embed-large", "dimensions": 1024},
+        ],
+        "lmstudio": [
+            {"model": "text-embedding-nomic-embed-text-v1.5", "dimensions": 768},
+            {"model": "text-embedding-all-minilm-l6-v2", "dimensions": 384},
         ],
         "sentence_transformers": [
             {"model": "all-MiniLM-L6-v2", "dimensions": 384},
@@ -60,10 +112,92 @@ CATALOG: dict = {
             "claude-haiku-4-5-20251001",
         ],
         "sarvam": ["sarvam-30b", "sarvam-105b"],
+        # Azure OpenAI deployments (named after the model) - the full OpenAI
+        # lineup Azure serves, current GPT-5.x through the still-common 4o pair.
+        "azure": [
+            "gpt-5.4-mini",
+            "gpt-5.4",
+            "gpt-5.5",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+        ],
+        # OpenAI-compatible cloud vendors: stable aliases only, never previews.
+        "xai": [
+            "grok-4",
+            "grok-4-fast-reasoning",
+            "grok-4-fast-non-reasoning",
+            "grok-3-mini",
+        ],
+        "groq": [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+        ],
+        "mistral": [
+            "mistral-large-latest",
+            "mistral-medium-latest",
+            "mistral-small-latest",
+        ],
+        "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+        "cohere": ["command-a-03-2025", "command-r-plus-08-2024"],
+        "together": [
+            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+            "deepseek-ai/DeepSeek-V3",
+        ],
+        "fireworks": [
+            "accounts/fireworks/models/llama-v3p3-70b-instruct",
+            "accounts/fireworks/models/deepseek-v3",
+        ],
+        # OpenRouter is an aggregator - one key, many upstream models.
+        "openrouter": [
+            "openai/gpt-4o-mini",
+            "anthropic/claude-sonnet-4.5",
+            "google/gemini-2.5-flash",
+            "meta-llama/llama-3.3-70b-instruct",
+            "deepseek/deepseek-chat",
+        ],
+        "perplexity": ["sonar", "sonar-pro", "sonar-reasoning"],
         # Local tags never 404; headline current models. llama3.1 stays (most
         # pulled, only current-quality 8B Llama); qwen2.5 → successor qwen3.
         "ollama": ["llama3.3", "llama3.1", "qwen3", "gemma4", "deepseek-r1", "mistral"],
+        # LM Studio community catalog ids for its most-downloaded models.
+        "lmstudio": ["openai/gpt-oss-20b", "qwen/qwen3-8b", "google/gemma-3-12b"],
     },
+}
+
+# OpenAI-compatible vendors served by the shared compat provider. LM Studio
+# (local base URL, keyless) and Azure (per-user endpoint inside the stored
+# credential) are handled separately.
+COMPAT_BASE_URLS = {
+    "xai": "https://api.x.ai/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "cohere": "https://api.cohere.ai/compatibility/v1",
+    "together": "https://api.together.xyz/v1",
+    "fireworks": "https://api.fireworks.ai/inference/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "voyage": "https://api.voyageai.com/v1",
+    "jina": "https://api.jina.ai/v1",
+}
+
+_PROVIDER_LABELS = {
+    "xai": "xAI",
+    "groq": "Groq",
+    "mistral": "Mistral",
+    "deepseek": "DeepSeek",
+    "cohere": "Cohere",
+    "together": "Together AI",
+    "fireworks": "Fireworks AI",
+    "openrouter": "OpenRouter",
+    "perplexity": "Perplexity",
+    "voyage": "Voyage AI",
+    "jina": "Jina AI",
 }
 
 
@@ -148,6 +282,42 @@ def get_embedder(
         from .gemini_provider import GeminiEmbedder
 
         return GeminiEmbedder(model, dimensions, api_key)
+    if provider == "azure":
+        from .openai_compat import CompatEmbedder, azure_base_url, split_azure_credential
+
+        endpoint, key = split_azure_credential(api_key)
+        return CompatEmbedder(
+            model,
+            dimensions,
+            key,
+            base_url=azure_base_url(endpoint),
+            provider_label="Azure OpenAI",
+            send_dimensions=len(embedding_dimension_options(provider, model)) > 1,
+        )
+    if provider in COMPAT_BASE_URLS:
+        from .openai_compat import CompatEmbedder
+
+        return CompatEmbedder(
+            model,
+            dimensions,
+            api_key,
+            base_url=COMPAT_BASE_URLS[provider],
+            provider_label=_PROVIDER_LABELS[provider],
+            # MRL models take the standard `dimensions` param; others 400 on it.
+            send_dimensions=len(embedding_dimension_options(provider, model)) > 1,
+        )
+    if provider == "lmstudio":
+        from ..config import settings
+        from .openai_compat import CompatEmbedder
+
+        return CompatEmbedder(
+            model,
+            dimensions,
+            api_key="lm-studio",  # local server ignores the key but the SDK wants one
+            base_url=settings.lmstudio_base_url,
+            provider_label="LM Studio",
+            batch_size=32,  # local inference - same reasoning as Ollama
+        )
     if provider == "ollama":
         from .ollama_provider import OllamaEmbedder
 
@@ -177,6 +347,35 @@ def get_llm(provider: str, model: str, api_key: str | None = None) -> LLMProvide
         from .sarvam_provider import SarvamLLM
 
         return SarvamLLM(model, api_key)
+    if provider == "azure":
+        from .openai_compat import CompatLLM, azure_base_url, split_azure_credential
+
+        endpoint, key = split_azure_credential(api_key)
+        return CompatLLM(
+            model,
+            key,
+            base_url=azure_base_url(endpoint),
+            provider_label="Azure OpenAI",
+        )
+    if provider in COMPAT_BASE_URLS:
+        from .openai_compat import CompatLLM
+
+        return CompatLLM(
+            model,
+            api_key,
+            base_url=COMPAT_BASE_URLS[provider],
+            provider_label=_PROVIDER_LABELS[provider],
+        )
+    if provider == "lmstudio":
+        from ..config import settings
+        from .openai_compat import CompatLLM
+
+        return CompatLLM(
+            model,
+            api_key="lm-studio",  # local server ignores the key but the SDK wants one
+            base_url=settings.lmstudio_base_url,
+            provider_label="LM Studio",
+        )
     if provider == "ollama":
         from .ollama_provider import OllamaLLM
 

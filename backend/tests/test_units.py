@@ -17,6 +17,7 @@ from app.providers.registry import (
     embedding_dimension_options,
     embedding_dimensions,
     get_embedder,
+    get_llm,
     resolve_embedding_dimensions,
     validate_llm,
 )
@@ -509,6 +510,113 @@ class TestVectorMigration:
         monkeypatch.setattr(memory_service, "SessionLocal", lambda: session)
         memory_service.reembed_project_memories(uuid.uuid4())  # must not raise
         assert session.closed
+
+
+class TestOpenAICompatProviders:
+    """xAI, Groq, Mistral, DeepSeek, Cohere and LM Studio all ride the shared
+    OpenAI-compatible provider - one implementation, per-vendor base URLs."""
+
+    def test_every_compat_vendor_has_a_base_url_and_catalog_entry(self):
+        from app.providers.registry import COMPAT_BASE_URLS
+
+        for provider in ("xai", "groq", "mistral", "deepseek", "cohere"):
+            assert COMPAT_BASE_URLS[provider].startswith("https://")
+            assert CATALOG["llm"].get(provider) or CATALOG["embedding"].get(provider)
+
+    def test_compat_llm_requires_a_key(self):
+        from app.providers.base import ProviderUnavailableError
+
+        with pytest.raises(ProviderUnavailableError):
+            get_llm("groq", "llama-3.3-70b-versatile", api_key=None)
+
+    def test_compat_llm_builds_with_a_key(self):
+        llm = get_llm("xai", "grok-4", api_key="test-key")
+        assert llm.model == "grok-4"
+        assert "api.x.ai" in str(llm.client.base_url)
+
+    def test_compat_embedder_wires_dimensions_and_batching(self):
+        emb = get_embedder("cohere", "embed-v4.0", api_key="k", dimensions=512)
+        assert emb.dimensions == 512
+        assert emb._send_dimensions is True  # embed-v4.0 is Matryoshka-capable
+        assert emb.batch_size == 64
+
+        emb = get_embedder("mistral", "mistral-embed", api_key="k")
+        assert emb.dimensions == 1024
+        assert emb._send_dimensions is False  # single-size model: no dims param
+
+    def test_lmstudio_is_keyless_and_local(self):
+        from app.providers.resolver import requires_key
+
+        assert not requires_key("lmstudio")
+        llm = get_llm("lmstudio", "openai/gpt-oss-20b", api_key=None)
+        assert "localhost:1234" in str(llm.client.base_url)
+        emb = get_embedder(
+            "lmstudio", "text-embedding-nomic-embed-text-v1.5", api_key=None
+        )
+        assert emb.batch_size == 32  # local inference - small batches
+
+    def test_new_providers_accepted_for_account_keys(self):
+        from app.schemas import ProviderKeyCreate
+
+        for provider in (
+            "xai", "groq", "mistral", "deepseek", "cohere",
+            "together", "fireworks", "openrouter", "perplexity", "voyage", "jina",
+            "azure",
+        ):
+            assert ProviderKeyCreate(provider=provider, key="x" * 20).provider == provider
+        with pytest.raises(Exception):
+            ProviderKeyCreate(provider="lmstudio", key="x" * 20)  # keyless - no key rows
+
+
+class TestAzureOpenAI:
+    """Azure's endpoint travels inside the encrypted credential ("endpoint|key")
+    so key resolution stays a plain string end to end."""
+
+    def test_credential_round_trip(self):
+        from app.providers.openai_compat import (
+            azure_base_url,
+            join_azure_credential,
+            split_azure_credential,
+        )
+
+        cred = join_azure_credential("https://res.openai.azure.com/", "sk-abc")
+        endpoint, key = split_azure_credential(cred)
+        assert endpoint == "https://res.openai.azure.com"
+        assert key == "sk-abc"
+        assert azure_base_url(endpoint) == "https://res.openai.azure.com/openai/v1"
+
+    def test_bare_key_without_endpoint_raises(self):
+        from app.providers.base import ProviderUnavailableError
+        from app.providers.openai_compat import split_azure_credential
+
+        with pytest.raises(ProviderUnavailableError):
+            split_azure_credential("just-a-key")
+        with pytest.raises(ProviderUnavailableError):
+            split_azure_credential(None)
+
+    def test_llm_and_embedder_route_to_the_resource(self):
+        cred = "https://res.openai.azure.com|k"
+        llm = get_llm("azure", "gpt-4o", api_key=cred)
+        assert "res.openai.azure.com" in str(llm.client.base_url)
+        assert "/openai/v1" in str(llm.client.base_url)
+
+        emb = get_embedder(
+            "azure", "text-embedding-3-small", api_key=cred, dimensions=512
+        )
+        assert emb.dimensions == 512
+        assert emb._send_dimensions is True  # MRL deployment: dims param sent
+
+
+class TestGeminiProviderCompat:
+    def test_vertex_express_keys_are_detected(self):
+        # AQ.-prefixed Vertex express keys must route to the Vertex backend;
+        # sending them to the Gemini Developer API 401s
+        # (ACCESS_TOKEN_TYPE_UNSUPPORTED). AIza keys stay on the Developer API.
+        from app.providers.gemini_provider import is_vertex_express_key
+
+        assert is_vertex_express_key("AQ.Ab8example")
+        assert not is_vertex_express_key("AIzaSyExample")
+        assert not is_vertex_express_key("")
 
 
 class TestAnthropicProviderCompat:

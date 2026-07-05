@@ -16,6 +16,13 @@ def l2_normalize(values: list[float]) -> list[float]:
     return [v / norm for v in values]
 
 
+def is_vertex_express_key(api_key: str) -> bool:
+    """Vertex AI express-mode API keys start with "AQ." (AI Studio keys start
+    with "AIza"). They hit a different Google backend: sending one to the
+    Gemini Developer API fails with 401 ACCESS_TOKEN_TYPE_UNSUPPORTED."""
+    return api_key.startswith("AQ.")
+
+
 def _client(api_key: str | None):
     if not api_key:
         raise ProviderUnavailableError(
@@ -28,6 +35,10 @@ def _client(api_key: str | None):
         raise ProviderUnavailableError(
             "google-genai is not installed. Run 'pip install -r requirements.txt'."
         )
+    # Both key kinds work through the same SDK - express keys just need the
+    # Vertex backend selected.
+    if is_vertex_express_key(api_key):
+        return genai.Client(vertexai=True, api_key=api_key)
     return genai.Client(api_key=api_key)
 
 

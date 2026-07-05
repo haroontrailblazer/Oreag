@@ -9,7 +9,11 @@ export function dimensionOptions(entry: EmbeddingModelEntry): number[] {
 }
 
 /** Providers that run locally and never need an API key. */
-export const KEYLESS_PROVIDERS = new Set(["ollama", "sentence_transformers"])
+export const KEYLESS_PROVIDERS = new Set([
+  "ollama",
+  "lmstudio",
+  "sentence_transformers",
+])
 
 /** The provider half of a `"provider/model"` value. */
 export function providerOf(value: string): string {

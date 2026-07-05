@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..auth.jwt import get_current_user
 from ..db import get_db
 from ..models import ProviderKey
-from ..providers import ollama_provider, st_provider
+from ..providers import ollama_provider, openai_compat, st_provider
 from ..providers.registry import CATALOG
 
 router = APIRouter(prefix="/api", tags=["meta"])
@@ -25,14 +25,30 @@ def list_models(
             select(ProviderKey.provider).where(ProviderKey.owner_id == user_id)
         ).all()
     )
+    keyed = [
+        "openai",
+        "gemini",
+        "anthropic",
+        "azure",
+        "sarvam",
+        "xai",
+        "groq",
+        "mistral",
+        "deepseek",
+        "cohere",
+        "together",
+        "fireworks",
+        "openrouter",
+        "perplexity",
+        "voyage",
+        "jina",
+    ]
     return {
         "catalog": CATALOG,
         "availability": {
-            "openai": "openai" in user_providers,
-            "gemini": "gemini" in user_providers,
-            "anthropic": "anthropic" in user_providers,
-            "sarvam": "sarvam" in user_providers,
+            **{provider: provider in user_providers for provider in keyed},
             "ollama": ollama_provider.is_available(),
+            "lmstudio": openai_compat.lmstudio_is_available(),
             "sentence_transformers": st_provider.is_available(),
         },
     }

@@ -6,6 +6,7 @@ import {
   Key as KeyRound,
   Trash,
 } from "@phosphor-icons/react/dist/ssr"
+import Link from "next/link"
 import { useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
@@ -50,8 +51,28 @@ import type { ProviderId, ProviderKey } from "@/lib/types"
 
 const PROVIDERS: { id: ProviderId; label: string; hint: string }[] = [
   { id: "openai", label: "OpenAI", hint: "Embeddings + chat (sk-…)" },
-  { id: "gemini", label: "Google Gemini", hint: "Embeddings + chat" },
+  {
+    id: "gemini",
+    label: "Google Gemini",
+    hint: "Embeddings + chat (AI Studio AIza… or Vertex express AQ.… keys)",
+  },
   { id: "anthropic", label: "Anthropic (Claude)", hint: "Chat only" },
+  {
+    id: "azure",
+    label: "Azure OpenAI",
+    hint: "Embeddings + chat (your resource endpoint + key; deployments named after models)",
+  },
+  { id: "mistral", label: "Mistral", hint: "Embeddings + chat" },
+  { id: "cohere", label: "Cohere", hint: "Embeddings + chat" },
+  { id: "together", label: "Together AI", hint: "Embeddings + chat (open models)" },
+  { id: "fireworks", label: "Fireworks AI", hint: "Embeddings + chat (open models)" },
+  { id: "xai", label: "xAI (Grok)", hint: "Chat only" },
+  { id: "groq", label: "Groq", hint: "Chat only (fast open models)" },
+  { id: "deepseek", label: "DeepSeek", hint: "Chat only" },
+  { id: "openrouter", label: "OpenRouter", hint: "Chat only (one key, many models)" },
+  { id: "perplexity", label: "Perplexity", hint: "Chat only (Sonar)" },
+  { id: "voyage", label: "Voyage AI", hint: "Embeddings only" },
+  { id: "jina", label: "Jina AI", hint: "Embeddings only" },
   { id: "sarvam", label: "Sarvam AI", hint: "Chat only (Indic LLMs)" },
 ]
 
@@ -64,6 +85,7 @@ export function ProviderKeys() {
 
   const [editing, setEditing] = useState<ProviderId | null>(null)
   const [value, setValue] = useState("")
+  const [endpoint, setEndpoint] = useState("")
   const [saving, setSaving] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<ProviderId | null>(null)
   const [removing, setRemoving] = useState(false)
@@ -71,18 +93,25 @@ export function ProviderKeys() {
 
   function openEditor(provider: ProviderId) {
     setValue("")
+    setEndpoint("")
     setEditing(provider)
   }
 
   async function handleSave() {
     if (!editing || !value.trim()) return
+    if (editing === "azure" && !endpoint.trim()) return
     setSaving(true)
     try {
+      const body: Record<string, unknown> = {
+        provider: editing,
+        key: value.trim(),
+      }
+      if (editing === "azure") body.endpoint = endpoint.trim()
       // Minimum display time so the encrypting animation reads, not flashes.
       await Promise.all([
         api("/api/provider-keys", {
           method: "PUT",
-          body: JSON.stringify({ provider: editing, key: value.trim() }),
+          body: JSON.stringify(body),
         }),
         new Promise((resolve) => setTimeout(resolve, 1400)),
       ])
@@ -131,7 +160,13 @@ export function ProviderKeys() {
         <CardDescription>
           Bring your own keys. They&apos;re encrypted at rest and used for this
           account&apos;s projects. A project can override these with its own key.
-          Prefer not to use a key? Run a local Ollama model instead.
+          Prefer not to use a key? Run a local Ollama model instead.{" "}
+          <Link
+            href="/settings/report-key-issue"
+            className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-foreground/70"
+          >
+            Key doesn&apos;t work or isn&apos;t supported? Report it.
+          </Link>
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -226,6 +261,22 @@ export function ProviderKeys() {
             <EncryptingLoader />
           ) : (
             <>
+              {editing === "azure" && (
+                <div className="space-y-2">
+                  <Label htmlFor="provider-endpoint">Resource endpoint</Label>
+                  <Input
+                    id="provider-endpoint"
+                    autoComplete="off"
+                    placeholder="https://<resource>.openai.azure.com"
+                    value={endpoint}
+                    onChange={(e) => setEndpoint(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Deployments must be named after their model (e.g. a
+                    deployment of gpt-4o called &quot;gpt-4o&quot;).
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="provider-key">API key</Label>
                 <Input
@@ -244,7 +295,14 @@ export function ProviderKeys() {
                 <Button variant="outline" onClick={() => setEditing(null)}>
                   Cancel
                 </Button>
-                <Button onClick={handleSave} disabled={saving || !value.trim()}>
+                <Button
+                  onClick={handleSave}
+                  disabled={
+                    saving ||
+                    !value.trim() ||
+                    (editing === "azure" && !endpoint.trim())
+                  }
+                >
                   Save key
                 </Button>
               </DialogFooter>

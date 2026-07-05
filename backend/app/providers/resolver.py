@@ -13,7 +13,7 @@ from .. import crypto
 from ..models import Project, ProviderKey
 
 # Providers that run locally and need no API key.
-KEYLESS_PROVIDERS = {"ollama", "sentence_transformers"}
+KEYLESS_PROVIDERS = {"ollama", "lmstudio", "sentence_transformers"}
 
 
 def requires_key(provider: str) -> bool:

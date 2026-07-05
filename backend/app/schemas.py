@@ -121,9 +121,28 @@ class ApiKeyUpdate(BaseModel):
 
 
 class ProviderKeyCreate(BaseModel):
-    provider: Literal["openai", "gemini", "anthropic", "sarvam"]
+    provider: Literal[
+        "openai",
+        "gemini",
+        "anthropic",
+        "azure",
+        "sarvam",
+        "xai",
+        "groq",
+        "mistral",
+        "deepseek",
+        "cohere",
+        "together",
+        "fireworks",
+        "openrouter",
+        "perplexity",
+        "voyage",
+        "jina",
+    ]
     key: str = Field(min_length=8, max_length=500)
     label: str = Field(default="default", min_length=1, max_length=100)
+    # Azure OpenAI only: the resource endpoint, stored inside the credential.
+    endpoint: str | None = Field(default=None, max_length=300)
 
 
 class ProviderKeyOut(BaseModel):

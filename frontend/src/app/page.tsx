@@ -85,7 +85,8 @@ export default async function Home() {
 
         <footer className="space-y-3">
           <div className="text-xs font-medium tracking-wide text-muted-foreground">
-            OpenAI · Gemini · Anthropic · Sarvam · Ollama
+            OpenAI · Gemini · Anthropic · xAI · Mistral · Groq · DeepSeek ·
+            Cohere · Ollama
           </div>
           <p className="max-w-sm text-[11px] leading-relaxed text-muted-foreground/70">
             Bring your own keys or run local models. Documents are embedded into

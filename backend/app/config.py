@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""  # deprecated - kept only so old .env files don't error
     ollama_base_url: str = "http://localhost:11434"
+    # LM Studio's local OpenAI-compatible server (Developer tab -> Start server)
+    lmstudio_base_url: str = "http://localhost:1234/v1"
 
     cors_origins: str = "http://localhost:3000,http://192.168.56.1:3000"
 
