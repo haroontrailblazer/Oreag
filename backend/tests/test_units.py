@@ -392,6 +392,93 @@ class TestEmbedBatchSizes:
         assert embed_batch_size(_Broken()) == 64
 
 
+class TestHybridRetrieval:
+    """Semantic + lexical rankings fused with RRF; degrades to semantic-only
+    when the full-text column is missing. Sits below both answer caches, so
+    nothing here can affect L1/L2 behavior."""
+
+    def _rows(self, *ids, sim=0.5):
+        return [
+            {
+                "id": i,
+                "content": f"chunk {i}",
+                "page_number": None,
+                "chunk_index": i,
+                "filename": "f.pdf",
+                "similarity": sim,
+            }
+            for i in ids
+        ]
+
+    def test_found_by_both_engines_ranks_first(self):
+        from app.services.retrieval import rrf_merge
+
+        semantic = self._rows(1, 2, 3)
+        lexical = self._rows(3, 4)  # chunk 3 also matched by keywords
+        out = rrf_merge(semantic, lexical, top_k=4)
+        assert out[0]["chunk_index"] == 3
+        assert all("id" not in row for row in out)  # SourceChunk-safe payloads
+
+    def test_keyword_only_hit_is_included(self):
+        from app.services.retrieval import rrf_merge
+
+        semantic = self._rows(1, 2)
+        lexical = self._rows(9)  # e.g. an exact error code vectors missed
+        out = rrf_merge(semantic, lexical, top_k=5)
+        assert any(row["chunk_index"] == 9 for row in out)
+
+    def test_caps_at_top_k_and_preserves_order_and_similarity(self):
+        from app.services.retrieval import rrf_merge
+
+        out = rrf_merge(self._rows(*range(1, 8), sim=0.42), [], top_k=5)
+        assert len(out) == 5
+        assert [row["chunk_index"] for row in out] == [1, 2, 3, 4, 5]
+        assert out[0]["similarity"] == 0.42  # cosine survives for thresholds/UI
+
+    def test_lexical_failure_degrades_to_semantic_only(self, monkeypatch):
+        from app.services import retrieval
+
+        class _Embedder:
+            def embed_query(self, q):
+                return [0.1]
+
+        monkeypatch.setattr(
+            retrieval.resolver, "resolve_embedding_key", lambda db, p: "k"
+        )
+        monkeypatch.setattr(retrieval, "get_embedder", lambda *a, **k: _Embedder())
+
+        sem_rows = self._rows(1, 2)
+
+        class _Result:
+            def mappings(self):
+                return sem_rows
+
+        class _DB:
+            def __init__(self):
+                self.calls = 0
+                self.rollbacks = 0
+
+            def execute(self, stmt, params=None):
+                self.calls += 1
+                if self.calls == 1:
+                    return _Result()
+                raise RuntimeError("column content_tsv does not exist")
+
+            def rollback(self):
+                self.rollbacks += 1
+
+        db = _DB()
+        project = Project(
+            id=uuid.uuid4(),
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+        )
+        out = retrieval.retrieve(db, project, "what is E-4417", 5)
+        assert [row["chunk_index"] for row in out] == [1, 2]
+        assert db.rollbacks == 1  # aborted transaction cleaned up
+
+
 class TestVectorMigration:
     """Memory vectors must follow chunk vectors through every embedding change:
     truncated in place on a same-model MRL shrink, cleared and re-embedded with

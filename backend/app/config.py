@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     rag_memory_blend_k: int = 4            # max memories blended into one answer
     rag_memory_min_similarity: float = 0.35
 
+    # Hybrid retrieval: fuse semantic (pgvector) and lexical (Postgres
+    # full-text) rankings with RRF, so exact terms (error codes, names, IDs)
+    # hit alongside meaning matches. Degrades to semantic-only automatically
+    # if the full-text column is missing (migration 0012 not applied).
+    hybrid_search_enabled: bool = True
+
     # Agentic retrieval (explore_brain): graph-aware traversal of the brain.
     explore_seeds_per_type: int = 6        # top chunks + top memories to seed from
     explore_fanout: int = 4                # neighbours expanded per node per hop

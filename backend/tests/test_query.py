@@ -203,7 +203,12 @@ class TestSemanticCacheWiring:
             "generate_answer",
             lambda *a, **k: llm_calls.append(1) or "FRESH",
         )
-        monkeypatch.setattr(query.retrieval, "retrieve", lambda db, p, q, k: [])
+        retrieval_calls = []
+        monkeypatch.setattr(
+            query.retrieval,
+            "retrieve",
+            lambda db, p, q, k: retrieval_calls.append(q) or [],
+        )
         monkeypatch.setattr(
             query.memory_service, "search_memories", lambda db, p, q, k: []
         )
@@ -213,7 +218,8 @@ class TestSemanticCacheWiring:
             api_key_id=None,
         )
         assert resp.answer == "SEMANTIC HIT"
-        assert llm_calls == []  # retrieval + generation entirely skipped
+        assert llm_calls == []  # the LLM was never invoked
+        assert retrieval_calls == []  # the main chunks table was never searched
         assert resp.cache_layer == "l2"
         assert resp.cache_similarity == 0.82
 
@@ -254,13 +260,15 @@ class TestSemanticCacheWiring:
 
 
 class TestQueryCaching:
-    def _wire(self, monkeypatch, gen_calls):
+    def _wire(self, monkeypatch, gen_calls, retrieval_calls=None):
         from app.services import query
 
-        monkeypatch.setattr(
-            query.retrieval, "retrieve",
-            lambda db, p, q, k: [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
-        )
+        def fake_retrieve(db, p, q, k):
+            if retrieval_calls is not None:
+                retrieval_calls.append(q)
+            return [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)]
+
+        monkeypatch.setattr(query.retrieval, "retrieve", fake_retrieve)
         monkeypatch.setattr(
             query.memory_service, "search_memories", lambda db, p, q, k: []
         )
@@ -274,7 +282,8 @@ class TestQueryCaching:
 
     def test_repeated_question_is_served_from_cache(self, monkeypatch):
         gen_calls = []
-        query = self._wire(monkeypatch, gen_calls)
+        retrieval_calls = []
+        query = self._wire(monkeypatch, gen_calls, retrieval_calls)
         project = _project()
 
         r1 = query.run_query(FakeDB([10, 0]), project, "What is X?", None, None)
@@ -283,6 +292,7 @@ class TestQueryCaching:
 
         assert r1.answer == r2.answer == "GROUNDED ANSWER"
         assert len(gen_calls) == 1  # the second ask did not re-run the LLM
+        assert len(retrieval_calls) == 1  # ...nor search the main DB again
         assert r1.cache_layer is None  # computed fresh
         assert r2.cache_layer == "l1"  # served by the exact-match layer
 
