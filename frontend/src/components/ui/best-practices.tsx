@@ -50,7 +50,7 @@ export function BestPractices({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
         <div className="border-b px-4 py-2.5 text-sm font-semibold">{title}</div>
-        <div className="max-h-80 space-y-3 overflow-y-auto px-4 py-3">
+        <div className="styled-scrollbar max-h-80 space-y-3 overflow-y-auto px-4 py-3">
           {tips.map((tip) => (
             <div key={tip.title} className="space-y-0.5">
               <p className="text-xs font-medium">{tip.title}</p>

@@ -910,3 +910,34 @@
   height: 0;
   display: none; /* Chromium / Safari */
 }
+
+/* Opt-in slim scrollbar - overrides the app-wide hiding for small scroll
+   regions that need the affordance (e.g. the Best-practices popover). */
+.styled-scrollbar {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgb(161 161 170 / 0.55) transparent; /* zinc-400 */
+}
+.styled-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  display: block;
+}
+.styled-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.styled-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgb(161 161 170 / 0.55);
+}
+.styled-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(161 161 170 / 0.85);
+}
+.dark .styled-scrollbar {
+  scrollbar-color: rgb(113 113 122 / 0.55) transparent; /* zinc-500 */
+}
+.dark .styled-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(113 113 122 / 0.55);
+}
+.dark .styled-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(113 113 122 / 0.85);
+}
