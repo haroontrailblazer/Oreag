@@ -351,7 +351,9 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
 
-        <div className="grid items-start gap-6 lg:grid-cols-2">
+        {/* Default grid stretch: the password card's bottom edge lines up
+            with the Appearance card's bottom edge on desktop. */}
+        <div className="grid gap-6 lg:grid-cols-2">
           {/* Security */}
           <Card>
             <CardHeader>
