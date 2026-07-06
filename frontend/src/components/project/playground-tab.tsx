@@ -3,6 +3,9 @@
 import {
   ArrowUp,
   Brain,
+  CaretDown,
+  Check,
+  Copy,
   FileText,
   Lightning,
   Plus,
@@ -82,6 +85,44 @@ type StreamEvent =
   | { type: "token"; text: string }
   | { type: "done"; response: QueryResponse }
   | { type: "error"; detail: string }
+
+/** Small copy-to-clipboard button with a brief "copied" checkmark. */
+function CopyButton({
+  text,
+  label = false,
+  className,
+}: {
+  text: string
+  label?: boolean
+  className?: string
+}) {
+  const [copied, setCopied] = useState(false)
+  function copy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label="Copy"
+      title="Copy"
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+        className
+      )}
+    >
+      {copied ? (
+        <Check className="size-3.5 text-emerald-500" />
+      ) : (
+        <Copy className="size-3.5" />
+      )}
+      {label ? (copied ? "Copied" : "Copy") : null}
+    </button>
+  )
+}
 
 /** Reference chips: file icon + name; clicking one reveals the chunk text. */
 function SourceChips({ sources }: { sources: SourceChunk[] }) {
@@ -179,12 +220,17 @@ function CacheBadge({ result }: { result: QueryResponse }) {
 function TurnView({ question, result }: Turn) {
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
+      {/* Question, right-aligned, with a copy button that appears on hover. */}
+      <div className="group flex items-start justify-end gap-1">
+        <CopyButton
+          text={question}
+          className="mt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        />
         <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
           {question}
         </div>
       </div>
-      <div className="max-w-3xl space-y-2">
+      <div className="group max-w-3xl space-y-2">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -223,6 +269,15 @@ function TurnView({ question, result }: Turn) {
           </details>
         ) : null}
         {result.sources.length ? <SourceChips sources={result.sources} /> : null}
+        {!result.needs_clarification && result.answer ? (
+          <div className="flex items-center pt-0.5">
+            <CopyButton
+              text={result.answer}
+              label
+              className="opacity-70 transition-opacity group-hover:opacity-100"
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   )
@@ -241,7 +296,12 @@ export function PlaygroundTab({ project }: { project: Project }) {
   const [uploading, setUploading] = useState(false)
   const [model, setModel] = useState(`${project.llm_provider}/${project.llm_model}`)
   const abortRef = useRef<AbortController | null>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null) // the scrollable conversation
+  const bottomRef = useRef<HTMLDivElement>(null) // sentinel at the very bottom
+  const streamTopRef = useRef<HTMLDivElement>(null) // top of the newest turn
+  // Shown when there's more conversation below the fold - lets the user jump to
+  // the latest instead of the view auto-yanking to the end of a long answer.
+  const [showScrollDown, setShowScrollDown] = useState(false)
   // A conversation id ties follow-ups together so "summarize that" works. Lazily
   // created on the first ask (client only) to avoid an SSR hydration mismatch.
   const conversationId = useRef<string | null>(null)
@@ -258,10 +318,34 @@ export function PlaygroundTab({ project }: { project: Project }) {
     hit_rate: number
   }>(`/api/projects/${project.id}/query-stats`, fetcher)
 
-  // Keep the newest content in view as tokens stream in and turns land.
+  function refreshScrollDown() {
+    const el = scrollRef.current
+    if (!el) return
+    setShowScrollDown(el.scrollHeight - el.scrollTop - el.clientHeight > 120)
+  }
+
+  // On a NEW question, bring it to the top of the view so the answer streams in
+  // below it - the user reads from the start and scrolls down, rather than the
+  // view chasing the last token. `streaming.question` only changes per ask.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" })
+    if (!streaming) return
+    const raf = requestAnimationFrame(() =>
+      streamTopRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+    )
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streaming?.question])
+
+  // As content grows (streaming tokens, finished turns), recompute whether the
+  // "scroll to latest" affordance is needed - without moving the viewport.
+  useEffect(() => {
+    const raf = requestAnimationFrame(refreshScrollDown)
+    return () => cancelAnimationFrame(raf)
   }, [streaming?.text, turns.length])
+
+  function scrollToLatest() {
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
+  }
   // The selected model's provider may have lost its key since it was chosen -
   // flag it (grey trigger + warning) instead of silently letting a query 503.
   const currentModelUsable = providerUsable(
@@ -476,42 +560,59 @@ export function PlaygroundTab({ project }: { project: Project }) {
         </div>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3 pb-4">
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto rounded-2xl border bg-background p-4">
-          {turns.length === 0 && !loading ? (
-            <div className="flex min-h-20 items-center justify-center text-center text-sm text-muted-foreground">
-              Ask a question to test retrieval, the agentic loop, and grounded
-              answers. Follow-ups like “summarize that” keep context.
-            </div>
-          ) : null}
-          {turns.map((turn, i) => (
-            <TurnView key={i} question={turn.question} result={turn.result} />
-          ))}
-          {streaming ? (
-            <div className="space-y-2">
-              <div className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
-                  {streaming.question}
-                </div>
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={scrollRef}
+            onScroll={refreshScrollDown}
+            className="h-full space-y-5 overflow-y-auto rounded-2xl border bg-background px-4 py-4 sm:px-6"
+          >
+            {turns.length === 0 && !loading ? (
+              <div className="flex min-h-20 items-center justify-center text-center text-sm text-muted-foreground">
+                Ask a question to test retrieval, the agentic loop, and grounded
+                answers. Follow-ups like “summarize that” keep context.
               </div>
-              {streaming.text ? (
-                // Answer grows in place; the caret marks the live cursor.
-                <div className="max-w-3xl">
-                  <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Answer
-                  </div>
-                  <div className="playground-streaming">
-                    <AnswerMarkdown>{streaming.text}</AnswerMarkdown>
+            ) : null}
+            {turns.map((turn, i) => (
+              <TurnView key={i} question={turn.question} result={turn.result} />
+            ))}
+            {streaming ? (
+              <div ref={streamTopRef} className="space-y-2 scroll-mt-4">
+                <div className="flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
+                    {streaming.question}
                   </div>
                 </div>
-              ) : (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <LoaderOne />
-                  Thinking
-                </div>
-              )}
-            </div>
+                {streaming.text ? (
+                  // Answer grows in place; the caret marks the live cursor.
+                  <div className="max-w-3xl">
+                    <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Answer
+                    </div>
+                    <div className="playground-streaming">
+                      <AnswerMarkdown>{streaming.text}</AnswerMarkdown>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <LoaderOne />
+                    Thinking
+                  </div>
+                )}
+              </div>
+            ) : null}
+            <div ref={bottomRef} />
+          </div>
+          {showScrollDown ? (
+            <button
+              type="button"
+              onClick={scrollToLatest}
+              aria-label="Scroll to latest"
+              title="Scroll to latest"
+              className="absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground"
+            >
+              <CaretDown className="size-4" />
+            </button>
           ) : null}
-          <div ref={bottomRef} />
         </div>
 
         {/* Static footer: cache rate, any key warning, and the input row. */}

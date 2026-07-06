@@ -180,7 +180,13 @@ export function AddFilesDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button aria-label="Add files" title="Add files">
+        <Button
+          aria-label="Add files"
+          title="Add files"
+          // Square icon button on mobile (matches the 3-dots actions button);
+          // full padded label from sm+.
+          className="w-9 shrink-0 p-0 sm:w-auto sm:px-4"
+        >
           <FileUp className="size-4" />
           <span className="hidden sm:inline">Add files</span>
         </Button>
