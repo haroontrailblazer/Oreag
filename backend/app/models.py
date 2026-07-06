@@ -172,4 +172,7 @@ class QueryLog(Base):
     question: Mapped[str] = mapped_column(Text)
     top_k: Mapped[int | None] = mapped_column(Integer)
     latency_ms: Mapped[int | None] = mapped_column(Integer)
+    # Which cache served this query: "l1" (exact), "l2" (semantic), or NULL when
+    # it was computed fresh. Powers the project-wide cache hit rate.
+    cache_layer: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

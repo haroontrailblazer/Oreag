@@ -376,6 +376,25 @@ class TestQueryCaching:
         assert r1.cache_layer is None  # computed fresh
         assert r2.cache_layer == "l1"  # served by the exact-match layer
 
+    def test_query_log_records_the_cache_layer(self, monkeypatch):
+        # The project-wide hit rate reads cache_layer off query_logs, so every
+        # query must persist which layer served it (or None when fresh).
+        from app.models import QueryLog
+
+        gen_calls = []
+        query = self._wire(monkeypatch, gen_calls)
+        project = _project()
+
+        db1 = FakeDB([10, 0])
+        query.run_query(db1, project, "What is X?", None, None)
+        db2 = FakeDB([10, 0])
+        query.run_query(db2, project, "what is   x?", None, None)  # same entry
+
+        logged1 = [o for o in db1.added if isinstance(o, QueryLog)]
+        logged2 = [o for o in db2.added if isinstance(o, QueryLog)]
+        assert logged1 and logged1[0].cache_layer is None  # fresh
+        assert logged2 and logged2[0].cache_layer == "l1"  # exact-match hit
+
     def test_content_change_bypasses_cache(self, monkeypatch):
         gen_calls = []
         query = self._wire(monkeypatch, gen_calls)

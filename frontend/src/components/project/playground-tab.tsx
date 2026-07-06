@@ -248,7 +248,15 @@ export function PlaygroundTab({ project }: { project: Project }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher)
   const availability = models?.availability ?? { [project.llm_provider]: true }
-  const cachedTurns = turns.filter((t) => t.result.cache_layer).length
+  // Project-wide cache performance (playground + /v1 API), not this session -
+  // sourced from query_logs and revalidated after each ask.
+  const { data: cacheStats, mutate: mutateStats } = useSWR<{
+    queries: number
+    cache_hits: number
+    l1: number
+    l2: number
+    hit_rate: number
+  }>(`/api/projects/${project.id}/query-stats`, fetcher)
 
   // Keep the newest content in view as tokens stream in and turns land.
   useEffect(() => {
@@ -402,6 +410,8 @@ export function PlaygroundTab({ project }: { project: Project }) {
       if (abortRef.current === controller) abortRef.current = null
       setLoading(false)
       setStreaming(null)
+      // The query was logged server-side; refresh the project-wide hit rate.
+      mutateStats()
     }
   }
 
@@ -498,17 +508,21 @@ export function PlaygroundTab({ project }: { project: Project }) {
           <div ref={bottomRef} />
         </div>
 
-        {turns.length > 0 ? (
+        {cacheStats && cacheStats.queries > 0 ? (
           <div
             className="-mt-3 flex items-center justify-end gap-1.5 text-xs text-muted-foreground"
-            title="Answers served from the exact (L1) or semantic (L2) cache this session - cached answers skip retrieval and the LLM"
+            title="Project-wide cache performance across the playground and the /v1 API. Cached answers skip retrieval and the LLM."
           >
             <Lightning
-              className={cn("size-3.5", cachedTurns > 0 && "text-emerald-500")}
-              weight={cachedTurns > 0 ? "fill" : "regular"}
+              className={cn(
+                "size-3.5",
+                cacheStats.cache_hits > 0 && "text-emerald-500"
+              )}
+              weight={cacheStats.cache_hits > 0 ? "fill" : "regular"}
             />
-            Cache hit rate {Math.round((cachedTurns / turns.length) * 100)}% (
-            {cachedTurns}/{turns.length} answers)
+            Cache hit rate {Math.round(cacheStats.hit_rate * 100)}% (
+            {cacheStats.cache_hits}/{cacheStats.queries} queries · {cacheStats.l1}{" "}
+            exact, {cacheStats.l2} similar)
           </div>
         ) : null}
 

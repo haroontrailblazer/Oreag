@@ -221,6 +221,7 @@ def run_query(
             question=question,
             top_k=top_k,
             latency_ms=latency_ms,
+            cache_layer=cache_layer,
         )
     )
     db.commit()
@@ -442,6 +443,7 @@ def run_query_stream(
                 question=question,
                 top_k=top_k,
                 latency_ms=latency_ms,
+                cache_layer=cache_layer,
             )
         )
         db.commit()

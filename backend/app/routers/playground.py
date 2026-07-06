@@ -1,15 +1,48 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Project
+from ..models import Project, QueryLog
 from ..schemas import QueryRequest, QueryResponse
 from ..sse import sse_response
 from ..services.query import run_query, run_query_stream
 from .deps import get_owned_project
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["playground"])
+
+
+@router.get("/query-stats")
+def query_stats(
+    project: Project = Depends(get_owned_project),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Project-wide cache performance across EVERY query surface (the
+    playground and the public /v1 API both write query_logs), so the hit rate
+    reflects the whole project, not one chat session."""
+
+    def count(*where) -> int:
+        return (
+            db.scalar(
+                select(func.count())
+                .select_from(QueryLog)
+                .where(QueryLog.project_id == project.id, *where)
+            )
+            or 0
+        )
+
+    total = count()
+    l1 = count(QueryLog.cache_layer == "l1")
+    l2 = count(QueryLog.cache_layer == "l2")
+    hits = l1 + l2
+    return {
+        "queries": total,
+        "cache_hits": hits,
+        "l1": l1,
+        "l2": l2,
+        "hit_rate": round(hits / total, 4) if total else 0.0,
+    }
 
 
 @router.post("/query", response_model=QueryResponse)
