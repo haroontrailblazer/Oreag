@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { AnswerMarkdown } from "@/components/project/answer-markdown"
 import { api, fetcher } from "@/lib/api"
 import { providerOf, providerUsable } from "@/lib/models"
 import type {
@@ -194,9 +195,13 @@ function TurnView({ question, result }: Turn) {
             {result.model} / {result.latency_ms} ms
           </div>
         </div>
-        <p className="break-words whitespace-pre-wrap text-sm leading-6">
-          {result.answer}
-        </p>
+        {result.needs_clarification ? (
+          <p className="break-words whitespace-pre-wrap text-sm leading-6">
+            {result.answer}
+          </p>
+        ) : (
+          <AnswerMarkdown>{result.answer}</AnswerMarkdown>
+        )}
         {result.sub_queries && result.sub_queries.length > 1 ? (
           <details className="text-xs text-muted-foreground">
             <summary className="cursor-pointer">
