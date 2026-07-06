@@ -269,6 +269,11 @@ export function AddFilesDialog({
                   Object.entries(models.catalog.embedding).flatMap(
                     ([provider, entries]) =>
                       entries
+                        // Only offer models whose provider has a usable key
+                        // (account key or this project's override). The
+                        // project's OWN current model stays selectable even if
+                        // its key was removed, so the Select is never empty -
+                        // but no other model from a keyless provider shows.
                         .filter(
                           (entry) =>
                             providerUsable(
@@ -276,7 +281,7 @@ export function AddFilesDialog({
                               "embedding",
                               availability,
                               project
-                            ) || `${provider}/${entry.model}` === embedding
+                            ) || `${provider}/${entry.model}` === projectEmbedding
                         )
                         .map((entry) => (
                           <SelectItem
@@ -292,13 +297,19 @@ export function AddFilesDialog({
                 )}
               </SelectContent>
             </Select>
-            {embeddingChanged && (
-              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                The embedding model is project-wide. Changing it re-indexes all{" "}
-                {project.file_count} existing file
-                {project.file_count === 1 ? "" : "s"} too.
-              </p>
-            )}
+            {embeddingChanged &&
+              (project.file_count > 0 ? (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                  The embedding model is project-wide. Changing it re-indexes all{" "}
+                  {project.file_count} existing file
+                  {project.file_count === 1 ? "" : "s"} too.
+                </p>
+              ) : (
+                <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  Sets the embedding model for this project. No existing files to
+                  re-index yet.
+                </p>
+              ))}
           </div>
 
           {embDimOptions.length > 1 && (
