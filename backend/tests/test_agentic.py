@@ -236,6 +236,86 @@ def _recorder(return_value):
     return fn
 
 
+class TestGatherContext:
+    """gather_context runs the retrieval loop but never generates - the split
+    that lets the streaming path retrieve first, then stream the answer."""
+
+    def test_returns_sources_without_generating(self):
+        from app.services.agentic import gather_context
+
+        strong = [_chunk("a.pdf", 0, "x", 0.9), _chunk("a.pdf", 1, "y", 0.8)]
+        ctx = gather_context(
+            question="what is X",
+            retrieve_fn=_recorder(strong),
+            plan_fn=_recorder(["unused"]),
+            clarify_fn=_recorder(["unused?"]),
+            top_k=5,
+            min_similarity=0.3,
+            min_strong=2,
+            max_rounds=2,
+        )
+        assert ctx.needs_clarification is False
+        assert ctx.depth == "short"
+        assert len(ctx.sources) == 2
+
+    def test_escalates_when_grounding_is_thin(self):
+        from app.services.agentic import gather_context
+
+        weak = [_chunk("a.pdf", 0, "x", 0.1)]
+        clarify_fn = _recorder(["which topic?"])
+        ctx = gather_context(
+            question="what is X",
+            retrieve_fn=_recorder(weak),
+            plan_fn=_recorder([]),
+            clarify_fn=clarify_fn,
+            top_k=5,
+            min_similarity=0.3,
+            min_strong=2,
+            max_rounds=2,
+        )
+        assert ctx.needs_clarification is True
+        assert ctx.clarification_questions == ["which topic?"]
+
+
+class TestGenerateAnswerStream:
+    def test_streams_deltas_when_provider_supports_it(self, monkeypatch):
+        from app.services import generation
+
+        class _StreamingLLM:
+            def generate(self, s, u):
+                return "should not be called"
+
+            def generate_stream(self, s, u):
+                yield "Py"
+                yield "Torch"
+
+        monkeypatch.setattr(
+            generation.resolver, "resolve_llm_key", lambda db, p: "k"
+        )
+        monkeypatch.setattr(generation, "get_llm", lambda *a, **k: _StreamingLLM())
+        project = Project(
+            owner_id=uuid.uuid4(), llm_provider="openai", llm_model="gpt-4o"
+        )
+        out = list(generation.generate_answer_stream(None, project, "q", []))
+        assert out == ["Py", "Torch"]
+        assert "".join(out) == "PyTorch"
+
+    def test_falls_back_to_full_answer_without_streaming(self, monkeypatch):
+        from app.services import generation
+
+        monkeypatch.setattr(
+            generation.resolver, "resolve_llm_key", lambda db, p: "k"
+        )
+        monkeypatch.setattr(
+            generation, "get_llm", lambda *a, **k: FakeLLM("FULL ANSWER")
+        )
+        project = Project(
+            owner_id=uuid.uuid4(), llm_provider="x", llm_model="y"
+        )
+        out = list(generation.generate_answer_stream(None, project, "q", []))
+        assert out == ["FULL ANSWER"]
+
+
 class TestRunAgenticQuery:
     def test_sufficient_first_round_answers_without_clarifying(self):
         from app.services.agentic import run_agentic_query

@@ -31,3 +31,21 @@ class SarvamLLM:
             ],
         )
         return resp.choices[0].message.content or ""
+
+    def generate_stream(self, system_prompt: str, user_prompt: str):
+        """Yield answer text deltas as they arrive (Sarvam is OpenAI-compatible)."""
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            temperature=0,
+            stream=True,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta

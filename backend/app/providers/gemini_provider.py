@@ -74,15 +74,28 @@ class GeminiLLM:
         self.model = model
         self.client = _client(api_key)
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def _config(self, system_prompt: str):
         from google.genai import types
 
+        return types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            temperature=0,
+        )
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
         resp = self.client.models.generate_content(
             model=self.model,
             contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0,
-            ),
+            config=self._config(system_prompt),
         )
         return resp.text or ""
+
+    def generate_stream(self, system_prompt: str, user_prompt: str):
+        """Yield answer text deltas as Gemini produces them."""
+        for chunk in self.client.models.generate_content_stream(
+            model=self.model,
+            contents=user_prompt,
+            config=self._config(system_prompt),
+        ):
+            if chunk.text:
+                yield chunk.text

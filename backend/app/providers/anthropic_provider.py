@@ -36,3 +36,13 @@ class AnthropicLLM:
             messages=[{"role": "user", "content": user_prompt}],
         )
         return resp.content[0].text if resp.content else ""
+
+    def generate_stream(self, system_prompt: str, user_prompt: str):
+        """Yield answer text deltas as Claude produces them."""
+        with self.client.messages.stream(
+            model=self.model,
+            max_tokens=MAX_TOKENS,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        ) as stream:
+            yield from stream.text_stream

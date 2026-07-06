@@ -21,10 +21,11 @@ from ..schemas import (
     RetrieveRequest,
     SourceChunk,
 )
+from ..sse import sse_response
 from ..services import explore, retrieval, storage
 from ..services.conversion import content_type_for, is_supported_upload, source_extension
 from ..services.ingestion import ingest_file
-from ..services.query import run_query
+from ..services.query import run_query, run_query_stream
 
 router = APIRouter(prefix="/v1/projects/{project_id}", tags=["public-api"])
 
@@ -51,6 +52,32 @@ def public_query(
         body.top_k,
         api_key_id=api_key.id,
         conversation_id=body.conversation_id,
+    )
+
+
+@router.post("/query/stream")
+def public_query_stream(
+    project_id: uuid.UUID,
+    body: QueryRequest,
+    api_key: ApiKey = Depends(require_api_key),
+    db: Session = Depends(get_db),
+):
+    """Same as /query, streamed token by token over Server-Sent Events.
+
+    Emits `data: {"type":"token","text":...}` frames as the answer is produced,
+    a final `data: {"type":"done","response":{...}}` frame with the full payload
+    (sources, model, latency, cache info), and `{"type":"error"}` on failure.
+    """
+    project = _get_project(db, project_id)
+    return sse_response(
+        run_query_stream(
+            db,
+            project,
+            body.question,
+            body.top_k,
+            api_key_id=api_key.id,
+            conversation_id=body.conversation_id,
+        )
     )
 
 

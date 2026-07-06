@@ -259,6 +259,86 @@ class TestSemanticCacheWiring:
         assert stored == [([0.1], "FRESH ANSWER")]
 
 
+class TestRunQueryStream:
+    """run_query_stream yields token events then a final done event, and serves
+    cache hits by streaming the stored text - same brain as run_query."""
+
+    def test_streams_tokens_then_done(self, monkeypatch):
+        from app.services import query
+
+        monkeypatch.setattr(
+            query.retrieval, "retrieve",
+            lambda db, p, q, k: [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+        )
+        monkeypatch.setattr(
+            query.memory_service, "search_memories", lambda db, p, q, k: []
+        )
+        monkeypatch.setattr(
+            query.generation, "generate_answer_stream",
+            lambda db, p, q, srcs, depth="short": iter(["Hello ", "world"]),
+        )
+        monkeypatch.setattr(
+            query.semantic_cache, "lookup", lambda db, p, q, k, s: (None, [0.1], None)
+        )
+        monkeypatch.setattr(query.semantic_cache, "store", lambda *a, **k: None)
+        monkeypatch.setattr(query.settings, "query_cache_enabled", False)
+
+        events = list(
+            query.run_query_stream(
+                FakeDB([10, 0]), _project(), "what is X", None, api_key_id=None
+            )
+        )
+        tokens = "".join(e["text"] for e in events if e["type"] == "token")
+        done = [e for e in events if e["type"] == "done"]
+        assert tokens == "Hello world"
+        assert len(done) == 1
+        resp = done[0]["response"]
+        assert resp["answer"] == "Hello world"
+        assert len(resp["sources"]) == 2
+        assert resp["cache_layer"] is None
+
+    def test_cache_hit_streams_stored_text_without_generating(self, monkeypatch):
+        from app.services import query
+        from app.services.agentic import AgenticResult
+
+        cached = AgenticResult(
+            answer="CACHED ANSWER", sources=[], depth="short",
+            sub_queries=[], rounds=1, needs_clarification=False,
+        )
+        monkeypatch.setattr(
+            query.semantic_cache, "lookup", lambda db, p, q, k, s: (cached, [0.1], 0.9)
+        )
+        monkeypatch.setattr(
+            query.memory_service, "search_memories", lambda db, p, q, k: []
+        )
+        monkeypatch.setattr(query.retrieval, "retrieve", lambda *a: [])
+        gen_called = []
+        monkeypatch.setattr(
+            query.generation, "generate_answer_stream",
+            lambda *a, **k: gen_called.append(1) or iter([]),
+        )
+        monkeypatch.setattr(query.settings, "query_cache_enabled", False)
+
+        events = list(query.run_query_stream(FakeDB([10, 0]), _project(), "q", None))
+        tokens = "".join(e["text"] for e in events if e["type"] == "token")
+        done = [e for e in events if e["type"] == "done"][0]
+        assert tokens == "CACHED ANSWER"
+        assert gen_called == []  # cache hit never calls the model
+        assert done["response"]["cache_layer"] == "l2"
+        assert done["response"]["cache_similarity"] == 0.9
+
+    def test_empty_project_yields_error_event(self, monkeypatch):
+        from app.services import query
+
+        events = list(query.run_query_stream(FakeDB([0, 0]), _project(), "q", None))
+        assert events == [
+            {
+                "type": "error",
+                "detail": "Project has no indexed content yet - upload files (or save memories) and wait for indexing",
+            }
+        ]
+
+
 class TestQueryCaching:
     def _wire(self, monkeypatch, gen_calls, retrieval_calls=None):
         from app.services import query

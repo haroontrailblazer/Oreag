@@ -77,6 +77,23 @@ class CompatLLM:
         )
         return resp.choices[0].message.content or ""
 
+    def generate_stream(self, system_prompt: str, user_prompt: str):
+        """Yield answer text deltas as the model produces them."""
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            stream=True,
+        )
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+
 
 class CompatEmbedder:
     def __init__(

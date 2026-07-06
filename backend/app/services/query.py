@@ -249,3 +249,226 @@ def run_query(
         cache_layer=cache_layer,
         cache_similarity=cache_similarity,
     )
+
+
+def _slice_text(text: str, size: int = 18):
+    """Break already-known text (a cache hit or a clarification) into small
+    pieces so it streams to the client the same way a live answer does."""
+    for i in range(0, len(text), size):
+        yield text[i : i + size]
+
+
+def run_query_stream(
+    db: Session,
+    project: Project,
+    question: str,
+    top_k_override: int | None,
+    api_key_id: uuid.UUID | None = None,
+    conversation_id: str | None = None,
+):
+    """Streaming twin of ``run_query``: yields event dicts as the answer is
+    produced. Same brain, caches and agentic loop - only the final generation
+    is streamed token by token.
+
+    Events:
+      * ``{"type": "token", "text": ...}``  - one answer delta (repeated)
+      * ``{"type": "done", "response": {...}}`` - final QueryResponse-shaped payload
+      * ``{"type": "error", "detail": ...}`` - a failure the client should show
+
+    Errors are yielded (not raised): a streaming response has already sent its
+    headers, so mid-stream failures cannot become HTTP status codes.
+    """
+    chunk_count = (
+        db.scalar(select(func.count()).select_from(Chunk).where(Chunk.project_id == project.id))
+        or 0
+    )
+    memory_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(Memory)
+            .where(Memory.project_id == project.id, Memory.embedding.isnot(None))
+        )
+        or 0
+    )
+    if not chunk_count and not memory_count:
+        yield {
+            "type": "error",
+            "detail": "Project has no indexed content yet - upload files (or save memories) and wait for indexing",
+        }
+        return
+
+    top_k = min(top_k_override or project.top_k, 20)
+    started = time.perf_counter()
+
+    def retrieve_fn(query: str, k: int) -> list[dict]:
+        sources = retrieval.retrieve(db, project, query, k) if chunk_count else []
+        if memory_count and settings.rag_memory_blend_k > 0:
+            try:
+                for mem, sim in memory_service.search_memories(
+                    db, project, query, settings.rag_memory_blend_k
+                ):
+                    if sim >= settings.rag_memory_min_similarity:
+                        sources.append(
+                            {
+                                "filename": "memory",
+                                "page_number": None,
+                                "chunk_index": -1,
+                                "content": mem.content,
+                                "similarity": sim,
+                            }
+                        )
+            except ProviderUnavailableError:
+                pass
+            except Exception:
+                logger.exception(
+                    "Memory blending failed for project %s; answering from "
+                    "documents only",
+                    project.id,
+                )
+                db.rollback()
+        return sources
+
+    def _llm():
+        key = resolver.resolve_llm_key(db, project)
+        return get_llm(project.llm_provider, project.llm_model, key)
+
+    history = _conversations.get_history(conversation_id) if conversation_id else []
+    signature = f"{chunk_count}:{memory_count}"
+    cache_layer: str | None = None
+    cache_similarity: float | None = None
+    semantic_vector: list[float] | None = None
+
+    try:
+        agentic_question = (
+            agentic.condense_question(
+                _llm(), history, question, settings.conversation_history_turns
+            )
+            if history
+            else question
+        )
+
+        # Same two-layer cache as run_query. A hit streams the stored text in
+        # slices (so the UX is identical); a miss gathers context, then streams
+        # the live generation and stores the finished answer back.
+        key = (
+            query_cache.cache_key(project, agentic_question, top_k, signature)
+            if settings.query_cache_enabled
+            else None
+        )
+        result = _cache.get(key) if key is not None else None
+        if result is not None:
+            cache_layer = "l1"
+        else:
+            hit, semantic_vector, cache_similarity = semantic_cache.lookup(
+                db, project, agentic_question, top_k, signature
+            )
+            if hit is not None:
+                result = hit
+                cache_layer = "l2"
+                if key is not None:
+                    _cache.set(key, hit)
+
+        if result is not None:
+            text = (
+                agentic.clarification_message(result.clarification_questions)
+                if result.needs_clarification
+                else (result.answer or "")
+            )
+            for piece in _slice_text(text):
+                yield {"type": "token", "text": piece}
+            final = result
+        else:
+            ctx = agentic.gather_context(
+                question=agentic_question,
+                retrieve_fn=retrieve_fn,
+                plan_fn=lambda q: agentic.plan_subqueries(
+                    _llm(), q, settings.agentic_max_subqueries
+                ),
+                clarify_fn=lambda q: agentic.request_clarification(
+                    _llm(), q, settings.agentic_max_clarifying
+                ),
+                top_k=top_k,
+                min_similarity=settings.agentic_min_similarity,
+                min_strong=settings.agentic_min_strong,
+                max_rounds=settings.agentic_max_rounds,
+            )
+            if ctx.needs_clarification:
+                text = agentic.clarification_message(ctx.clarification_questions)
+                for piece in _slice_text(text):
+                    yield {"type": "token", "text": piece}
+                final = agentic.AgenticResult(
+                    answer=None,
+                    sources=ctx.sources,
+                    depth=ctx.depth,
+                    sub_queries=ctx.sub_queries,
+                    rounds=ctx.rounds,
+                    needs_clarification=True,
+                    clarification_questions=ctx.clarification_questions,
+                )
+            else:
+                acc: list[str] = []
+                for tok in generation.generate_answer_stream(
+                    db, project, agentic_question, ctx.sources, ctx.depth
+                ):
+                    acc.append(tok)
+                    yield {"type": "token", "text": tok}
+                final = agentic.AgenticResult(
+                    answer="".join(acc),
+                    sources=ctx.sources,
+                    depth=ctx.depth,
+                    sub_queries=ctx.sub_queries,
+                    rounds=ctx.rounds,
+                    needs_clarification=False,
+                )
+                if key is not None:
+                    _cache.set(key, final)
+                semantic_cache.store(
+                    db, project, agentic_question, top_k, signature, final, semantic_vector
+                )
+    except ProviderUnavailableError as exc:
+        yield {"type": "error", "detail": str(exc)}
+        return
+    except Exception:
+        logger.exception("Streaming query failed for project %s", project.id)
+        yield {"type": "error", "detail": "The query failed. Please try again."}
+        return
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    try:
+        db.add(
+            QueryLog(
+                project_id=project.id,
+                api_key_id=api_key_id,
+                question=question,
+                top_k=top_k,
+                latency_ms=latency_ms,
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    answer = (
+        agentic.clarification_message(final.clarification_questions)
+        if final.needs_clarification
+        else final.answer
+    )
+    if conversation_id:
+        _conversations.append_turn(conversation_id, question, answer)
+
+    yield {
+        "type": "done",
+        "response": {
+            "answer": answer,
+            "sources": [dict(s) for s in final.sources],
+            "model": f"{project.llm_provider}/{project.llm_model}",
+            "latency_ms": latency_ms,
+            "depth": final.depth,
+            "sub_queries": final.sub_queries,
+            "needs_clarification": final.needs_clarification,
+            "clarification_questions": final.clarification_questions,
+            "conversation_id": conversation_id,
+            "cache_layer": cache_layer,
+            "cache_similarity": cache_similarity,
+        },
+    }

@@ -72,3 +72,38 @@ class OllamaLLM:
             timeout=600,
         )
         return data["message"]["content"]
+
+    def generate_stream(self, system_prompt: str, user_prompt: str):
+        """Yield answer text deltas from Ollama's NDJSON chat stream."""
+        import json
+
+        payload = {
+            "model": self.model,
+            "stream": True,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        try:
+            with httpx.stream(
+                "POST",
+                f"{settings.ollama_base_url}/api/chat",
+                json=payload,
+                timeout=600,
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    piece = json.loads(line).get("message", {}).get("content")
+                    if piece:
+                        yield piece
+        except httpx.ConnectError:
+            raise ProviderUnavailableError(
+                f"Ollama is not reachable at {settings.ollama_base_url} - is Ollama running?"
+            )
+        except httpx.HTTPStatusError as exc:
+            raise ProviderUnavailableError(
+                f"Ollama error ({exc.response.status_code}): {exc.response.text[:300]}"
+            )

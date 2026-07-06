@@ -911,6 +911,24 @@
   display: none; /* Chromium / Safari */
 }
 
+/* Blinking caret trailing the answer while it streams in the playground. */
+.playground-streaming > :last-child::after,
+.playground-streaming::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  background: currentColor;
+  vertical-align: text-bottom;
+  animation: caret-blink 1s steps(1) infinite;
+}
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* Opt-in slim scrollbar - overrides the app-wide hiding for small scroll
    regions that need the affordance (e.g. the Best-practices popover). */
 .styled-scrollbar {

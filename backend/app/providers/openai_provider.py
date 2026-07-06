@@ -44,22 +44,40 @@ class OpenAILLM:
         self.model = model
         self.client = _client(api_key)
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def _params(self) -> dict:
         # GPT-5.x reasoning models reject `temperature` unless reasoning_effort
         # is "none" (gpt-5.5 defaults to "medium"). Pin effort to "none" for
         # fast, RAG-suited answers and skip temperature there; legacy 4o-era
         # models don't accept reasoning_effort, so they keep temperature=0.
-        params: dict = {}
         if self.model.startswith("gpt-5"):
-            params["reasoning_effort"] = "none"
-        else:
-            params["temperature"] = 0
+            return {"reasoning_effort": "none"}
+        return {"temperature": 0}
+
+    def _messages(self, system_prompt: str, user_prompt: str) -> list[dict]:
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
         resp = self.client.chat.completions.create(
             model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            **params,
+            messages=self._messages(system_prompt, user_prompt),
+            **self._params(),
         )
         return resp.choices[0].message.content or ""
+
+    def generate_stream(self, system_prompt: str, user_prompt: str):
+        """Yield answer text deltas as the model produces them."""
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=self._messages(system_prompt, user_prompt),
+            stream=True,
+            **self._params(),
+        )
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta

@@ -71,3 +71,25 @@ def generate_answer(
     return llm.generate(
         system_prompt_for(depth), build_user_prompt(question, sources)
     )
+
+
+def generate_answer_stream(
+    db: Session,
+    project: Project,
+    question: str,
+    sources: list[dict],
+    depth: str = "short",
+):
+    """Yield the answer as text deltas. Providers that implement ``generate_stream``
+    (OpenAI and every OpenAI-compatible vendor) stream token by token; any other
+    provider falls back to yielding the full answer once, so the same code path
+    works everywhere."""
+    api_key = resolver.resolve_llm_key(db, project)
+    llm = get_llm(project.llm_provider, project.llm_model, api_key)
+    system_prompt = system_prompt_for(depth)
+    user_prompt = build_user_prompt(question, sources)
+    streamer = getattr(llm, "generate_stream", None)
+    if callable(streamer):
+        yield from streamer(system_prompt, user_prompt)
+    else:
+        yield llm.generate(system_prompt, user_prompt)

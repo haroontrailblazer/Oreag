@@ -212,6 +212,72 @@ class AgenticResult:
     clarification_questions: list[str] = field(default_factory=list)
 
 
+@dataclass
+class GatheredContext:
+    """The loop's retrieval outcome BEFORE the final answer is written.
+
+    Splitting "gather" from "generate" lets a streaming caller do the (blocking)
+    retrieval/planning first, then stream just the answer token by token.
+    """
+
+    sources: list[dict]
+    depth: str
+    sub_queries: list[str]
+    rounds: int
+    needs_clarification: bool
+    clarification_questions: list[str] = field(default_factory=list)
+
+
+def gather_context(
+    *,
+    question: str,
+    retrieve_fn: Callable[[str, int], list[dict]],
+    plan_fn: Callable[[str], list[str]],
+    clarify_fn: Callable[[str], list[str]],
+    top_k: int = 5,
+    min_similarity: float = 0.3,
+    min_strong: int = 2,
+    max_rounds: int = 2,
+) -> GatheredContext:
+    """Run the retrieval loop and return the gathered context (no generation).
+
+    Detects depth, decomposes a broad question, retrieves and merges over up to
+    ``max_rounds``, and either returns enough grounding to answer, or the
+    clarifying questions to hand back to the human.
+    """
+    depth = detect_depth(question)
+    sub_queries = plan_fn(question) if depth == "long" else [question]
+
+    gathered: list[dict] = []
+    queries = list(sub_queries)
+    rounds = 0
+    while rounds < max_rounds:
+        rounds += 1
+        round_results = [retrieve_fn(q, top_k) for q in queries]
+        gathered = merge_sources([gathered, *round_results])
+        if is_sufficient(gathered, min_similarity, min_strong):
+            return GatheredContext(
+                sources=gathered,
+                depth=depth,
+                sub_queries=sub_queries,
+                rounds=rounds,
+                needs_clarification=False,
+            )
+        # Not enough yet - broaden the net and re-query the literal question.
+        queries = [question]
+        top_k = min(top_k * 2, 20)
+
+    # Loop exhausted without enough grounding → keep a human in the loop.
+    return GatheredContext(
+        sources=gathered,
+        depth=depth,
+        sub_queries=sub_queries,
+        rounds=rounds,
+        needs_clarification=True,
+        clarification_questions=clarify_fn(question),
+    )
+
+
 def run_agentic_query(
     *,
     question: str,
@@ -229,45 +295,33 @@ def run_agentic_query(
     Dependency-injected so it carries no DB or provider knowledge: ``retrieve_fn``
     runs one vector search, ``plan_fn`` decomposes a broad question, ``generate_fn``
     writes the (depth-aware) answer, and ``clarify_fn`` produces clarifying
-    questions. The loop:
-
-      * detects depth - a broad question is decomposed into sub-queries, a
-        focused one is searched as-is;
-      * retrieves every query and merges the results into a widening context;
-      * answers as soon as the context is sufficient (depth threaded through);
-      * otherwise broadens and retries up to ``max_rounds``, and only then hands
-        back to the human with clarifying questions instead of guessing.
+    questions. Gathers context, then either answers or asks for clarification.
     """
-    depth = detect_depth(question)
-    sub_queries = plan_fn(question) if depth == "long" else [question]
-
-    gathered: list[dict] = []
-    queries = list(sub_queries)
-    rounds = 0
-    while rounds < max_rounds:
-        rounds += 1
-        round_results = [retrieve_fn(q, top_k) for q in queries]
-        gathered = merge_sources([gathered, *round_results])
-        if is_sufficient(gathered, min_similarity, min_strong):
-            return AgenticResult(
-                answer=generate_fn(question, gathered, depth),
-                sources=gathered,
-                depth=depth,
-                sub_queries=sub_queries,
-                rounds=rounds,
-                needs_clarification=False,
-            )
-        # Not enough yet - broaden the net and re-query the literal question.
-        queries = [question]
-        top_k = min(top_k * 2, 20)
-
-    # Loop exhausted without enough grounding → keep a human in the loop.
+    ctx = gather_context(
+        question=question,
+        retrieve_fn=retrieve_fn,
+        plan_fn=plan_fn,
+        clarify_fn=clarify_fn,
+        top_k=top_k,
+        min_similarity=min_similarity,
+        min_strong=min_strong,
+        max_rounds=max_rounds,
+    )
+    if ctx.needs_clarification:
+        return AgenticResult(
+            answer=None,
+            sources=ctx.sources,
+            depth=ctx.depth,
+            sub_queries=ctx.sub_queries,
+            rounds=ctx.rounds,
+            needs_clarification=True,
+            clarification_questions=ctx.clarification_questions,
+        )
     return AgenticResult(
-        answer=None,
-        sources=gathered,
-        depth=depth,
-        sub_queries=sub_queries,
-        rounds=rounds,
-        needs_clarification=True,
-        clarification_questions=clarify_fn(question),
+        answer=generate_fn(question, ctx.sources, ctx.depth),
+        sources=ctx.sources,
+        depth=ctx.depth,
+        sub_queries=ctx.sub_queries,
+        rounds=ctx.rounds,
+        needs_clarification=False,
     )

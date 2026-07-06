@@ -85,6 +85,78 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export const fetcher = <T>(path: string) => api<T>(path)
 
 /**
+ * POST a JSON body and consume a Server-Sent Events stream, calling `onEvent`
+ * with each parsed `data:` frame. Auth mirrors {@link api}. Resolves when the
+ * stream ends; rejects (ApiError) on a non-2xx response, or an AbortError when
+ * `signal` fires. The caller interprets event shapes.
+ */
+export async function apiStream(
+  path: string,
+  body: unknown,
+  {
+    onEvent,
+    signal,
+  }: { onEvent: (event: unknown) => void; signal?: AbortSignal }
+): Promise<void> {
+  const supabase = createClient()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  const headers = new Headers()
+  if (session) headers.set("Authorization", `Bearer ${session.access_token}`)
+  headers.set("Content-Type", "application/json")
+
+  const res = await fetch(`${getApiBase()}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    let detail = res.statusText
+    try {
+      const errBody = await res.json()
+      if (errBody?.detail) {
+        detail =
+          typeof errBody.detail === "string"
+            ? errBody.detail
+            : JSON.stringify(errBody.detail)
+      }
+    } catch {
+      // non-JSON error body
+    }
+    throw new ApiError(res.status, detail)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    // SSE frames are separated by a blank line; each carries one `data:` line.
+    let sep: number
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, sep)
+      buffer = buffer.slice(sep + 2)
+      const dataLine = frame
+        .split("\n")
+        .find((line) => line.startsWith("data:"))
+      if (!dataLine) continue
+      const payload = dataLine.slice(5).trim()
+      if (!payload) continue
+      try {
+        onEvent(JSON.parse(payload))
+      } catch {
+        // ignore a malformed frame rather than break the stream
+      }
+    }
+  }
+}
+
+/**
  * POST a FormData body with upload-progress reporting and cancellation.
  *
  * `fetch` can't surface upload progress, so this uses XMLHttpRequest. Auth and

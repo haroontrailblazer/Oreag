@@ -10,7 +10,7 @@ import {
   Warning,
 } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { AnswerMarkdown } from "@/components/project/answer-markdown"
-import { api, fetcher } from "@/lib/api"
+import { api, apiStream, fetcher } from "@/lib/api"
 import { providerOf, providerUsable } from "@/lib/models"
 import type {
   ModelsResponse,
@@ -76,6 +76,12 @@ const ACCEPTED_FILE_TYPES = [
 ].join(",")
 
 type Turn = { question: string; result: QueryResponse }
+
+/** One SSE frame from the /query/stream endpoint. */
+type StreamEvent =
+  | { type: "token"; text: string }
+  | { type: "done"; response: QueryResponse }
+  | { type: "error"; detail: string }
 
 /** Reference chips: file icon + name; clicking one reveals the chunk text. */
 function SourceChips({ sources }: { sources: SourceChunk[] }) {
@@ -225,11 +231,17 @@ function TurnView({ question, result }: Turn) {
 export function PlaygroundTab({ project }: { project: Project }) {
   const [question, setQuestion] = useState("")
   const [turns, setTurns] = useState<Turn[]>([])
-  const [pending, setPending] = useState<string | null>(null)
+  // The in-flight answer as it streams in. `text` grows token by token; it
+  // becomes a finished Turn (with sources/cache) once the "done" event lands.
+  const [streaming, setStreaming] = useState<{
+    question: string
+    text: string
+  } | null>(null)
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [model, setModel] = useState(`${project.llm_provider}/${project.llm_model}`)
   const abortRef = useRef<AbortController | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
   // A conversation id ties follow-ups together so "summarize that" works. Lazily
   // created on the first ask (client only) to avoid an SSR hydration mismatch.
   const conversationId = useRef<string | null>(null)
@@ -237,6 +249,11 @@ export function PlaygroundTab({ project }: { project: Project }) {
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher)
   const availability = models?.availability ?? { [project.llm_provider]: true }
   const cachedTurns = turns.filter((t) => t.result.cache_layer).length
+
+  // Keep the newest content in view as tokens stream in and turns land.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" })
+  }, [streaming?.text, turns.length])
   // The selected model's provider may have lost its key since it was chosen -
   // flag it (grey trigger + warning) instead of silently letting a query 503.
   const currentModelUsable = providerUsable(
@@ -265,13 +282,13 @@ export function PlaygroundTab({ project }: { project: Project }) {
     abortRef.current?.abort()
     abortRef.current = null
     setLoading(false)
-    setPending(null)
+    setStreaming(null)
   }
 
   function handleNewChat() {
     conversationId.current = null
     setTurns([])
-    setPending(null)
+    setStreaming(null)
   }
 
   async function handleUpload(list: FileList | null) {
@@ -342,28 +359,49 @@ export function PlaygroundTab({ project }: { project: Project }) {
     const controller = new AbortController()
     abortRef.current = controller
     setLoading(true)
-    setPending(nextQuestion)
+    setStreaming({ question: nextQuestion, text: "" })
     setQuestion("")
+
+    let final: QueryResponse | null = null
+    let streamError: string | null = null
     try {
-      const response = await api<QueryResponse>(
-        `/api/projects/${project.id}/query`,
+      await apiStream(
+        `/api/projects/${project.id}/query/stream`,
         {
-          method: "POST",
-          body: JSON.stringify({
-            question: nextQuestion,
-            conversation_id: conversationId.current,
-          }),
+          question: nextQuestion,
+          conversation_id: conversationId.current,
+        },
+        {
           signal: controller.signal,
+          onEvent: (event) => {
+            const ev = event as StreamEvent
+            if (ev.type === "token") {
+              setStreaming((s) =>
+                s ? { ...s, text: s.text + ev.text } : s
+              )
+            } else if (ev.type === "done") {
+              final = ev.response
+            } else if (ev.type === "error") {
+              streamError = ev.detail
+            }
+          },
         }
       )
-      setTurns((prev) => [...prev, { question: nextQuestion, result: response }])
+      if (streamError) {
+        toast.error(streamError)
+      } else if (final) {
+        setTurns((prev) => [
+          ...prev,
+          { question: nextQuestion, result: final as QueryResponse },
+        ])
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return
       toast.error(err instanceof Error ? err.message : "Query failed")
     } finally {
       if (abortRef.current === controller) abortRef.current = null
       setLoading(false)
-      setPending(null)
+      setStreaming(null)
     }
   }
 
@@ -432,21 +470,32 @@ export function PlaygroundTab({ project }: { project: Project }) {
           {turns.map((turn, i) => (
             <TurnView key={i} question={turn.question} result={turn.result} />
           ))}
-          {loading ? (
+          {streaming ? (
             <div className="space-y-2">
-              {pending ? (
-                <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
-                    {pending}
+              <div className="flex justify-end">
+                <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
+                  {streaming.question}
+                </div>
+              </div>
+              {streaming.text ? (
+                // Answer grows in place; the caret marks the live cursor.
+                <div className="max-w-3xl">
+                  <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Answer
+                  </div>
+                  <div className="playground-streaming">
+                    <AnswerMarkdown>{streaming.text}</AnswerMarkdown>
                   </div>
                 </div>
-              ) : null}
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <LoaderOne />
-                Thinking
-              </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <LoaderOne />
+                  Thinking
+                </div>
+              )}
             </div>
           ) : null}
+          <div ref={bottomRef} />
         </div>
 
         {turns.length > 0 ? (
