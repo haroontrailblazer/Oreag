@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 import { fetcher, uploadWithProgress } from "@/lib/api"
 import { dimensionOptions, providerUsable } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
@@ -75,6 +76,14 @@ export function AddFilesDialog({
   const availability = models?.availability ?? {
     [project.embedding_provider]: true,
   }
+  // The selected embedding model's provider may have lost its key - grey it and
+  // warn, since indexing the upload needs an embedding key.
+  const embCurrentUsable = providerUsable(
+    embProvider,
+    "embedding",
+    availability,
+    project
+  )
 
   function changeEmbedding(value: string) {
     setEmbedding(value)
@@ -261,7 +270,7 @@ export function AddFilesDialog({
           <div className="space-y-2">
             <Label>Embedding model</Label>
             <Select value={embedding} onValueChange={changeEmbedding}>
-              <SelectTrigger>
+              <SelectTrigger className={cn(!embCurrentUsable && "text-muted-foreground")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -269,11 +278,11 @@ export function AddFilesDialog({
                   Object.entries(models.catalog.embedding).flatMap(
                     ([provider, entries]) =>
                       entries
-                        // Only offer models whose provider has a usable key
-                        // (account key or this project's override). The
-                        // project's OWN current model stays selectable even if
-                        // its key was removed, so the Select is never empty -
-                        // but no other model from a keyless provider shows.
+                        // Offer models whose provider has a usable key (account
+                        // key or this project's override). The project's OWN
+                        // current model stays selectable even if its key was
+                        // removed - shown greyed with a "key removed" tag - so
+                        // the Select is never empty.
                         .filter(
                           (entry) =>
                             providerUsable(
@@ -283,20 +292,40 @@ export function AddFilesDialog({
                               project
                             ) || `${provider}/${entry.model}` === projectEmbedding
                         )
-                        .map((entry) => (
-                          <SelectItem
-                            key={`${provider}/${entry.model}`}
-                            value={`${provider}/${entry.model}`}
-                          >
-                            {provider} / {entry.model} ({entry.dimensions}d)
-                          </SelectItem>
-                        ))
+                        .map((entry) => {
+                          const value = `${provider}/${entry.model}`
+                          const usable = providerUsable(
+                            provider,
+                            "embedding",
+                            availability,
+                            project
+                          )
+                          return (
+                            <SelectItem
+                              key={value}
+                              value={value}
+                              className={cn(
+                                !usable && "text-muted-foreground opacity-70"
+                              )}
+                            >
+                              {provider} / {entry.model} ({entry.dimensions}d)
+                              {!usable ? " · key removed" : ""}
+                            </SelectItem>
+                          )
+                        })
                   )
                 ) : (
                   <SelectItem value={embedding}>{embedding}</SelectItem>
                 )}
               </SelectContent>
             </Select>
+            {!embCurrentUsable && (
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                The API key for {embProvider} was removed. Add it in Settings or
+                choose a model whose provider still has a key - indexing needs an
+                embedding key.
+              </p>
+            )}
             {embeddingChanged &&
               (project.file_count > 0 ? (
                 <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">

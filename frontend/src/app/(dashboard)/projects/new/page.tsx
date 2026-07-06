@@ -29,6 +29,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher, uploadWithProgress } from "@/lib/api"
 import { dimensionOptions, providerOf } from "@/lib/models"
+import { cn } from "@/lib/utils"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 const MAX_FILE_MB = 50
@@ -357,7 +358,9 @@ export default function NewProjectPage() {
             <div className="space-y-2">
               <Label>Embedding model</Label>
               <Select value={embedding} onValueChange={setEmbedding}>
-                <SelectTrigger>
+                <SelectTrigger
+                  className={cn(!embAvailable && "text-muted-foreground")}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -374,8 +377,13 @@ export default function NewProjectPage() {
                               <SelectItem
                                 key={`${provider}/${entry.model}`}
                                 value={`${provider}/${entry.model}`}
+                                className={cn(
+                                  !availability[provider] &&
+                                    "text-muted-foreground opacity-70"
+                                )}
                               >
                                 {provider} / {entry.model} ({entry.dimensions}d)
+                                {!availability[provider] ? " · needs key" : ""}
                               </SelectItem>
                             ))
                       )
@@ -421,7 +429,9 @@ export default function NewProjectPage() {
             <div className="space-y-2">
               <Label>Answer model (LLM)</Label>
               <Select value={llm} onValueChange={setLlm}>
-                <SelectTrigger>
+                <SelectTrigger
+                  className={cn(!llmAvailable && "text-muted-foreground")}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -438,8 +448,13 @@ export default function NewProjectPage() {
                               <SelectItem
                                 key={`${provider}/${model}`}
                                 value={`${provider}/${model}`}
+                                className={cn(
+                                  !availability[provider] &&
+                                    "text-muted-foreground opacity-70"
+                                )}
                               >
                                 {provider} / {model}
+                                {!availability[provider] ? " · needs key" : ""}
                               </SelectItem>
                             ))
                       )

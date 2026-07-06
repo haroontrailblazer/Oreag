@@ -359,23 +359,26 @@ export function FilesTab({
               onChanged()
             }}
           />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" aria-label="File actions">
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={handleRetryFailed}>
-                <RotateCcw className="size-4" />
-                Retry failed files
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={handleReindexAll}>
-                <RotateCcw className="size-4" />
-                Re-index all files
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Bulk retry / re-index only make sense with files present. */}
+          {files && files.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="File actions">
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={handleRetryFailed}>
+                  <RotateCcw className="size-4" />
+                  Retry failed files
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleReindexAll}>
+                  <RotateCcw className="size-4" />
+                  Re-index all files
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 

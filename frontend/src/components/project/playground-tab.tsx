@@ -7,7 +7,9 @@ import {
   Lightning,
   Plus,
   Square,
+  Warning,
 } from "@phosphor-icons/react/dist/ssr"
+import Link from "next/link"
 import { useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
@@ -31,7 +33,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher } from "@/lib/api"
-import { providerUsable } from "@/lib/models"
+import { providerOf, providerUsable } from "@/lib/models"
 import type {
   ModelsResponse,
   Project,
@@ -230,6 +232,29 @@ export function PlaygroundTab({ project }: { project: Project }) {
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher)
   const availability = models?.availability ?? { [project.llm_provider]: true }
   const cachedTurns = turns.filter((t) => t.result.cache_layer).length
+  // The selected model's provider may have lost its key since it was chosen -
+  // flag it (grey trigger + warning) instead of silently letting a query 503.
+  const currentModelUsable = providerUsable(
+    providerOf(model),
+    "llm",
+    availability,
+    project
+  )
+  // Which providers still have a usable key, and the first model to switch to.
+  // Lets the "key removed" notice tell the user exactly what IS available and
+  // offer a one-click switch, instead of a dead-end error.
+  const availableLlmProviders = models
+    ? Object.keys(models.catalog.llm).filter((p) =>
+        providerUsable(p, "llm", availability, project)
+      )
+    : []
+  const firstAvailableModel = models
+    ? Object.entries(models.catalog.llm).flatMap(([provider, names]) =>
+        providerUsable(provider, "llm", availability, project)
+          ? names.map((n) => `${provider}/${n}`)
+          : []
+      )[0] ?? null
+    : null
 
   function handleStop() {
     abortRef.current?.abort()
@@ -292,6 +317,22 @@ export function PlaygroundTab({ project }: { project: Project }) {
   async function handleAsk() {
     const nextQuestion = question.trim()
     if (!nextQuestion || loading) return
+    // The selected model's key was removed - don't fire a request that would
+    // 503. If another provider still has a key, switch to it automatically and
+    // continue; otherwise guide the user to add a key. Never a raw error.
+    if (!currentModelUsable) {
+      if (firstAvailableModel) {
+        handleModelChange(firstAvailableModel)
+        toast.info(
+          `Switched to ${firstAvailableModel.split("/")[1]} - the key for ${providerOf(model)} was removed.`
+        )
+      } else {
+        toast.info(
+          `No usable answer model - add a provider key in Settings to continue.`
+        )
+      }
+      return
+    }
     if (!conversationId.current) conversationId.current = crypto.randomUUID()
     const controller = new AbortController()
     abortRef.current = controller
@@ -417,6 +458,38 @@ export function PlaygroundTab({ project }: { project: Project }) {
           </div>
         ) : null}
 
+        {!currentModelUsable ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+            <Warning className="size-4 shrink-0" weight="fill" />
+            <span className="min-w-0 flex-1">
+              The API key for <strong>{providerOf(model)}</strong> was removed,
+              so this model can no longer answer.
+              {firstAvailableModel
+                ? ` You still have a key for ${availableLlmProviders.join(", ")}.`
+                : " Add a provider key to keep answering."}
+            </span>
+            {firstAvailableModel ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 border-amber-400/60 bg-transparent"
+                onClick={() => handleModelChange(firstAvailableModel)}
+              >
+                Switch to {firstAvailableModel.split("/")[1]}
+              </Button>
+            ) : (
+              <Button
+                asChild
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 border-amber-400/60 bg-transparent"
+              >
+                <Link href="/settings/api-keys">Add a key</Link>
+              </Button>
+            )}
+          </div>
+        ) : null}
+
         <div className="rounded-xl border bg-background p-1.5 shadow-xs focus-within:border-foreground">
           <Textarea
             rows={1}
@@ -461,7 +534,10 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 <SelectTrigger
                   size="sm"
                   aria-label="Answer model"
-                  className="h-8 max-w-44 rounded-full border-0 bg-muted px-3 shadow-none focus:ring-0"
+                  className={cn(
+                    "h-8 max-w-44 rounded-full border-0 bg-muted px-3 shadow-none focus:ring-0",
+                    !currentModelUsable && "text-muted-foreground"
+                  )}
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -474,14 +550,27 @@ export function PlaygroundTab({ project }: { project: Project }) {
                             providerUsable(provider, "llm", availability, project) ||
                             `${provider}/${name}` === model
                         )
-                        .map((name) => (
-                          <SelectItem
-                            key={`${provider}/${name}`}
-                            value={`${provider}/${name}`}
-                          >
-                            {provider} / {name}
-                          </SelectItem>
-                        ))
+                        .map((name) => {
+                          const value = `${provider}/${name}`
+                          const usable = providerUsable(
+                            provider,
+                            "llm",
+                            availability,
+                            project
+                          )
+                          return (
+                            <SelectItem
+                              key={value}
+                              value={value}
+                              className={cn(
+                                !usable && "text-muted-foreground opacity-70"
+                              )}
+                            >
+                              {provider} / {name}
+                              {!usable ? " · key removed" : ""}
+                            </SelectItem>
+                          )
+                        })
                     )
                   ) : (
                     <SelectItem value={model}>{model}</SelectItem>

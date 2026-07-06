@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select"
 import { api, fetcher } from "@/lib/api"
 import { dimensionOptions, providerOf, providerUsable } from "@/lib/models"
+import { cn } from "@/lib/utils"
 import type { ModelsResponse, Project } from "@/lib/types"
 
 export function SettingsTab({
@@ -122,6 +123,18 @@ export function SettingsTab({
   const reindexNeeded = embModelChanged || chunkChanged || embDimsChanged
   const embKeyOnly = !reindexNeeded && Boolean(embKeyInput.trim())
   const embForcedInput = !embAccountHasKey && !embOverrideLast4
+  // With no files there is nothing to re-index - a model/chunk change just
+  // saves config, so drop the re-index confirmation and its "N files" wording.
+  const hasFiles = project.file_count > 0
+  // The currently-selected models' providers may have lost their key - grey
+  // them so a stale model doesn't look usable.
+  const llmCurrentUsable = providerUsable(llmProvider, "llm", availability, project)
+  const embCurrentUsable = providerUsable(
+    embProvider,
+    "embedding",
+    availability,
+    project
+  )
 
   function changeLlm(value: string) {
     setLlm(value)
@@ -278,9 +291,11 @@ export function SettingsTab({
         body: JSON.stringify(body),
       })
       toast.success(
-        instantShrink
-          ? "Vector size updated - existing vectors reused, nothing re-embedded"
-          : "Re-indexing started - all files will be processed again"
+        !hasFiles
+          ? "Embedding configuration saved"
+          : instantShrink
+            ? "Vector size updated - existing vectors reused, nothing re-embedded"
+            : "Re-indexing started - all files will be processed again"
       )
       setConfirmReindex(false)
       setEmbKeyInput("")
@@ -412,7 +427,7 @@ export function SettingsTab({
           <div className="space-y-2">
             <Label>Model</Label>
             <Select value={llm} onValueChange={changeLlm}>
-              <SelectTrigger>
+              <SelectTrigger className={cn(!llmCurrentUsable && "text-muted-foreground")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -424,14 +439,26 @@ export function SettingsTab({
                           providerUsable(provider, "llm", availability, project) ||
                           `${provider}/${model}` === llm
                       )
-                      .map((model) => (
-                        <SelectItem
-                          key={`${provider}/${model}`}
-                          value={`${provider}/${model}`}
-                        >
-                          {provider} / {model}
-                        </SelectItem>
-                      ))
+                      .map((model) => {
+                        const usable = providerUsable(
+                          provider,
+                          "llm",
+                          availability,
+                          project
+                        )
+                        return (
+                          <SelectItem
+                            key={`${provider}/${model}`}
+                            value={`${provider}/${model}`}
+                            className={cn(
+                              !usable && "text-muted-foreground opacity-70"
+                            )}
+                          >
+                            {provider} / {model}
+                            {!usable ? " · key removed" : ""}
+                          </SelectItem>
+                        )
+                      })
                   )
                 ) : (
                   <SelectItem value={llm}>{llm}</SelectItem>
@@ -510,7 +537,7 @@ export function SettingsTab({
           <div className="space-y-2">
             <Label>Embedding model</Label>
             <Select value={embedding} onValueChange={changeEmbedding}>
-              <SelectTrigger>
+              <SelectTrigger className={cn(!embCurrentUsable && "text-muted-foreground")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -527,14 +554,26 @@ export function SettingsTab({
                               project
                             ) || `${provider}/${entry.model}` === embedding
                         )
-                        .map((entry) => (
-                          <SelectItem
-                            key={`${provider}/${entry.model}`}
-                            value={`${provider}/${entry.model}`}
-                          >
-                            {provider} / {entry.model} ({entry.dimensions}d)
-                          </SelectItem>
-                        ))
+                        .map((entry) => {
+                          const usable = providerUsable(
+                            provider,
+                            "embedding",
+                            availability,
+                            project
+                          )
+                          return (
+                            <SelectItem
+                              key={`${provider}/${entry.model}`}
+                              value={`${provider}/${entry.model}`}
+                              className={cn(
+                                !usable && "text-muted-foreground opacity-70"
+                              )}
+                            >
+                              {provider} / {entry.model} ({entry.dimensions}d)
+                              {!usable ? " · key removed" : ""}
+                            </SelectItem>
+                          )
+                        })
                   )
                 ) : (
                   <SelectItem value={embedding}>{embedding}</SelectItem>
@@ -598,10 +637,20 @@ export function SettingsTab({
               )}
               {reindexNeeded ? (
                 <Button
-                  onClick={() => setConfirmReindex(true)}
+                  // With no files there's nothing to re-index, so skip the
+                  // confirmation and just persist the config change.
+                  onClick={() =>
+                    hasFiles ? setConfirmReindex(true) : handleReindex()
+                  }
                   disabled={!embUsable || reindexing}
                 >
-                  Change &amp; re-index
+                  {reindexing ? (
+                    <LoaderOne />
+                  ) : hasFiles ? (
+                    "Change & re-index"
+                  ) : (
+                    "Save changes"
+                  )}
                 </Button>
               ) : (
                 <Button
