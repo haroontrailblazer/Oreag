@@ -180,9 +180,9 @@ export function AddFilesDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button>
+        <Button aria-label="Add files" title="Add files">
           <FileUp className="size-4" />
-          Add files
+          <span className="hidden sm:inline">Add files</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto no-scrollbar sm:max-w-lg">

@@ -159,7 +159,7 @@ export default function ProjectPage({
         </span>
       </div>
 
-      <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1">
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
         {/* Same pill bar on every screen - compact triggers on phones so all
             six fit; swipes sideways as a safety net on very narrow screens
             (the app-wide CSS hides the scrollbar). */}
@@ -174,7 +174,7 @@ export default function ProjectPage({
             </TabsTrigger>
           ))}
         </TabsList>
-        <TabsContent value="files" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="files" className="mt-4 min-h-0 flex-1 overflow-y-auto" forceMount={mountAll}>
           <FilesTab
             project={project}
             onChanged={handleChanged}
@@ -182,20 +182,22 @@ export default function ProjectPage({
             focusToken={focusToken}
           />
         </TabsContent>
-        <TabsContent value="memory" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="memory" className="mt-4 min-h-0 flex-1 overflow-y-auto" forceMount={mountAll}>
           <MemoryTab project={project} />
         </TabsContent>
-        <TabsContent value="playground" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
+        {/* Playground manages its own scroll (conversation scrolls, input +
+            header stay put), so this slot doesn't scroll - it just fills. */}
+        <TabsContent value="playground" className="mt-4 flex min-h-0 flex-1 flex-col" forceMount={mountAll}>
           <PlaygroundTab project={project} />
         </TabsContent>
-        <TabsContent value="api" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="api" className="mt-4 min-h-0 flex-1 overflow-y-auto" forceMount={mountAll}>
           <ApiTab project={project} />
         </TabsContent>
         {/* No forceMount: the 3D canvas (WebGL) only spins up when opened. */}
-        <TabsContent value="visualize" className="mt-4 min-h-0 overflow-y-auto">
+        <TabsContent value="visualize" className="mt-4 min-h-0 flex-1 overflow-y-auto">
           <VisualizeTab project={project} onViewFile={handleViewFile} />
         </TabsContent>
-        <TabsContent value="settings" className="mt-4 min-h-0 overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="settings" className="mt-4 min-h-0 flex-1 overflow-y-auto" forceMount={mountAll}>
           <SettingsTab project={project} onChanged={handleChanged} />
         </TabsContent>
       </Tabs>

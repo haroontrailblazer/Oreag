@@ -416,8 +416,10 @@ export function PlaygroundTab({ project }: { project: Project }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
+    // Fixed frame: header (title) and the input row stay put; only the
+    // conversation in the middle scrolls - the same on mobile and desktop.
+    <Card className="flex h-full min-h-0 flex-col">
+      <CardHeader className="shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1.5">
             <CardTitle>Test your RAG</CardTitle>
@@ -462,15 +464,19 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 variant="outline"
                 size="sm"
                 onClick={handleNewChat}
+                aria-label="New chat"
+                title="New chat"
+                className="gap-1.5"
               >
-                New chat
+                <Plus className="size-4" />
+                <span className="hidden sm:inline">New chat</span>
               </Button>
             ) : null}
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="min-h-32 space-y-5 rounded-2xl border bg-background p-4">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 pb-4">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto rounded-2xl border bg-background p-4">
           {turns.length === 0 && !loading ? (
             <div className="flex min-h-20 items-center justify-center text-center text-sm text-muted-foreground">
               Ask a question to test retrieval, the agentic loop, and grounded
@@ -508,9 +514,11 @@ export function PlaygroundTab({ project }: { project: Project }) {
           <div ref={bottomRef} />
         </div>
 
+        {/* Static footer: cache rate, any key warning, and the input row. */}
+        <div className="shrink-0 space-y-3">
         {cacheStats && cacheStats.queries > 0 ? (
           <div
-            className="-mt-3 flex items-center justify-end gap-1.5 text-xs text-muted-foreground"
+            className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground"
             title="Project-wide cache performance across the playground and the /v1 API. Cached answers skip retrieval and the LLM."
           >
             <Lightning
@@ -660,6 +668,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
               )}
             </Button>
           </div>
+        </div>
         </div>
       </CardContent>
     </Card>

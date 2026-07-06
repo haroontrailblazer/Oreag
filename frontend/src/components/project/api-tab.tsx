@@ -420,12 +420,18 @@ print(data["answer"])`
             </div>
             <div className="flex items-center gap-2">
               <BestPractices tips={BEST_PRACTICE_TIPS} />
-              <Button onClick={handleCreate} disabled={creating}>
+              <Button
+                onClick={handleCreate}
+                disabled={creating}
+                aria-label="Create key"
+                title="Create key"
+              >
                 {creating ? (
                   <LoaderOne />
                 ) : (
                   <>
-                    <Plus className="size-4" /> Create key
+                    <Plus className="size-4" />
+                    <span className="hidden sm:inline">Create key</span>
                   </>
                 )}
               </Button>

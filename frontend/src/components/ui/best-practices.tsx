@@ -39,13 +39,17 @@ export function BestPractices({
         <Button
           variant="outline"
           size="sm"
+          aria-label="Best practices"
+          title="Best practices"
           className={cn(
-            "h-7 shrink-0 gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground",
+            // Icon-only on phones so it doesn't crowd the page title/actions;
+            // full label from sm+.
+            "size-7 shrink-0 rounded-full p-0 text-muted-foreground hover:text-foreground sm:h-7 sm:w-auto sm:gap-1.5 sm:px-2.5 sm:text-xs sm:font-medium",
             className
           )}
         >
           <Lightbulb className="size-3.5" />
-          Best practices
+          <span className="hidden sm:inline">Best practices</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
