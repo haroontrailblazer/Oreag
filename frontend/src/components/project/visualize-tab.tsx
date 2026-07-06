@@ -548,7 +548,7 @@ export function VisualizeTab({
           // Desktop: size the canvas to the space left under the page header,
           // tabs and card chrome (~22.5rem) so the whole tab fits the viewport
           // with no page scroll; phones keep a fixed height and scroll as usual.
-          className="relative h-[60dvh] min-h-[340px] overflow-hidden rounded-xl border bg-zinc-50 sm:h-[480px] lg:h-[calc(100dvh-22.5rem)] lg:min-h-[420px] dark:border-zinc-800 dark:bg-[#09090b]"
+          className="relative h-[52dvh] min-h-[320px] overflow-hidden rounded-xl border bg-zinc-50 sm:h-[420px] lg:h-[calc(100dvh-26rem)] lg:min-h-[380px] dark:border-zinc-800 dark:bg-[#09090b]"
         >
           {(isLoading || !ForceGraph3D) && <GraphLoader />}
 
@@ -601,8 +601,12 @@ export function VisualizeTab({
           )}
 
           {selected && (
-            <div className="absolute right-3 top-3 w-72 max-w-[calc(100%-1.5rem)] rounded-xl border bg-background/95 p-4 text-foreground shadow-xl backdrop-blur">
-              <div className="flex items-start justify-between gap-2">
+            // Header (type + close) and the View-file action stay pinned; only
+            // the middle body scrolls - with the custom scrollbar - so every
+            // node popup (file, section, chunk, memory) behaves the same when
+            // its text or metadata is long.
+            <div className="absolute right-3 top-3 flex max-h-[calc(100%-1.5rem)] w-72 max-w-[calc(100%-1.5rem)] flex-col rounded-xl border bg-background/95 p-4 text-foreground shadow-xl backdrop-blur">
+              <div className="flex shrink-0 items-start justify-between gap-2">
                 <Badge variant="outline" className="capitalize">
                   <span
                     className="size-2 rounded-full"
@@ -623,34 +627,36 @@ export function VisualizeTab({
                   <X className="size-3.5" />
                 </Button>
               </div>
-              <p className="mt-2 break-words text-sm font-medium leading-snug">
-                {selected.label}
-              </p>
-              {selected.text && (
-                <p className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
-                  {selected.text}
+              <div className="styled-scrollbar mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
+                <p className="break-words text-sm font-medium leading-snug">
+                  {selected.label}
                 </p>
-              )}
-              <dl className="mt-3 space-y-1 text-[11px] text-muted-foreground">
-                {Object.entries(selected.metadata ?? {})
-                  .filter(([, v]) => v != null && v !== "" && String(v) !== "[]")
-                  .slice(0, 5)
-                  .map(([k, v]) => (
-                    <div key={k} className="flex justify-between gap-3">
-                      <dt className="shrink-0 capitalize">
-                        {k.replaceAll("_", " ")}
-                      </dt>
-                      <dd className="truncate font-mono text-foreground/80">
-                        {Array.isArray(v) ? v.join(", ") : String(v)}
-                      </dd>
-                    </div>
-                  ))}
-              </dl>
+                {selected.text && (
+                  <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+                    {selected.text}
+                  </p>
+                )}
+                <dl className="mt-3 space-y-1 text-[11px] text-muted-foreground">
+                  {Object.entries(selected.metadata ?? {})
+                    .filter(([, v]) => v != null && v !== "" && String(v) !== "[]")
+                    .slice(0, 5)
+                    .map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-3">
+                        <dt className="shrink-0 capitalize">
+                          {k.replaceAll("_", " ")}
+                        </dt>
+                        <dd className="truncate font-mono text-foreground/80">
+                          {Array.isArray(v) ? v.join(", ") : String(v)}
+                        </dd>
+                      </div>
+                    ))}
+                </dl>
+              </div>
               {fileIdOf(selected) && (
                 <Button
                   size="sm"
                   variant="outline"
-                  className="mt-3 w-full"
+                  className="mt-3 w-full shrink-0"
                   disabled={locating}
                   onClick={() => {
                     // Switch tabs via the page's client state - NOT
