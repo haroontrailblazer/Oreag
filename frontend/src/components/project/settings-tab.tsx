@@ -1,5 +1,12 @@
 "use client"
 
+import {
+  ChatCircle,
+  Cube,
+  Gauge,
+  GearSix,
+  WarningOctagon,
+} from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
 import { useRef, useState } from "react"
 import { toast } from "@/lib/toast"
@@ -335,13 +342,67 @@ export function SettingsTab({
     router.push("/dashboard")
   }
 
+  const overview: { label: string; value: string }[] = [
+    {
+      label: "Answer model",
+      value: `${project.llm_provider} / ${project.llm_model}`,
+    },
+    {
+      label: "Embedding",
+      value: `${project.embedding_provider} / ${project.embedding_model}`,
+    },
+    { label: "Dimensions", value: `${project.embedding_dimensions}d` },
+    {
+      label: "Chunking",
+      value: `${project.chunk_size} / ${project.chunk_overlap}`,
+    },
+    { label: "Top-K", value: String(project.top_k) },
+    { label: "Files", value: String(project.file_count) },
+    { label: "Chunks", value: String(project.chunk_count) },
+    { label: "Status", value: project.status },
+  ]
+
   return (
     <div className="space-y-4">
+      {/* At-a-glance summary of the project's live configuration. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Gauge className="size-4 text-muted-foreground" />
+            Overview
+          </CardTitle>
+          <CardDescription>
+            This project&apos;s current configuration at a glance.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+          {overview.map((item) => (
+            <div
+              key={item.label}
+              className="rounded-lg border bg-muted/30 px-3 py-2.5"
+            >
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                {item.label}
+              </div>
+              <div
+                className="mt-0.5 truncate text-sm font-medium capitalize"
+                title={item.value}
+              >
+                {item.value}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1.5">
-              <CardTitle>General</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <GearSix className="size-4 text-muted-foreground" />
+                General
+              </CardTitle>
               <CardDescription>These take effect immediately.</CardDescription>
             </div>
             <BestPractices
@@ -413,7 +474,10 @@ export function SettingsTab({
 
       <Card>
         <CardHeader>
-          <CardTitle>Answer model (LLM)</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <ChatCircle className="size-4 text-muted-foreground" />
+            Answer model (LLM)
+          </CardTitle>
           <CardDescription>
             The chat model used to write answers. Only providers you have a key
             for appear - add more in{" "}
@@ -504,7 +568,10 @@ export function SettingsTab({
 
       <Card>
         <CardHeader>
-          <CardTitle>Indexing &amp; embedding</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Cube className="size-4 text-muted-foreground" />
+            Indexing &amp; embedding
+          </CardTitle>
           <CardDescription>
             The embedding model turns text into vectors. Changing the model or
             chunking re-processes every file; changing only the key is instant.
@@ -665,15 +732,21 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
-      <Card className="border-destructive/40">
+      <Card className="border-destructive/40 bg-destructive/[0.02]">
         <CardHeader>
-          <CardTitle className="text-destructive">Danger zone</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <WarningOctagon className="size-4" />
+            Danger zone
+          </CardTitle>
           <CardDescription>
             Deletes the project, all files, chunks, and API keys. Cannot be
             undone.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            Permanently remove <span className="font-medium text-foreground">{project.name}</span> and everything in it.
+          </p>
           <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
             Delete project
           </Button>
