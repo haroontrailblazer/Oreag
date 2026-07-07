@@ -10,6 +10,7 @@ import {
   FolderSimple,
   SealCheck,
   SignOut,
+  WarningCircle,
 } from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -97,6 +98,7 @@ export default function ProfilePage() {
   const [savingName, setSavingName] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [resending, setResending] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [signingOutAll, setSigningOutAll] = useState(false)
 
@@ -200,6 +202,21 @@ export default function ProfilePage() {
     })
   }
 
+  async function handleResendVerification() {
+    if (!email) return
+    setResending(true)
+    const { error } = await createClient().auth.resend({
+      type: "signup",
+      email,
+    })
+    setResending(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success("Verification email sent - check your inbox (and spam).")
+  }
+
   async function handleSignOut(scope: "local" | "global") {
     const setter = scope === "global" ? setSigningOutAll : setSigningOut
     setter(true)
@@ -295,8 +312,33 @@ export default function ProfilePage() {
                     <SealCheck className="size-3.5" weight="fill" />
                     Verified
                   </span>
+                ) : meta ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                    <WarningCircle className="size-3.5" weight="fill" />
+                    Unverified
+                  </span>
                 ) : null}
               </div>
+
+              {/* Verify prompt: only when the email isn't confirmed yet. */}
+              {meta && !meta.verified ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+                  <span className="min-w-0 flex-1">
+                    Your email isn&apos;t verified yet. Confirm it to secure your
+                    account and keep access if you ever need to reset your
+                    password.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 shrink-0 border-amber-400/60 bg-transparent"
+                    disabled={resending}
+                    onClick={handleResendVerification}
+                  >
+                    {resending ? <LoaderOne /> : "Resend email"}
+                  </Button>
+                </div>
+              ) : null}
 
               <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground">
                 <span>Member since {formatDate(meta?.createdAt ?? null)}</span>
@@ -354,6 +396,7 @@ export default function ProfilePage() {
 
         {/* Default grid stretch: the password card's bottom edge lines up
             with the Appearance card's bottom edge on desktop. */}
+        {/* Two cards per row from lg+, like the project Settings tab. */}
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Security */}
           <Card>
@@ -371,72 +414,70 @@ export default function ProfilePage() {
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
-            {/* Sessions */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Sessions</CardTitle>
-                <CardDescription>
-                  Sign out here, or everywhere at once if a device was lost or
-                  a session looks suspicious.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  disabled={signingOut || signingOutAll}
-                  onClick={() => handleSignOut("local")}
-                >
-                  {signingOut ? (
-                    <LoaderOne />
-                  ) : (
-                    <>
-                      <SignOut className="size-4" />
-                      Sign out
-                    </>
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={signingOut || signingOutAll}
-                  onClick={() => handleSignOut("global")}
-                >
-                  {signingOutAll ? <LoaderOne /> : "Sign out of all devices"}
-                </Button>
-              </CardContent>
-            </Card>
+          {/* Sessions */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Sessions</CardTitle>
+              <CardDescription>
+                Sign out here, or everywhere at once if a device was lost or a
+                session looks suspicious.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                disabled={signingOut || signingOutAll}
+                onClick={() => handleSignOut("local")}
+              >
+                {signingOut ? (
+                  <LoaderOne />
+                ) : (
+                  <>
+                    <SignOut className="size-4" />
+                    Sign out
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={signingOut || signingOutAll}
+                onClick={() => handleSignOut("global")}
+              >
+                {signingOutAll ? <LoaderOne /> : "Sign out of all devices"}
+              </Button>
+            </CardContent>
+          </Card>
 
-            {/* Appearance */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Appearance</CardTitle>
-                <CardDescription>
-                  Choose how Oreag looks on this device.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ThemeToggle />
-              </CardContent>
-            </Card>
-          </div>
+          {/* Appearance */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Appearance</CardTitle>
+              <CardDescription>
+                Choose how Oreag looks on this device.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ThemeToggle />
+            </CardContent>
+          </Card>
+
+          {/* Danger zone */}
+          <Card className="border-destructive/40 bg-destructive/[0.02]">
+            <CardHeader>
+              <CardTitle className="text-destructive">Danger zone</CardTitle>
+              <CardDescription>
+                Permanently delete your account and all of your projects, files,
+                indexed chunks, API keys and provider keys. This cannot be
+                undone.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button variant="destructive" onClick={() => setConfirmOpen(true)}>
+                Delete my account
+              </Button>
+            </CardContent>
+          </Card>
         </div>
-
-        {/* Danger zone */}
-        <Card className="border-destructive/40">
-          <CardHeader>
-            <CardTitle className="text-destructive">Danger zone</CardTitle>
-            <CardDescription>
-              Permanently delete your account and all of your projects, files,
-              indexed chunks, API keys and provider keys. This cannot be
-              undone.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button variant="destructive" onClick={() => setConfirmOpen(true)}>
-              Delete my account
-            </Button>
-          </CardContent>
-        </Card>
       </div>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

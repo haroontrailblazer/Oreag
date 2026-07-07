@@ -779,7 +779,7 @@ export function SettingsTab({
             </div>
             <Button
               variant="outline"
-              className="shrink-0"
+              className="shrink-0 border-amber-500/50 bg-amber-400/10 text-amber-700 hover:bg-amber-400/20 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
               onClick={() => setConfirmSuspend(true)}
             >
               {project.suspended ? "Resume" : "Suspend"}
@@ -859,9 +859,13 @@ export function SettingsTab({
               Cancel
             </Button>
             <Button
-              variant={project.suspended ? "default" : "destructive"}
               onClick={handleSuspend}
               disabled={suspending}
+              className={
+                project.suspended
+                  ? undefined
+                  : "bg-amber-500 text-white hover:bg-amber-500/90"
+              }
             >
               {suspending ? (
                 <LoaderOne />
