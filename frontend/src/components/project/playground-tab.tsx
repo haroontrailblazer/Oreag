@@ -502,12 +502,13 @@ export function PlaygroundTab({ project }: { project: Project }) {
   return (
     // Fixed frame: header (title) and the input row stay put; only the
     // conversation in the middle scrolls - the same on mobile and desktop.
-    <Card className="flex h-full min-h-0 flex-col">
+    // Tighter padding + hidden description on mobile give the answers more room.
+    <Card className="flex h-full min-h-0 flex-col gap-3 py-3 sm:gap-6 sm:py-6">
       <CardHeader className="shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1.5">
             <CardTitle>Test your RAG</CardTitle>
-            <CardDescription>
+            <CardDescription className="hidden sm:block">
               Ask a question with the same pipeline your API consumers will use.
               Follow-ups remember the conversation.
             </CardDescription>
@@ -683,7 +684,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 }
               }
             }}
-            className="min-h-10 resize-none border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
+            className="styled-scrollbar max-h-32 min-h-10 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
           />
           <div className="flex items-center justify-between gap-2 px-1 pt-1">
             <div className="flex min-w-0 items-center gap-2">
