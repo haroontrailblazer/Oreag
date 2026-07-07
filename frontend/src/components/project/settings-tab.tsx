@@ -395,6 +395,8 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
+      {/* Two cards per row from lg+; items-start so uneven heights don't stretch. */}
+      <div className="grid items-start gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
@@ -752,6 +754,7 @@ export function SettingsTab({
           </Button>
         </CardContent>
       </Card>
+      </div>
 
       <Dialog open={confirmReindex} onOpenChange={setConfirmReindex}>
         <DialogContent>
