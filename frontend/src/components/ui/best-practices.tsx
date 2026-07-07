@@ -14,6 +14,9 @@ import { cn } from "@/lib/utils"
 export interface BestPracticeTip {
   title: string
   detail: string
+  // A small illustration for the tip (see best-practice-visuals), rendered
+  // above the title like the Visualize "Dimensions & this space" diagram.
+  visual?: ReactNode
 }
 
 /**
@@ -54,9 +57,14 @@ export function BestPractices({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
         <div className="border-b px-4 py-2.5 text-sm font-semibold">{title}</div>
-        <div className="styled-scrollbar max-h-80 space-y-3 overflow-y-auto px-4 py-3">
+        <div className="styled-scrollbar max-h-80 space-y-3.5 overflow-y-auto px-4 py-3">
           {tips.map((tip) => (
-            <div key={tip.title} className="space-y-0.5">
+            <div key={tip.title} className="space-y-1">
+              {tip.visual ? (
+                <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-muted-foreground">
+                  {tip.visual}
+                </div>
+              ) : null}
               <p className="text-xs font-medium">{tip.title}</p>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {tip.detail}

@@ -259,9 +259,11 @@ export default function ProfilePage() {
       </div>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pb-1">
+        {/* Top row: Identity beside Sessions, two cards wide. */}
+        <div className="grid gap-6 lg:grid-cols-2">
         {/* Identity: avatar with hover-to-change, name, email, account meta. */}
         <Card>
-          <CardContent className="flex flex-col gap-6 p-6 sm:flex-row sm:items-center">
+          <CardContent className="flex flex-col gap-6 p-6">
             <div className="group relative shrink-0 self-center">
               <UserAvatar
                 key={previewSrc ?? "none"}
@@ -361,43 +363,76 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
 
-        {/* Account-wide usage at a glance. */}
+        {/* Sessions - sits beside Identity in the top row. */}
         <Card>
           <CardHeader>
-            <CardTitle>Usage overview</CardTitle>
+            <CardTitle>Sessions</CardTitle>
             <CardDescription>
-              Everything this account has indexed and served, across all
-              projects.
+              Sign out here, or everywhere at once if a device was lost or a
+              session looks suspicious.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatTile
-              icon={<FolderSimple className="size-4.5" />}
-              label="Projects"
-              value={totals?.projects ?? null}
-            />
-            <StatTile
-              icon={<Files className="size-4.5" />}
-              label="Files indexed"
-              value={totals?.files ?? null}
-            />
-            <StatTile
-              icon={<Cube className="size-4.5" />}
-              label="Chunks embedded"
-              value={totals?.chunks ?? null}
-            />
-            <StatTile
-              icon={<ChatCircleText className="size-4.5" />}
-              label="Queries answered"
-              value={totals?.queries ?? null}
-            />
+          <CardContent className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={signingOut || signingOutAll}
+              onClick={() => handleSignOut("local")}
+            >
+              {signingOut ? (
+                <LoaderOne />
+              ) : (
+                <>
+                  <SignOut className="size-4" />
+                  Sign out
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={signingOut || signingOutAll}
+              onClick={() => handleSignOut("global")}
+            >
+              {signingOutAll ? <LoaderOne /> : "Sign out of all devices"}
+            </Button>
           </CardContent>
         </Card>
+        </div>
 
-        {/* Default grid stretch: the password card's bottom edge lines up
-            with the Appearance card's bottom edge on desktop. */}
         {/* Two cards per row from lg+, like the project Settings tab. */}
         <div className="grid gap-6 lg:grid-cols-2">
+          {/* Account-wide usage at a glance. */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Usage overview</CardTitle>
+              <CardDescription>
+                Everything this account has indexed and served, across all
+                projects.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-3">
+              <StatTile
+                icon={<FolderSimple className="size-4.5" />}
+                label="Projects"
+                value={totals?.projects ?? null}
+              />
+              <StatTile
+                icon={<Files className="size-4.5" />}
+                label="Files indexed"
+                value={totals?.files ?? null}
+              />
+              <StatTile
+                icon={<Cube className="size-4.5" />}
+                label="Chunks embedded"
+                value={totals?.chunks ?? null}
+              />
+              <StatTile
+                icon={<ChatCircleText className="size-4.5" />}
+                label="Queries answered"
+                value={totals?.queries ?? null}
+              />
+            </CardContent>
+          </Card>
+
           {/* Security */}
           <Card>
             <CardHeader>
@@ -411,40 +446,6 @@ export default function ProfilePage() {
                 submitLabel="Update password"
                 onSuccess={() => toast.success("Password updated")}
               />
-            </CardContent>
-          </Card>
-
-          {/* Sessions */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Sessions</CardTitle>
-              <CardDescription>
-                Sign out here, or everywhere at once if a device was lost or a
-                session looks suspicious.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                disabled={signingOut || signingOutAll}
-                onClick={() => handleSignOut("local")}
-              >
-                {signingOut ? (
-                  <LoaderOne />
-                ) : (
-                  <>
-                    <SignOut className="size-4" />
-                    Sign out
-                  </>
-                )}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={signingOut || signingOutAll}
-                onClick={() => handleSignOut("global")}
-              >
-                {signingOutAll ? <LoaderOne /> : "Sign out of all devices"}
-              </Button>
             </CardContent>
           </Card>
 

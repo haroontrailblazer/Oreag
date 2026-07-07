@@ -43,6 +43,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { api, fetcher } from "@/lib/api"
+import {
+  CostViz,
+  DimensionsViz,
+  KeyViz,
+  TopKViz,
+} from "@/components/ui/best-practice-visuals"
 import { dimensionOptions, providerOf, providerUsable } from "@/lib/models"
 import { cn } from "@/lib/utils"
 import type { ModelsResponse, Project } from "@/lib/types"
@@ -430,26 +436,31 @@ export function SettingsTab({
             <BestPractices
               tips={[
                 {
+                  visual: <CostViz />,
                   title: "Model switches re-embed everything",
                   detail:
                     "Chunks are wiped and re-ingested, and memory embeddings are re-embedded with the new model. Budget embedding cost before switching on a large project.",
                 },
                 {
+                  visual: <DimensionsViz />,
                   title: "Shrinking dimensions is free",
                   detail:
                     "Same Matryoshka model at a smaller size (e.g. 3072 to 1024) truncates stored vectors in place - instant, no API calls. Growing back requires a full re-index.",
                 },
                 {
+                  visual: <KeyViz />,
                   title: "Key changes are instant",
                   detail:
                     "Replacing a provider key never re-indexes anything - only model and chunking changes do.",
                 },
                 {
+                  visual: <KeyViz />,
                   title: "Project keys override account keys",
                   detail:
                     "A key set here wins over the account-level key for this project only - handy for separate billing or rate limits.",
                 },
                 {
+                  visual: <TopKViz />,
                   title: "top_k trades recall for noise",
                   detail:
                     "More retrieved chunks catch more facts but dilute the context. 5 suits focused questions; raise it for broad, multi-part ones.",

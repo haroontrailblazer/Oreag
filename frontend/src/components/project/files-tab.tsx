@@ -16,6 +16,11 @@ import useSWR from "swr"
 
 import { AddFilesDialog } from "@/components/project/add-files-dialog"
 import { BestPractices } from "@/components/ui/best-practices"
+import {
+  ChunkingViz,
+  CostViz,
+  RetryViz,
+} from "@/components/ui/best-practice-visuals"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
@@ -326,26 +331,31 @@ export function FilesTab({
           <BestPractices
             tips={[
               {
+                visual: <ChunkingViz />,
                 title: "Mind the 50 MB limit",
                 detail:
                   "About 30 file types are supported (PDF, DOCX, PPTX, XLSX, HTML, images, audio...). Everything is converted to Markdown before chunking, so clean source documents index best.",
               },
               {
+                visual: <ChunkingViz />,
                 title: "Chunk size: start at 1000 / 200",
                 detail:
                   "The defaults suit most documents. Use smaller chunks (300-500) for FAQs and short facts, larger (1500-2000) for narrative or legal text where context matters. Overlap of ~20% protects facts that straddle a cut.",
               },
               {
+                visual: <ChunkingViz />,
                 title: "Per-file overrides are free",
                 detail:
                   "Chunking set in the upload dialog applies only to those files - no need to reindex the whole project to experiment.",
               },
               {
+                visual: <RetryViz />,
                 title: "Retry beats re-upload",
                 detail:
                   "A failed file keeps its stored original - fix the cause (usually a provider key) and hit Retry instead of uploading again.",
               },
               {
+                visual: <CostViz />,
                 title: "Re-indexing costs embeddings",
                 detail:
                   "Changing the project's chunking or embedding model re-embeds every chunk. Exception: shrinking the same Matryoshka model's dimensions is instant and free.",

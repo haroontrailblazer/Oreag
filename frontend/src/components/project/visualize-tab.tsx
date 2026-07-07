@@ -14,6 +14,7 @@ import useSWR from "swr"
 
 import { Badge } from "@/components/ui/badge"
 import { BestPractices } from "@/components/ui/best-practices"
+import { GraphViz } from "@/components/ui/best-practice-visuals"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -76,21 +77,25 @@ const LEGEND = [
 
 const BEST_PRACTICE_TIPS = [
   {
+    visual: <GraphViz />,
     title: "Read the clusters",
     detail:
       "Nodes that huddle together are semantically similar. A file whose chunks sit far from everything else may be off-topic for this project - or a unique source worth keeping.",
   },
   {
+    visual: <GraphViz />,
     title: "Edges are relationships",
     detail:
       "Structural edges connect files to their chunks; similarity edges link related content across files and memories. Dense cross-file linking means your documents reinforce each other.",
   },
   {
+    visual: <GraphViz />,
     title: "Hover, then click",
     detail:
       "Hover shows a quick tooltip; clicking opens the details panel with a View file shortcut that jumps straight to the document.",
   },
   {
+    visual: <GraphViz />,
     title: "Watch it after big uploads",
     detail:
       "Re-open this view after indexing new files to sanity-check where they landed in the knowledge space.",
