@@ -231,8 +231,9 @@ export default function ProfilePage() {
 
   return (
     // Fixed frame like every other page: the title never moves, the cards
-    // scroll in their own container.
-    <div className="flex h-[calc(100dvh-6.25rem)] flex-col gap-6 md:h-[calc(100dvh-4rem)]">
+    // scroll in their own container. overflow-hidden pins the frame so only the
+    // inner region can scroll - the page itself never moves.
+    <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-6 overflow-hidden md:h-[calc(100dvh-4rem)]">
       <div className="shrink-0">
         <h1 className="text-2xl font-semibold">Profile</h1>
         <p className="text-sm text-muted-foreground">

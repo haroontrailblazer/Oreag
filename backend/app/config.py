@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # Keyed on project+model+top_k+content+question, so new files/memories
     # invalidate it. Entries also expire after the TTL.
     query_cache_enabled: bool = True
-    query_cache_ttl_seconds: int = 300     # 5 minutes
+    query_cache_ttl_seconds: int = 3600    # L1 exact-match cache - 1 hour
     query_cache_max_entries: int = 512     # in-memory LRU cap across all projects
 
     # Semantic cache (L2, pgvector): also serve SIMILAR questions from cache,
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     # query runs for real. Scoped per project + models + content signature.
     semantic_cache_enabled: bool = True
     semantic_cache_min_similarity: float = 0.75
-    semantic_cache_ttl_seconds: int = 3600  # 1 hour
+    semantic_cache_ttl_seconds: int = 86400  # L2 semantic cache - 24 hours
 
     # Optional Redis: when set, the CAG cache AND conversation memory use Redis
     # (shared across workers, survives restarts); otherwise they fall back to an
