@@ -46,6 +46,23 @@ class TestCacheKey:
         b = cache_key(project, "what is x?", 5, "10:0")
         assert a == b
 
+    def test_same_question_in_any_case_shares_the_l1_entry(self):
+        # An exact repeat asked in caps, lower, or with different trailing
+        # punctuation must map to ONE L1 key (a true exact-match hit), not fall
+        # through to the semantic layer.
+        from app.services.query_cache import cache_key, normalize_question
+
+        project = _project()
+        variants = [
+            "what is pytorch",
+            "WHAT IS PYTORCH",
+            "What Is PyTorch?",
+            "  what   is   pytorch!!  ",
+        ]
+        keys = {cache_key(project, v, 5, "10:0") for v in variants}
+        assert len(keys) == 1
+        assert normalize_question("What Is PyTorch?") == "what is pytorch"
+
     def test_different_question_differs(self):
         from app.services.query_cache import cache_key
 

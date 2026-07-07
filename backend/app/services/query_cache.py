@@ -25,15 +25,27 @@ from collections.abc import Callable
 from typing import Any
 
 
+def normalize_question(question: str) -> str:
+    """Canonical form of a question for the exact-match (L1) cache.
+
+    Lower-cases, collapses runs of whitespace, and strips surrounding
+    punctuation, so "What is PyTorch?", "what is pytorch", and "WHAT  IS
+    PYTORCH!" all map to one L1 entry (an exact repeat is case- and
+    punctuation-insensitive). Anything beyond trivial rewording still misses
+    L1 and is caught by the semantic (L2) layer.
+    """
+    return " ".join(question.lower().split()).strip(" ?!.,;:")
+
+
 def cache_key(project, question: str, top_k: int, content_signature: str) -> str:
     """Build the cache key for a query.
 
     Everything that can change the answer is part of the key: the project, the
     chat + embedding models, top_k, a signature of the indexed content, and the
-    question (lower-cased, whitespace-collapsed, so trivial spelling differences
-    share an entry).
+    normalized question (see ``normalize_question``), so trivial case/whitespace/
+    punctuation differences share an entry.
     """
-    normalized = " ".join(question.lower().split())
+    normalized = normalize_question(question)
     return "|".join(
         [
             str(project.id),

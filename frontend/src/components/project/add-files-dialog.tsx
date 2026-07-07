@@ -184,8 +184,8 @@ export function AddFilesDialog({
           aria-label="Add files"
           title="Add files"
           // Square icon button on mobile (matches the 3-dots actions button);
-          // full padded label from sm+.
-          className="w-9 shrink-0 p-0 sm:w-auto sm:px-4"
+          // the default padded label from sm+ (desktop untouched).
+          className="shrink-0 max-sm:w-9 max-sm:p-0"
         >
           <FileUp className="size-4" />
           <span className="hidden sm:inline">Add files</span>
