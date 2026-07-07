@@ -27,13 +27,22 @@ const STATUS_GLOW: Record<Project["status"], string> = {
   error: "#ef4444",
 }
 
-function StatusButton({ status }: { status: Project["status"] }) {
+function StatusButton({
+  status,
+  suspended,
+}: {
+  status: Project["status"]
+  suspended?: boolean
+}) {
+  // A suspended project reads "suspended" (amber) regardless of index state.
+  const label = suspended ? "suspended" : status
+  const glow = suspended ? "#f59e0b" : STATUS_GLOW[status]
   return (
     <span
       className="status-btn shrink-0 capitalize"
-      style={{ "--glow": STATUS_GLOW[status] } as CSSProperties}
+      style={{ "--glow": glow } as CSSProperties}
     >
-      <span>{status}</span>
+      <span>{label}</span>
     </span>
   )
 }
@@ -164,7 +173,10 @@ export default function DashboardPage() {
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="truncate">{project.name}</CardTitle>
-                    <StatusButton status={project.status} />
+                    <StatusButton
+                      status={project.status}
+                      suspended={project.suspended}
+                    />
                   </div>
                   {project.description && (
                     <CardDescription className="line-clamp-2">

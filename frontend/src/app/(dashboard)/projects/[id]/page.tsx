@@ -149,6 +149,11 @@ export default function ProjectPage({
     <div className="flex h-[calc(100dvh-6.25rem)] flex-col gap-4 md:h-[calc(100dvh-4rem)] md:gap-6">
       <div className="flex flex-wrap items-center gap-3 shrink-0">
         <h1 className="text-2xl font-semibold">{project.name}</h1>
+        {project.suspended && (
+          <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+            Suspended
+          </span>
+        )}
         {project.status === "indexing" && (
           <SquaresLoader size={4} className="text-muted-foreground" />
         )}

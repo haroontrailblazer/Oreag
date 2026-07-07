@@ -82,12 +82,15 @@ function SidebarLink({
 function ProjectNavIndicator({
   projectId,
   status,
+  suspended,
 }: {
   projectId: string
   status: Project["status"]
+  suspended?: boolean
 }) {
   const { pending } = useLinkStatus()
   const navigating = useProjectNavPending(projectId, pending)
+  const tone = suspended ? "fill-amber-500 text-amber-500" : statusTone[status]
   return (
     <span className="flex size-3.5 shrink-0 items-center justify-center">
       {navigating ? (
@@ -95,8 +98,8 @@ function ProjectNavIndicator({
       ) : (
         <Circle
           weight="fill"
-          className={cn("size-2.5", statusTone[status])}
-          aria-label={status}
+          className={cn("size-2.5", tone)}
+          aria-label={suspended ? "suspended" : status}
         />
       )}
     </span>
@@ -121,7 +124,11 @@ function ProjectLink({
     >
       <FolderKanban className="size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{project.name}</span>
-      <ProjectNavIndicator projectId={project.id} status={project.status} />
+      <ProjectNavIndicator
+        projectId={project.id}
+        status={project.status}
+        suspended={project.suspended}
+      />
     </Link>
   )
 }
@@ -236,10 +243,13 @@ function SidebarBody() {
     fetcher
   )
 
-  // Clear the search box when switching between the projects/files contexts.
-  useEffect(() => {
+  // Clear the search box when switching between the projects/files contexts -
+  // adjusted during render (not a setState-in-effect).
+  const [lastProjectId, setLastProjectId] = useState(projectId)
+  if (projectId !== lastProjectId) {
+    setLastProjectId(projectId)
     setQuery("")
-  }, [projectId])
+  }
 
   // Briefly spin a file row while the Files tab scrolls to / highlights it.
   useEffect(() => {
@@ -475,10 +485,13 @@ export function DashboardSidebar() {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
 
-  // Close the mobile drawer whenever the route changes.
-  useEffect(() => {
+  // Close the mobile drawer whenever the route changes - adjusted during
+  // render (not a setState-in-effect).
+  const [lastPathname, setLastPathname] = useState(pathname)
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname)
     setMenuOpen(false)
-  }, [pathname])
+  }
 
   return (
     <>
