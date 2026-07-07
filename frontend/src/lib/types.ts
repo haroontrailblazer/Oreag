@@ -11,6 +11,8 @@ export interface Project {
   llm_model: string
   top_k: number
   status: "empty" | "indexing" | "ready" | "error"
+  // When true the public /v1 API + MCP are blocked (403) until resumed.
+  suspended: boolean
   created_at: string
   updated_at: string
   file_count: number

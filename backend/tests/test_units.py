@@ -1006,6 +1006,38 @@ class TestIngestionDeleteRace:
         assert db.commits == 1
 
 
+class TestProjectSuspend:
+    """A suspended project keeps all its data but blocks the public /v1 API and
+    MCP (both funnel through rag_v1._get_project)."""
+
+    class _DB:
+        def __init__(self, project):
+            self._project = project
+
+        def get(self, model, key):
+            return self._project
+
+    def test_get_project_blocks_when_suspended(self):
+        from fastapi import HTTPException
+
+        from app.routers.rag_v1 import _get_project
+
+        project = Project(id=uuid.uuid4(), suspended=True)
+        with pytest.raises(HTTPException) as exc:
+            _get_project(self._DB(project), project.id)
+        assert exc.value.status_code == 403
+
+    def test_get_project_allows_when_active(self):
+        from app.routers.rag_v1 import _get_project
+
+        project = Project(id=uuid.uuid4(), suspended=False)
+        assert _get_project(self._DB(project), project.id) is project
+
+    def test_project_out_defaults_suspended_false(self):
+        cols = set(Project.__table__.columns.keys())
+        assert "suspended" in cols
+
+
 class TestApiSurface:
     def test_healthz(self):
         client = TestClient(app)

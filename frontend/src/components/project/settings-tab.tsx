@@ -86,6 +86,8 @@ export function SettingsTab({
   const [confirmReindex, setConfirmReindex] = useState(false)
   const [reindexing, setReindexing] = useState(false)
 
+  const [confirmSuspend, setConfirmSuspend] = useState(false)
+  const [suspending, setSuspending] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const deleteDone = useRef(false)
@@ -315,6 +317,24 @@ export function SettingsTab({
     }
   }
 
+  async function handleSuspend() {
+    const resume = project.suspended
+    setSuspending(true)
+    try {
+      await api(`/api/projects/${project.id}/${resume ? "resume" : "suspend"}`, {
+        method: "POST",
+      })
+      toast.success(resume ? "Project resumed" : "Project suspended")
+      setConfirmSuspend(false)
+      onChanged()
+      globalMutate("/api/projects")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Action failed")
+    } finally {
+      setSuspending(false)
+    }
+  }
+
   async function handleDelete() {
     deleteDone.current = false
     setDeleting(true)
@@ -395,8 +415,8 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
-      {/* Two cards per row from lg+; items-start so uneven heights don't stretch. */}
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      {/* Two cards per row from lg+; stretch so each row's cards share a height. */}
+      <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
@@ -741,17 +761,47 @@ export function SettingsTab({
             Danger zone
           </CardTitle>
           <CardDescription>
-            Deletes the project, all files, chunks, and API keys. Cannot be
-            undone.
+            Suspend to pause access, or delete to remove the project entirely.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            Permanently remove <span className="font-medium text-foreground">{project.name}</span> and everything in it.
-          </p>
-          <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
-            Delete project
-          </Button>
+        <CardContent className="space-y-4">
+          {/* Suspend / resume - reversible, above the destructive delete. */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">
+                {project.suspended ? "Resume project" : "Suspend project"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {project.suspended
+                  ? "This project is suspended - its keys and API are blocked. Resume to reactivate."
+                  : "Pause all API keys and external access (public API + MCP). Your data is kept; reversible any time."}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              className="shrink-0"
+              onClick={() => setConfirmSuspend(true)}
+            >
+              {project.suspended ? "Resume" : "Suspend"}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-destructive/20 pt-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-destructive">Delete project</p>
+              <p className="text-xs text-muted-foreground">
+                Permanently remove{" "}
+                <span className="font-medium text-foreground">{project.name}</span>{" "}
+                and everything in it. Cannot be undone.
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              className="shrink-0"
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete project
+            </Button>
+          </div>
         </CardContent>
       </Card>
       </div>
@@ -778,6 +828,48 @@ export function SettingsTab({
             </Button>
             <Button onClick={handleReindex} disabled={reindexing}>
               {reindexing ? <LoaderOne /> : instantShrink ? "Apply" : "Re-index"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmSuspend}
+        onOpenChange={(open) => {
+          if (!open && !suspending) setConfirmSuspend(false)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {project.suspended ? "Resume this project?" : "Suspend this project?"}
+            </DialogTitle>
+            <DialogDescription>
+              {project.suspended
+                ? "The project's API keys and endpoints will start working again immediately."
+                : "All of this project's API keys stop working and the public API + MCP return 403 until you resume. Files, chunks, memories and keys are kept - nothing is deleted."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmSuspend(false)}
+              disabled={suspending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={project.suspended ? "default" : "destructive"}
+              onClick={handleSuspend}
+              disabled={suspending}
+            >
+              {suspending ? (
+                <LoaderOne />
+              ) : project.suspended ? (
+                "Resume project"
+              ) : (
+                "Suspend project"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

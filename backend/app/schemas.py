@@ -67,6 +67,7 @@ class ProjectOut(BaseModel):
     llm_model: str
     top_k: int
     status: str
+    suspended: bool = False
     created_at: datetime
     updated_at: datetime
     file_count: int = 0

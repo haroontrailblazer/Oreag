@@ -168,6 +168,27 @@ def update_project(
     return _to_out(project, _counts(db, [project.id]))
 
 
+@router.post("/{project_id}/suspend", response_model=ProjectOut)
+def suspend_project(
+    project: Project = Depends(get_owned_project), db: Session = Depends(get_db)
+):
+    """Pause a project: its keys and the public /v1 API + MCP stop working (403)
+    until resumed. Nothing is deleted."""
+    project.suspended = True
+    db.commit()
+    return _to_out(project, _counts(db, [project.id]))
+
+
+@router.post("/{project_id}/resume", response_model=ProjectOut)
+def resume_project(
+    project: Project = Depends(get_owned_project), db: Session = Depends(get_db)
+):
+    """Reactivate a suspended project - keys and external access work again."""
+    project.suspended = False
+    db.commit()
+    return _to_out(project, _counts(db, [project.id]))
+
+
 @router.delete("/{project_id}", status_code=204)
 def delete_project(
     project: Project = Depends(get_owned_project), db: Session = Depends(get_db)

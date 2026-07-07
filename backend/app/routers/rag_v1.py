@@ -34,6 +34,11 @@ def _get_project(db: Session, project_id: uuid.UUID) -> Project:
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(404, "Project not found")
+    if project.suspended:
+        raise HTTPException(
+            403,
+            "This project is suspended. The owner can resume it from the dashboard.",
+        )
     return project
 
 
