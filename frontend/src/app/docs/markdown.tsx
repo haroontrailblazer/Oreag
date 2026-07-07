@@ -38,7 +38,7 @@ export function Markdown({
   children: string
 }) {
   return (
-    <div className="prose prose-lg max-w-[68ch] dark:prose-invert prose-headings:scroll-mt-24 prose-h2:mt-0 prose-h2:border-b prose-h2:pb-3 prose-h2:text-3xl prose-h2:font-bold prose-h2:tracking-tight prose-h3:mt-10 prose-h3:text-xl prose-h3:font-semibold prose-h3:tracking-tight prose-p:leading-[1.8] prose-p:text-foreground/90 prose-li:leading-[1.8] prose-li:my-1 prose-li:text-foreground/90 prose-strong:text-foreground prose-strong:font-semibold prose-a:font-medium prose-a:text-sky-600 dark:prose-a:text-sky-400 prose-a:underline-offset-2 prose-table:text-base prose-code:before:content-none prose-code:after:content-none">
+    <div className="prose max-w-[68ch] dark:prose-invert prose-headings:scroll-mt-24 prose-h2:mt-0 prose-h2:border-b prose-h2:pb-3 prose-h2:text-2xl prose-h2:font-bold prose-h2:tracking-tight prose-h3:mt-10 prose-h3:text-lg prose-h3:font-semibold prose-h3:tracking-tight prose-p:leading-[1.8] prose-p:text-foreground/90 prose-li:leading-[1.8] prose-li:my-1 prose-li:text-foreground/90 prose-strong:text-foreground prose-strong:font-semibold prose-a:font-medium prose-a:text-sky-600 dark:prose-a:text-sky-400 prose-a:underline-offset-2 prose-table:text-sm prose-code:before:content-none prose-code:after:content-none sm:prose-lg sm:prose-h2:text-3xl sm:prose-h3:text-xl sm:prose-table:text-base">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -50,6 +50,13 @@ export function Markdown({
             <h4 id={`${sectionId}-${slug(nodeText(children))}`}>{children}</h4>
           ),
           pre: ({ children }) => <>{children}</>,
+          // Wide tables scroll inside their own box on mobile instead of
+          // forcing the whole page to scroll sideways.
+          table: ({ children }) => (
+            <div className="my-6 overflow-x-auto">
+              <table className="!my-0">{children}</table>
+            </div>
+          ),
           code: ({ className, children }) => {
             const text = String(children ?? "")
             const lang = /language-(\w+)/.exec(className || "")?.[1]
