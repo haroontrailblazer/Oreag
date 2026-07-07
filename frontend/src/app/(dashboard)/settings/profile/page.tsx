@@ -259,17 +259,15 @@ export default function ProfilePage() {
       </div>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pb-1">
-        {/* Top row: Identity beside Sessions, two cards wide. */}
-        <div className="grid gap-6 lg:grid-cols-2">
-        {/* Identity: avatar with hover-to-change, name, email, account meta. */}
+        {/* Identity hero: avatar and account details side by side, full width. */}
         <Card>
-          <CardContent className="flex flex-col gap-6 p-6">
-            <div className="group relative shrink-0 self-center">
+          <CardContent className="flex flex-col items-center gap-6 p-6 text-center sm:flex-row sm:items-start sm:gap-8 sm:p-8 sm:text-left">
+            <div className="group relative shrink-0">
               <UserAvatar
                 key={previewSrc ?? "none"}
                 src={previewSrc}
                 name={name || email}
-                className="size-28 text-3xl"
+                className="size-24 text-3xl sm:size-28"
               />
               <button
                 type="button"
@@ -292,7 +290,7 @@ export default function ProfilePage() {
             <div className="min-w-0 flex-1 space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="display-name">Display name</Label>
-                <div className="flex gap-2">
+                <div className="flex justify-center gap-2 sm:justify-start">
                   <Input
                     id="display-name"
                     value={name}
@@ -307,7 +305,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-sm">
+              <div className="flex flex-wrap items-center justify-center gap-2 text-sm sm:justify-start">
                 <span className="text-muted-foreground">{email ?? "-"}</span>
                 {meta?.verified ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
@@ -324,7 +322,7 @@ export default function ProfilePage() {
 
               {/* Verify prompt: only when the email isn't confirmed yet. */}
               {meta && !meta.verified ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-left text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
                   <span className="min-w-0 flex-1">
                     Your email isn&apos;t verified yet. Confirm it to secure your
                     account and keep access if you ever need to reset your
@@ -342,7 +340,7 @@ export default function ProfilePage() {
                 </div>
               ) : null}
 
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground sm:justify-start">
                 <span>Member since {formatDate(meta?.createdAt ?? null)}</span>
                 <span>Last sign-in {formatDate(meta?.lastSignIn ?? null)}</span>
                 <button
@@ -363,76 +361,41 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
 
-        {/* Sessions - sits beside Identity in the top row. */}
+        {/* Account-wide usage: full-width row of stat tiles. */}
         <Card>
           <CardHeader>
-            <CardTitle>Sessions</CardTitle>
+            <CardTitle>Usage overview</CardTitle>
             <CardDescription>
-              Sign out here, or everywhere at once if a device was lost or a
-              session looks suspicious.
+              Everything this account has indexed and served, across all
+              projects.
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              disabled={signingOut || signingOutAll}
-              onClick={() => handleSignOut("local")}
-            >
-              {signingOut ? (
-                <LoaderOne />
-              ) : (
-                <>
-                  <SignOut className="size-4" />
-                  Sign out
-                </>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={signingOut || signingOutAll}
-              onClick={() => handleSignOut("global")}
-            >
-              {signingOutAll ? <LoaderOne /> : "Sign out of all devices"}
-            </Button>
+          <CardContent className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatTile
+              icon={<FolderSimple className="size-4.5" />}
+              label="Projects"
+              value={totals?.projects ?? null}
+            />
+            <StatTile
+              icon={<Files className="size-4.5" />}
+              label="Files indexed"
+              value={totals?.files ?? null}
+            />
+            <StatTile
+              icon={<Cube className="size-4.5" />}
+              label="Chunks embedded"
+              value={totals?.chunks ?? null}
+            />
+            <StatTile
+              icon={<ChatCircleText className="size-4.5" />}
+              label="Queries answered"
+              value={totals?.queries ?? null}
+            />
           </CardContent>
         </Card>
-        </div>
 
-        {/* Two cards per row from lg+, like the project Settings tab. */}
+        {/* Two balanced rows of paired cards, like the project Settings tab. */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Account-wide usage at a glance. */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Usage overview</CardTitle>
-              <CardDescription>
-                Everything this account has indexed and served, across all
-                projects.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-3">
-              <StatTile
-                icon={<FolderSimple className="size-4.5" />}
-                label="Projects"
-                value={totals?.projects ?? null}
-              />
-              <StatTile
-                icon={<Files className="size-4.5" />}
-                label="Files indexed"
-                value={totals?.files ?? null}
-              />
-              <StatTile
-                icon={<Cube className="size-4.5" />}
-                label="Chunks embedded"
-                value={totals?.chunks ?? null}
-              />
-              <StatTile
-                icon={<ChatCircleText className="size-4.5" />}
-                label="Queries answered"
-                value={totals?.queries ?? null}
-              />
-            </CardContent>
-          </Card>
-
           {/* Security */}
           <Card>
             <CardHeader>
@@ -446,6 +409,40 @@ export default function ProfilePage() {
                 submitLabel="Update password"
                 onSuccess={() => toast.success("Password updated")}
               />
+            </CardContent>
+          </Card>
+
+          {/* Sessions */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Sessions</CardTitle>
+              <CardDescription>
+                Sign out here, or everywhere at once if a device was lost or a
+                session looks suspicious.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                disabled={signingOut || signingOutAll}
+                onClick={() => handleSignOut("local")}
+              >
+                {signingOut ? (
+                  <LoaderOne />
+                ) : (
+                  <>
+                    <SignOut className="size-4" />
+                    Sign out
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={signingOut || signingOutAll}
+                onClick={() => handleSignOut("global")}
+              >
+                {signingOutAll ? <LoaderOne /> : "Sign out of all devices"}
+              </Button>
             </CardContent>
           </Card>
 
