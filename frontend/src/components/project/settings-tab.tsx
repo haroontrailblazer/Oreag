@@ -422,8 +422,11 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
-      {/* Two cards per row from lg+; stretch so each row's cards share a height. */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* Two cards per row from lg+; stretch so each row's cards share a height.
+          grid-cols-1 is load-bearing on mobile: without a template the implicit
+          auto track sizes to the widest card's min-content (long model labels),
+          overflowing the viewport - minmax(0,1fr) clamps it. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
@@ -525,7 +528,7 @@ export function SettingsTab({
           <div className="space-y-2">
             <Label>Model</Label>
             <Select value={llm} onValueChange={changeLlm}>
-              <SelectTrigger className={cn(!llmCurrentUsable && "text-muted-foreground")}>
+              <SelectTrigger className={cn("w-full", !llmCurrentUsable && "text-muted-foreground")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -638,7 +641,7 @@ export function SettingsTab({
           <div className="space-y-2">
             <Label>Embedding model</Label>
             <Select value={embedding} onValueChange={changeEmbedding}>
-              <SelectTrigger className={cn(!embCurrentUsable && "text-muted-foreground")}>
+              <SelectTrigger className={cn("w-full", !embCurrentUsable && "text-muted-foreground")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -689,7 +692,7 @@ export function SettingsTab({
                 value={String(embDimensions)}
                 onValueChange={(v) => setEmbDimensions(Number(v))}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

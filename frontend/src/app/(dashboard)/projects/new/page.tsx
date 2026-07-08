@@ -325,7 +325,7 @@ export default function NewProjectPage() {
               <Label>Embedding model</Label>
               <Select value={embedding} onValueChange={setEmbedding}>
                 <SelectTrigger
-                  className={cn(!embAvailable && "text-muted-foreground")}
+                  className={cn("w-full", !embAvailable && "text-muted-foreground")}
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -373,7 +373,7 @@ export default function NewProjectPage() {
                   value={String(effectiveDims)}
                   onValueChange={(v) => setEmbDimensions(Number(v))}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -396,7 +396,7 @@ export default function NewProjectPage() {
               <Label>Answer model (LLM)</Label>
               <Select value={llm} onValueChange={setLlm}>
                 <SelectTrigger
-                  className={cn(!llmAvailable && "text-muted-foreground")}
+                  className={cn("w-full", !llmAvailable && "text-muted-foreground")}
                 >
                   <SelectValue />
                 </SelectTrigger>

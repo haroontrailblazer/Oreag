@@ -266,7 +266,7 @@ export function AddFilesDialog({
           <div className="space-y-2">
             <Label>Embedding model</Label>
             <Select value={embedding} onValueChange={changeEmbedding}>
-              <SelectTrigger className={cn(!embCurrentUsable && "text-muted-foreground")}>
+              <SelectTrigger className={cn("w-full", !embCurrentUsable && "text-muted-foreground")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -344,7 +344,7 @@ export function AddFilesDialog({
                 value={String(embDimensions)}
                 onValueChange={(v) => setEmbDimensions(Number(v))}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
