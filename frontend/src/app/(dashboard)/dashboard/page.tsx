@@ -118,7 +118,7 @@ export default function DashboardPage() {
   // moves, only the cards area scrolls (mobile chrome ~6.25rem, desktop
   // p-8 = 4rem).
   return (
-    <div className="flex h-[calc(100dvh-6.25rem)] flex-col gap-6 md:h-[calc(100dvh-4rem)]">
+    <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-6 overflow-hidden md:h-full">
       <div className="flex shrink-0 items-center justify-between">
         <h1 className="text-2xl font-semibold">Projects</h1>
         <Button asChild>

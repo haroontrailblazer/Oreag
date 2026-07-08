@@ -9,7 +9,10 @@ import { Badge } from "@/components/ui/badge"
 import { BestPractices } from "@/components/ui/best-practices"
 import {
   MemoryViz,
+  PinViz,
   RetrievalViz,
+  TagViz,
+  VectorViz,
 } from "@/components/ui/best-practice-visuals"
 import { Button } from "@/components/ui/button"
 import {
@@ -32,13 +35,13 @@ const BEST_PRACTICE_TIPS = [
       "Short, self-contained memories retrieve better than long notes - they embed into a single clean vector, like a good chunk.",
   },
   {
-    visual: <MemoryViz />,
+    visual: <TagViz />,
     title: "Tag for humans, not for search",
     detail:
       "Search is semantic (meaning-based). Tags help YOU filter and audit this list - they do not boost retrieval.",
   },
   {
-    visual: <MemoryViz />,
+    visual: <PinViz />,
     title: "Pin what must persist",
     detail:
       "Pinned memories are protected from bulk cleanup - use pins for decisions and constraints agents must never lose.",
@@ -50,7 +53,7 @@ const BEST_PRACTICE_TIPS = [
       "Relevant memories are blended into /query answers alongside document chunks (shown as memory sources), and they live in the same vector space as your files.",
   },
   {
-    visual: <MemoryViz />,
+    visual: <VectorViz />,
     title: "Unembedded memories are invisible",
     detail:
       "A memory saved while no embedding key was available has no vector and cannot be searched - re-save it (or change models) to embed it.",

@@ -19,7 +19,9 @@ import { BestPractices } from "@/components/ui/best-practices"
 import {
   ChunkingViz,
   CostViz,
+  DocTypesViz,
   RetryViz,
+  SlidersViz,
 } from "@/components/ui/best-practice-visuals"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { BoxLoader } from "@/components/ui/box-loader"
@@ -331,7 +333,7 @@ export function FilesTab({
           <BestPractices
             tips={[
               {
-                visual: <ChunkingViz />,
+                visual: <DocTypesViz />,
                 title: "Mind the 50 MB limit",
                 detail:
                   "About 30 file types are supported (PDF, DOCX, PPTX, XLSX, HTML, images, audio...). Everything is converted to Markdown before chunking, so clean source documents index best.",
@@ -343,7 +345,7 @@ export function FilesTab({
                   "The defaults suit most documents. Use smaller chunks (300-500) for FAQs and short facts, larger (1500-2000) for narrative or legal text where context matters. Overlap of ~20% protects facts that straddle a cut.",
               },
               {
-                visual: <ChunkingViz />,
+                visual: <SlidersViz />,
                 title: "Per-file overrides are free",
                 detail:
                   "Chunking set in the upload dialog applies only to those files - no need to reindex the whole project to experiment.",

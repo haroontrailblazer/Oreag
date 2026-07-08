@@ -18,7 +18,9 @@ import { BestPractices } from "@/components/ui/best-practices"
 import {
   CacheViz,
   ConversationViz,
+  KeysMultiViz,
   KeyViz,
+  ServerViz,
 } from "@/components/ui/best-practice-visuals"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
@@ -174,13 +176,13 @@ const BEST_PRACTICE_TIPS = [
       "The full oreag_sk_ key appears only at creation - store it in a secret manager immediately. Only the last 4 characters are kept for display.",
   },
   {
-    visual: <KeyViz />,
+    visual: <ServerViz />,
     title: "Never ship keys to browsers",
     detail:
       "Call /v1 from your server or agent backend. A key embedded in client-side code is public.",
   },
   {
-    visual: <KeyViz />,
+    visual: <KeysMultiViz />,
     title: "One key per consumer",
     detail:
       "Give each app, agent, or teammate its own key so usage is attributable and revoking one does not break the others.",

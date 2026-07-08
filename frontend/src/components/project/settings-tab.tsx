@@ -47,6 +47,7 @@ import {
   CostViz,
   DimensionsViz,
   KeyViz,
+  OverrideViz,
   TopKViz,
 } from "@/components/ui/best-practice-visuals"
 import { dimensionOptions, providerOf, providerUsable } from "@/lib/models"
@@ -454,7 +455,7 @@ export function SettingsTab({
                     "Replacing a provider key never re-indexes anything - only model and chunking changes do.",
                 },
                 {
-                  visual: <KeyViz />,
+                  visual: <OverrideViz />,
                   title: "Project keys override account keys",
                   detail:
                     "A key set here wins over the account-level key for this project only - handy for separate billing or rate limits.",

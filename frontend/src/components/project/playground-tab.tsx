@@ -38,8 +38,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { AnswerMarkdown } from "@/components/project/answer-markdown"
 import {
   CacheViz,
+  ChipsViz,
   ConversationViz,
-  KeyViz,
+  PipelineViz,
   RetrievalViz,
 } from "@/components/ui/best-practice-visuals"
 import { api, apiStream, fetcher } from "@/lib/api"
@@ -535,7 +536,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                     "Cached - exact means the same question was asked before (L1). Cached - similar means a semantically close question was answered (L2, similarity shown). Fresh answers have no badge and cost retrieval + an LLM call.",
                 },
                 {
-                  visual: <RetrievalViz />,
+                  visual: <ChipsViz />,
                   title: "Click the reference chips",
                   detail:
                     "Each chip is a chunk that grounded the answer - click to read the exact passage and its match score. Memory chips (brain icon) are agent memories blended in.",
@@ -547,7 +548,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                     "Retrieval is hybrid: meaning-based vector search plus full-text keyword search, so error codes and IDs match even when embeddings miss them.",
                 },
                 {
-                  visual: <KeyViz />,
+                  visual: <PipelineViz />,
                   title: "This is exactly the /v1 pipeline",
                   detail:
                     "The playground calls the same code path as your public API and MCP tools - what you see here is what your consumers get.",

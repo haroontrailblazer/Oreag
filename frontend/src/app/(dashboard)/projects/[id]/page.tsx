@@ -142,11 +142,11 @@ export default function ProjectPage({
 
   return (
     // The page is a fixed frame on every screen (viewport minus the chrome
-    // above/around it: mobile top bar + wrapper padding, or the desktop
-    // layout's 2rem paddings) - title, meta and the tab switcher never move;
-    // each tab's content scrolls in its own container below them, so nothing
-    // slides behind the header.
-    <div className="flex h-[calc(100dvh-6.25rem)] flex-col gap-4 md:h-[calc(100dvh-4rem)] md:gap-6">
+    // above/around it) - title, meta and the tab switcher never move; each
+    // tab's content scrolls in its own container below them, so nothing slides
+    // behind the header. Desktop height is derived from the layout via
+    // md:h-full; mobile subtracts the sticky top bar + padding (~6.25rem).
+    <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-4 overflow-hidden md:h-full md:gap-6">
       <div className="flex flex-wrap items-center gap-3 shrink-0">
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         {project.suspended && (

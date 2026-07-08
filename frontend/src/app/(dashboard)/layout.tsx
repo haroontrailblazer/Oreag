@@ -12,8 +12,13 @@ export default function DashboardLayout({
     // sidebar/content on tall pages. Mobile keeps a natural min-h-dvh scroll.
     <div className="min-h-dvh bg-background md:grid md:h-dvh md:grid-cols-[16rem_minmax(0,1fr)] md:overflow-hidden">
       <DashboardSidebar />
-      <main className="min-w-0 bg-muted/20 md:overflow-y-auto">
-        <div className="mx-auto max-w-6xl p-4 py-6 md:p-8">{children}</div>
+      <main className="min-w-0 bg-muted/20 md:h-dvh md:overflow-y-auto">
+        {/* min-h-full + md:h-full give children a *definite* height to resolve
+            h-full/flex-1 against, so fixed-frame pages derive their height from
+            the real layout (no hardcoded viewport-minus-chrome guesses). */}
+        <div className="mx-auto flex min-h-full max-w-6xl flex-col p-4 py-6 md:h-full md:p-8">
+          {children}
+        </div>
       </main>
     </div>
   )
