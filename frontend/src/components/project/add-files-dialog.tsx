@@ -31,13 +31,9 @@ import { fetcher, uploadWithProgress } from "@/lib/api"
 import { dimensionOptions, providerUsable } from "@/lib/models"
 import type { ModelsResponse, Project } from "@/lib/types"
 
-const ACCEPTED_FILE_TYPES = [
-  ".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".html", ".htm", ".csv", ".json",
-  ".xml", ".txt", ".md", ".rtf", ".odt", ".ods", ".odp", ".epub", ".eml",
-  ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".wav", ".mp3",
-  ".m4a", ".zip",
-]
-const ACCEPT_ATTR = ACCEPTED_FILE_TYPES.join(",")
+// No extension whitelist: the backend ingests any file it can extract text
+// from (rich formats via MarkItDown, everything else as plain text) and
+// rejects only opaque binary with a per-file error.
 const MAX_FILE_MB = 50
 
 export function AddFilesDialog({
@@ -115,11 +111,6 @@ export function AddFilesDialog({
     if (!list) return
     const next = [...files]
     for (const file of Array.from(list)) {
-      const ext = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`
-      if (!ACCEPTED_FILE_TYPES.includes(ext)) {
-        toast.error(`${file.name}: unsupported file type`)
-        continue
-      }
       if (file.size > MAX_FILE_MB * 1024 * 1024) {
         toast.error(`${file.name}: exceeds the ${MAX_FILE_MB} MB limit`)
         continue
@@ -217,7 +208,6 @@ export function AddFilesDialog({
             <input
               ref={fileInput}
               type="file"
-              accept={ACCEPT_ATTR}
               multiple
               hidden
               onChange={(e) => addFiles(e.target.files)}

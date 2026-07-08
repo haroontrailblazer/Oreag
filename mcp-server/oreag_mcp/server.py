@@ -81,7 +81,7 @@ def ask_docs(question: str) -> dict:
 def add_document(filename: str, content: str) -> list:
     """Upload a text document into the project so it is chunked, embedded, and
     searchable. Requires an API key with upload permission (read-only keys get a
-    403). `filename` should end in a supported text extension such as .md or .txt."""
+    403). Any text content is accepted regardless of the filename's extension."""
     return _client().upload_document(filename, content)
 
 

@@ -54,6 +54,27 @@ def is_supported_upload(filename: str) -> bool:
     return source_extension(filename) in SUPPORTED_UPLOAD_EXTENSIONS
 
 
+def try_decode_text(data: bytes) -> str | None:
+    """Best-effort text decode for files outside the MarkItDown allowlist.
+
+    NUL bytes in the head mark the file as binary (the git heuristic); text
+    without them decodes as UTF-8 or, failing that, cp1252 so single-byte
+    legacy files still ingest.
+    """
+    if b"\x00" in data[:8192]:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace")
+
+
+def is_ingestable(filename: str, data: bytes) -> bool:
+    """Anything convertible is ingestable: allowlisted formats via MarkItDown,
+    every other extension (or none) as plain text - only opaque binary fails."""
+    return is_supported_upload(filename) or try_decode_text(data) is not None
+
+
 def content_type_for(filename: str, fallback: str | None = None) -> str:
     return fallback or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
@@ -87,7 +108,15 @@ def convert_to_markdown(data: bytes, filename: str) -> ConvertedDocument:
 
     suffix = source_extension(filename)
     if suffix not in SUPPORTED_UPLOAD_EXTENSIONS:
-        raise ValueError(f"Unsupported file type: {suffix or 'unknown'}")
+        # Everything else ingests as plain text (code, configs, logs, files
+        # without an extension) so questions can search every uploaded file.
+        text = try_decode_text(data)
+        if text is None:
+            raise ValueError(f"Unsupported binary file type: {suffix or 'unknown'}")
+        text = text.strip()
+        if not text:
+            raise ValueError("No extractable text found in this file")
+        return ConvertedDocument(markdown=text, page_count=None)
 
     temp_path = ""
     try:

@@ -53,38 +53,6 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-const ACCEPTED_FILE_TYPES = [
-  ".pdf",
-  ".docx",
-  ".pptx",
-  ".xlsx",
-  ".xls",
-  ".html",
-  ".htm",
-  ".csv",
-  ".json",
-  ".xml",
-  ".txt",
-  ".md",
-  ".rtf",
-  ".odt",
-  ".ods",
-  ".odp",
-  ".epub",
-  ".eml",
-  ".jpg",
-  ".jpeg",
-  ".png",
-  ".gif",
-  ".bmp",
-  ".tif",
-  ".tiff",
-  ".wav",
-  ".mp3",
-  ".m4a",
-  ".zip",
-].join(",")
-
 type Turn = { question: string; result: QueryResponse }
 
 /** One SSE frame from the /query/stream endpoint. */
@@ -392,13 +360,10 @@ export function PlaygroundTab({ project }: { project: Project }) {
 
   async function handleUpload(list: FileList | null) {
     if (!list || list.length === 0) return
+    // No extension whitelist: the backend ingests any file it can extract
+    // text from and rejects only opaque binary with a per-file error.
     const form = new FormData()
     for (const file of Array.from(list)) {
-      const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`
-      if (!ACCEPTED_FILE_TYPES.split(",").includes(extension)) {
-        toast.error(`${file.name}: unsupported file type`)
-        return
-      }
       form.append("uploads", file)
     }
     setUploading(true)
@@ -715,7 +680,6 @@ export function PlaygroundTab({ project }: { project: Project }) {
               <input
                 ref={fileInput}
                 type="file"
-                accept={ACCEPTED_FILE_TYPES}
                 multiple
                 hidden
                 onChange={(event) => handleUpload(event.target.files)}

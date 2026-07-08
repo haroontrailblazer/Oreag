@@ -22,7 +22,13 @@ from app.providers.registry import (
     validate_llm,
 )
 from app.schemas import ProjectCreate, ProjectOut, ProviderKeyOut
-from app.services.conversion import is_supported_upload, markdown_path_for
+from app.services.conversion import (
+    convert_to_markdown,
+    is_ingestable,
+    is_supported_upload,
+    markdown_path_for,
+    try_decode_text,
+)
 from app.services.generation import build_user_prompt
 from app.services.ingestion import parse_pdf
 from app.services.memory_graph import _sections
@@ -916,6 +922,31 @@ class TestConversion:
 
     def test_markdown_sidecar_path(self):
         assert markdown_path_for("owner/project/file.pdf") == "owner/project/file.pdf.md"
+
+    def test_text_files_ingestable_regardless_of_extension(self):
+        code = b"def hello():\n    return 42\n"
+        assert try_decode_text(code) == "def hello():\n    return 42\n"
+        assert is_ingestable("script.py", code)
+        assert is_ingestable("Dockerfile", b"FROM python:3.12\n")
+
+    def test_opaque_binary_rejected(self):
+        exe = b"MZ\x90\x00\x03\x00\x00\x00"
+        assert try_decode_text(exe) is None
+        assert not is_ingestable("app.exe", exe)
+        # allowlisted extensions still route to MarkItDown, whatever the bytes
+        assert is_ingestable("doc.pdf", exe)
+
+    def test_convert_falls_back_to_plain_text(self):
+        doc = convert_to_markdown(b"server:\n  port: 8080\n", "config.yaml")
+        assert doc.markdown == "server:\n  port: 8080"
+        assert doc.page_count is None
+
+    def test_convert_rejects_unknown_binary(self):
+        with pytest.raises(ValueError, match="Unsupported binary"):
+            convert_to_markdown(b"MZ\x90\x00\x03\x00\x00\x00", "blob.bin")
+
+    def test_cp1252_fallback_decodes_legacy_text(self):
+        assert try_decode_text("caf\xe9 menu".encode("cp1252")) == "caf\xe9 menu"
 
 
 class TestMemoryGraph:

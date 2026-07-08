@@ -23,7 +23,7 @@ from ..schemas import (
 )
 from ..sse import sse_response
 from ..services import explore, retrieval, storage
-from ..services.conversion import content_type_for, is_supported_upload, source_extension
+from ..services.conversion import content_type_for, is_ingestable, source_extension
 from ..services.ingestion import ingest_file
 from ..services.query import run_query, run_query_stream
 
@@ -113,9 +113,13 @@ async def public_upload_files(
     """Ingest documents with an API key, using the project's default chunking and
     embedding settings.
 
+    Any file text can be extracted from is accepted: rich formats (PDF, Office,
+    images, audio, ...) convert via MarkItDown, everything else ingests as plain
+    text - only opaque binary is rejected. Client content types are optional.
+
     Guarded: requires a key created with upload permission (read-only keys get
-    403), an allowlisted file type, a per-file size cap, a per-request file-count
-    cap, a per-project total-file quota, and a per-project ingest rate limit.
+    403), a per-file size cap, a per-request file-count cap, a per-project
+    total-file quota, and a per-project ingest rate limit.
     """
     if not api_key.can_upload:
         raise HTTPException(
@@ -156,9 +160,11 @@ async def public_upload_files(
     created: list[File] = []
     for upload in uploads:
         filename = upload.filename or "upload"
-        if not is_supported_upload(filename):
-            raise HTTPException(400, f"Unsupported file type: {filename}")
         data = await upload.read()
+        if not is_ingestable(filename, data):
+            raise HTTPException(
+                400, f"Unsupported file type: {filename} (no text could be extracted)"
+            )
         if len(data) > settings.max_upload_bytes:
             raise HTTPException(
                 413,

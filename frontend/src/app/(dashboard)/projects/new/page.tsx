@@ -32,38 +32,10 @@ import { dimensionOptions, providerOf } from "@/lib/models"
 import { cn } from "@/lib/utils"
 import type { ModelsResponse, Project } from "@/lib/types"
 
+// No extension whitelist: the backend ingests any file it can extract text
+// from (rich formats via MarkItDown, everything else as plain text) and
+// rejects only opaque binary with a per-file error.
 const MAX_FILE_MB = 50
-const ACCEPTED_FILE_TYPES = [
-  ".pdf",
-  ".docx",
-  ".pptx",
-  ".xlsx",
-  ".xls",
-  ".html",
-  ".htm",
-  ".csv",
-  ".json",
-  ".xml",
-  ".txt",
-  ".md",
-  ".rtf",
-  ".odt",
-  ".ods",
-  ".odp",
-  ".epub",
-  ".eml",
-  ".jpg",
-  ".jpeg",
-  ".png",
-  ".gif",
-  ".bmp",
-  ".tif",
-  ".tiff",
-  ".wav",
-  ".mp3",
-  ".m4a",
-  ".zip",
-].join(",")
 
 function firstAvailableModel<T>(
   groups: Record<string, T[]>,
@@ -128,11 +100,6 @@ export default function NewProjectPage() {
     if (!list) return
     const next = [...files]
     for (const file of Array.from(list)) {
-      const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`
-      if (!ACCEPTED_FILE_TYPES.split(",").includes(extension)) {
-        toast.error(`${file.name}: unsupported file type`)
-        continue
-      }
       if (file.size > MAX_FILE_MB * 1024 * 1024) {
         toast.error(`${file.name}: exceeds the ${MAX_FILE_MB} MB limit`)
         continue
@@ -264,7 +231,6 @@ export default function NewProjectPage() {
               <input
                 ref={fileInput}
                 type="file"
-                accept={ACCEPTED_FILE_TYPES}
                 multiple
                 hidden
                 onChange={(e) => addFiles(e.target.files)}

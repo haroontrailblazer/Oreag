@@ -336,7 +336,7 @@ export function FilesTab({
                 visual: <DocTypesViz />,
                 title: "Mind the 50 MB limit",
                 detail:
-                  "About 30 file types are supported (PDF, DOCX, PPTX, XLSX, HTML, images, audio...). Everything is converted to Markdown before chunking, so clean source documents index best.",
+                  "Any file with extractable text works: rich formats (PDF, DOCX, PPTX, XLSX, HTML, images, audio...) are converted with MarkItDown, everything else (code, configs, logs) ingests as plain text. Only opaque binary is rejected. Clean source documents index best.",
               },
               {
                 visual: <ChunkingViz />,

@@ -15,7 +15,7 @@ from ..models import Chunk, File, Project
 from ..providers import registry
 from ..schemas import FileOut, ReindexRequest
 from ..services import storage
-from ..services.conversion import content_type_for, is_supported_upload, source_extension
+from ..services.conversion import content_type_for, is_ingestable, source_extension
 from ..services.ingestion import ingest_file, recompute_project_status
 from ..services.memory import reembed_project_memories
 from .deps import get_owned_project
@@ -162,9 +162,11 @@ async def upload_files(
     created: list[File] = []
     for upload in uploads:
         filename = upload.filename or "upload"
-        if not is_supported_upload(filename):
-            raise HTTPException(400, f"Unsupported file type: {filename}")
         data = await upload.read()
+        if not is_ingestable(filename, data):
+            raise HTTPException(
+                400, f"Unsupported file type: {filename} (no text could be extracted)"
+            )
         if len(data) > settings.max_upload_bytes:
             raise HTTPException(
                 413,
