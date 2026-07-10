@@ -80,13 +80,13 @@ class TestRunQueryWiring:
         gen = []
         monkeypatch.setattr(
             query.retrieval, "retrieve",
-            lambda db, p, q, k: [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+            lambda db, p, q, k, **kw:[_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
         )
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
 
-        def fake_generate(db, p, question, sources, depth="short"):
+        def fake_generate(db, p, question, sources, depth="short", **kw):
             gen.append((question, depth, len(sources)))
             return "GROUNDED ANSWER"
 
@@ -111,17 +111,17 @@ class TestRunQueryWiring:
 
         monkeypatch.setattr(
             query.retrieval, "retrieve",
-            lambda db, p, q, k: [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+            lambda db, p, q, k, **kw:[_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
         )
 
-        def exploding_search(db, p, q, k):
+        def exploding_search(db, p, q, k, **kw):
             raise RuntimeError("different vector dimensions 1536 and 768")
 
         monkeypatch.setattr(query.memory_service, "search_memories", exploding_search)
         monkeypatch.setattr(query.settings, "rag_memory_blend_k", 3)
         monkeypatch.setattr(
             query.generation, "generate_answer",
-            lambda db, p, question, sources, depth="short": "DOCS ONLY",
+            lambda db, p, question, sources, depth="short", **kw: "DOCS ONLY",
         )
 
         db = FakeDB([10, 3])  # chunks present AND embedded memories present
@@ -136,10 +136,10 @@ class TestRunQueryWiring:
 
         gen_calls = []
         monkeypatch.setattr(
-            query.retrieval, "retrieve", lambda db, p, q, k: [_src("noise", 0.01)]
+            query.retrieval, "retrieve", lambda db, p, q, k, **kw:[_src("noise", 0.01)]
         )
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
         monkeypatch.setattr(
             query.generation, "generate_answer",
@@ -195,7 +195,7 @@ class TestSemanticCacheWiring:
             needs_clarification=False,
         )
         monkeypatch.setattr(
-            query.semantic_cache, "lookup", lambda db, p, q, k, s: (cached, [0.1], 0.82)
+            query.semantic_cache, "lookup", lambda db, p, q, k, s, **kw:(cached, [0.1], 0.82)
         )
         llm_calls = []
         monkeypatch.setattr(
@@ -207,10 +207,10 @@ class TestSemanticCacheWiring:
         monkeypatch.setattr(
             query.retrieval,
             "retrieve",
-            lambda db, p, q, k: retrieval_calls.append(q) or [],
+            lambda db, p, q, k, **kw:retrieval_calls.append(q) or [],
         )
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
 
         resp = query.run_query(
@@ -227,7 +227,7 @@ class TestSemanticCacheWiring:
         from app.services import query
 
         monkeypatch.setattr(
-            query.semantic_cache, "lookup", lambda db, p, q, k, s: (None, [0.1], None)
+            query.semantic_cache, "lookup", lambda db, p, q, k, s, **kw:(None, [0.1], None)
         )
         stored = []
         monkeypatch.setattr(
@@ -238,15 +238,15 @@ class TestSemanticCacheWiring:
             ),
         )
         monkeypatch.setattr(
-            query.retrieval, "retrieve", lambda db, p, q, k: [_src("alpha", 0.9, 0)]
+            query.retrieval, "retrieve", lambda db, p, q, k, **kw:[_src("alpha", 0.9, 0)]
         )
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
         monkeypatch.setattr(
             query.generation,
             "generate_answer",
-            lambda db, p, q, srcs, depth="short": "FRESH ANSWER",
+            lambda db, p, q, srcs, depth="short", **kw: "FRESH ANSWER",
         )
 
         resp = query.run_query(
@@ -268,17 +268,17 @@ class TestRunQueryStream:
 
         monkeypatch.setattr(
             query.retrieval, "retrieve",
-            lambda db, p, q, k: [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+            lambda db, p, q, k, **kw:[_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
         )
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
         monkeypatch.setattr(
             query.generation, "generate_answer_stream",
-            lambda db, p, q, srcs, depth="short": iter(["Hello ", "world"]),
+            lambda db, p, q, srcs, depth="short", **kw: iter(["Hello ", "world"]),
         )
         monkeypatch.setattr(
-            query.semantic_cache, "lookup", lambda db, p, q, k, s: (None, [0.1], None)
+            query.semantic_cache, "lookup", lambda db, p, q, k, s, **kw:(None, [0.1], None)
         )
         monkeypatch.setattr(query.semantic_cache, "store", lambda *a, **k: None)
         monkeypatch.setattr(query.settings, "query_cache_enabled", False)
@@ -306,12 +306,12 @@ class TestRunQueryStream:
             sub_queries=[], rounds=1, needs_clarification=False,
         )
         monkeypatch.setattr(
-            query.semantic_cache, "lookup", lambda db, p, q, k, s: (cached, [0.1], 0.9)
+            query.semantic_cache, "lookup", lambda db, p, q, k, s, **kw:(cached, [0.1], 0.9)
         )
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
-        monkeypatch.setattr(query.retrieval, "retrieve", lambda *a: [])
+        monkeypatch.setattr(query.retrieval, "retrieve", lambda *a, **kw: [])
         gen_called = []
         monkeypatch.setattr(
             query.generation, "generate_answer_stream",
@@ -343,17 +343,17 @@ class TestQueryCaching:
     def _wire(self, monkeypatch, gen_calls, retrieval_calls=None):
         from app.services import query
 
-        def fake_retrieve(db, p, q, k):
+        def fake_retrieve(db, p, q, k, **kw):
             if retrieval_calls is not None:
                 retrieval_calls.append(q)
             return [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)]
 
         monkeypatch.setattr(query.retrieval, "retrieve", fake_retrieve)
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
 
-        def fake_generate(db, p, question, sources, depth="short"):
+        def fake_generate(db, p, question, sources, depth="short", **kw):
             gen_calls.append(question)
             return "GROUNDED ANSWER"
 
@@ -423,10 +423,10 @@ class TestConversationMemory:
 
         monkeypatch.setattr(
             query.retrieval, "retrieve",
-            lambda db, p, q, k: [_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+            lambda db, p, q, k, **kw:[_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
         )
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
         monkeypatch.setattr(
             query.generation, "generate_answer", lambda *a, **k: "GROUNDED ANSWER"
@@ -438,14 +438,15 @@ class TestConversationMemory:
         monkeypatch.setattr(query, "get_llm", lambda *a, **k: llm)
 
         cid = "conv-" + uuid.uuid4().hex
+        project = _project()
         resp = query.run_query(
-            FakeDB([10, 0]), _project(), "what is X", None, None, conversation_id=cid
+            FakeDB([10, 0]), project, "what is X", None, None, conversation_id=cid
         )
 
         assert resp.answer == "GROUNDED ANSWER"
         assert resp.conversation_id == cid
         assert llm.calls == []  # no history → no condense call
-        assert query._conversations.get_history(cid) == [
+        assert query._conversations.get_history(str(project.id), cid) == [
             {"question": "what is X", "answer": "GROUNDED ANSWER"}
         ]
 
@@ -453,17 +454,19 @@ class TestConversationMemory:
         from app.services import query
 
         cid = "conv-" + uuid.uuid4().hex
+        project = _project()
         query._conversations.append_turn(
-            cid, "what is deep learning", "Deep learning is a subfield of ML."
+            str(project.id), cid, "what is deep learning",
+            "Deep learning is a subfield of ML.",
         )
 
         seen = []
         monkeypatch.setattr(
             query.retrieval, "retrieve",
-            lambda db, p, q, k: seen.append(q) or [_src("ctx", 0.9, 0)],
+            lambda db, p, q, k, **kw:seen.append(q) or [_src("ctx", 0.9, 0)],
         )
         monkeypatch.setattr(
-            query.memory_service, "search_memories", lambda db, p, q, k: []
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
         )
         monkeypatch.setattr(
             query.generation, "generate_answer", lambda *a, **k: "ANSWER"
@@ -475,13 +478,13 @@ class TestConversationMemory:
         )
 
         resp = query.run_query(
-            FakeDB([10, 0]), _project(), "summarize that", None, None,
+            FakeDB([10, 0]), project, "summarize that", None, None,
             conversation_id=cid,
         )
 
         # Retrieval ran on the condensed standalone, not the literal "summarize that".
         assert seen[0] == "deep learning overview"
         # The ORIGINAL user question is what gets stored in history.
-        history = query._conversations.get_history(cid)
+        history = query._conversations.get_history(str(project.id), cid)
         assert history[-1] == {"question": "summarize that", "answer": "ANSWER"}
         assert resp.answer == "ANSWER"

@@ -65,9 +65,15 @@ def generate_answer(
     question: str,
     sources: list[dict],
     depth: str = "short",
+    llm_fn=None,
 ) -> str:
-    api_key = resolver.resolve_llm_key(db, project)
-    llm = get_llm(project.llm_provider, project.llm_model, api_key)
+    # query.py passes its per-request LLM getter (key resolved at most once)
+    # as ``llm_fn``; standalone callers omit it and resolution happens here.
+    if llm_fn is not None:
+        llm = llm_fn()
+    else:
+        api_key = resolver.resolve_llm_key(db, project)
+        llm = get_llm(project.llm_provider, project.llm_model, api_key)
     return llm.generate(
         system_prompt_for(depth), build_user_prompt(question, sources)
     )
@@ -79,13 +85,17 @@ def generate_answer_stream(
     question: str,
     sources: list[dict],
     depth: str = "short",
+    llm_fn=None,
 ):
     """Yield the answer as text deltas. Providers that implement ``generate_stream``
     (OpenAI and every OpenAI-compatible vendor) stream token by token; any other
     provider falls back to yielding the full answer once, so the same code path
     works everywhere."""
-    api_key = resolver.resolve_llm_key(db, project)
-    llm = get_llm(project.llm_provider, project.llm_model, api_key)
+    if llm_fn is not None:
+        llm = llm_fn()
+    else:
+        api_key = resolver.resolve_llm_key(db, project)
+        llm = get_llm(project.llm_provider, project.llm_model, api_key)
     system_prompt = system_prompt_for(depth)
     user_prompt = build_user_prompt(question, sources)
     streamer = getattr(llm, "generate_stream", None)

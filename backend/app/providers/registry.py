@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from .base import EmbeddingProvider, LLMProvider
 
 # Single source of truth for what the wizard offers and what the backend accepts.
@@ -267,6 +269,12 @@ def validate_llm(provider: str, model: str) -> None:
         raise ValueError(f"Unknown LLM: {provider}/{model}")
 
 
+# Providers are stateless wrappers around thread-safe SDK clients, so instances
+# are memoized per (provider, model, key, dims): the underlying httpx connection
+# pools get reused across requests instead of paying a fresh TLS handshake per
+# call (and sentence-transformers keeps its model loaded). Errors (e.g. missing
+# key) are never cached - lru_cache only stores successful returns.
+@lru_cache(maxsize=128)
 def get_embedder(
     provider: str,
     model: str,
@@ -329,6 +337,7 @@ def get_embedder(
     raise ValueError(f"Unknown embedding provider: {provider}")
 
 
+@lru_cache(maxsize=128)
 def get_llm(provider: str, model: str, api_key: str | None = None) -> LLMProvider:
     validate_llm(provider, model)
     if provider == "openai":

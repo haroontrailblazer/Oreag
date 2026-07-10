@@ -18,7 +18,17 @@ def _client(api_key: str | None):
         raise ProviderUnavailableError(
             "anthropic is not installed. Run 'pip install -r requirements.txt'."
         )
-    return anthropic.Anthropic(api_key=api_key)
+    import httpx
+
+    # Bound the SDK defaults (600s, 2 retries) so a hung upstream can't pin a
+    # threadpool thread for minutes; streaming applies `read` per delta. 300s
+    # read matches the SDK's own sizing for the 8192-token budget (~230s) -
+    # a scalar timeout would also regress connect from 5s to the full value.
+    return anthropic.Anthropic(
+        api_key=api_key,
+        timeout=httpx.Timeout(300.0, connect=5.0),
+        max_retries=1,
+    )
 
 
 class AnthropicLLM:

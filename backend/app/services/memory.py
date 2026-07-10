@@ -92,20 +92,32 @@ _SEARCH_SQL = text(
 
 
 def search_memories(
-    db: Session, project: Project, query: str, top_k: int
+    db: Session,
+    project: Project,
+    query: str,
+    top_k: int,
+    embed_fn=None,
 ) -> list[tuple[Memory, float]]:
-    key = resolver.resolve_embedding_key(db, project)
-    if resolver.requires_key(project.embedding_provider) and not key:
-        raise ProviderUnavailableError(
-            "Memory search needs an embedding key. Add one in Settings → API keys."
+    # Chunks and memories share the project's embedding space, so query.py
+    # passes its per-request memoized embedder as ``embed_fn`` - the vector
+    # computed for chunk retrieval is reused here instead of paying a second
+    # identical provider round-trip. Standalone callers omit it.
+    if embed_fn is None:
+        key = resolver.resolve_embedding_key(db, project)
+        if resolver.requires_key(project.embedding_provider) and not key:
+            raise ProviderUnavailableError(
+                "Memory search needs an embedding key. Add one in Settings → API keys."
+            )
+        embedder = get_embedder(
+            project.embedding_provider,
+            project.embedding_model,
+            key,
+            dimensions=project.embedding_dimensions,
         )
-    embedder = get_embedder(
-        project.embedding_provider,
-        project.embedding_model,
-        key,
-        dimensions=project.embedding_dimensions,
-    )
-    qvec = "[" + ",".join(repr(v) for v in embedder.embed_query(query)) + "]"
+        query_vector = embedder.embed_query(query)
+    else:
+        query_vector = embed_fn(query)
+    qvec = "[" + ",".join(repr(v) for v in query_vector) + "]"
     rows = db.execute(
         _SEARCH_SQL, {"qvec": qvec, "project_id": str(project.id), "top_k": top_k}
     ).all()

@@ -3,6 +3,7 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
 from fastapi import File as FastAPIFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy import text as sql_text
@@ -162,22 +163,30 @@ async def upload_files(
     created: list[File] = []
     for upload in uploads:
         filename = upload.filename or "upload"
-        data = await upload.read()
-        if not is_ingestable(filename, data):
+        # Size cap BEFORE buffering/decoding - see the public route for why.
+        if upload.size is not None and upload.size > settings.max_upload_bytes:
             raise HTTPException(
-                400, f"Unsupported file type: {filename} (no text could be extracted)"
+                413,
+                f"{filename} exceeds the "
+                f"{settings.max_upload_bytes // (1024 * 1024)} MB limit",
             )
+        data = await upload.read()
         if len(data) > settings.max_upload_bytes:
             raise HTTPException(
                 413,
                 f"{filename} exceeds the "
                 f"{settings.max_upload_bytes // (1024 * 1024)} MB limit",
             )
+        if not is_ingestable(filename, data):
+            raise HTTPException(
+                400, f"Unsupported file type: {filename} (no text could be extracted)"
+            )
         file_id = uuid.uuid4()
         extension = source_extension(filename)
         content_type = content_type_for(filename, upload.content_type)
         path = f"{project.owner_id}/{project.id}/{file_id}{extension}"
-        storage.upload_file(path, data, content_type)
+        # Sync storage PUT off the event loop - this handler is async.
+        await run_in_threadpool(storage.upload_file, path, data, content_type)
         record = File(
             id=file_id,
             project_id=project.id,

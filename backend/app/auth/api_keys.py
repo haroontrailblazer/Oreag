@@ -1,7 +1,7 @@
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -44,6 +44,13 @@ def require_api_key(
     )
     if api_key is None:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    api_key.last_used_at = datetime.now(timezone.utc)
-    db.commit()
+    # last_used_at is a dashboard display field with minute granularity - don't
+    # pay a write transaction (WAL fsync + row lock, serializing concurrent
+    # requests on the same key) on EVERY request to maintain it. Refresh only
+    # when it's stale by more than a minute.
+    now = datetime.now(timezone.utc)
+    last = api_key.last_used_at
+    if last is None or last.tzinfo is None or now - last > timedelta(seconds=60):
+        api_key.last_used_at = now
+        db.commit()
     return api_key

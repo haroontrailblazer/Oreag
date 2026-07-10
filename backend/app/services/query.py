@@ -6,13 +6,14 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Chunk, Memory, Project, QueryLog
 from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
-from ..providers.registry import get_llm
+from ..providers.registry import get_embedder, get_llm
 from ..schemas import QueryResponse, SourceChunk
 from . import agentic
 from . import generation
@@ -51,12 +52,56 @@ _cache = query_cache.QueryCache(
     deserialize=_deserialize_result,
 )
 
-# Server-side conversation memory, keyed by conversation_id.
+# Server-side conversation memory, keyed by (project_id, conversation_id).
 _conversations = query_cache.ConversationStore(
     _conv_backend,
     ttl_seconds=settings.conversation_ttl_seconds,
     max_turns=settings.conversation_max_turns,
 )
+
+
+def _request_helpers(db: Session, project: Project):
+    """Per-request memoization for provider work.
+
+    One uncached query used to re-resolve keys (a provider_keys SELECT each
+    time) and re-embed the same strings up to 3x (L2 lookup, chunk retrieval,
+    memory search - all in the same embedding space), each a blocking provider
+    round-trip. Returns:
+
+      * ``embed_memo`` - {query string: vector}; seed it with vectors already
+        computed elsewhere (e.g. the semantic-cache lookup).
+      * ``embed_query`` - embeds through the memo, resolving the embedding key
+        and building the embedder at most once.
+      * ``llm`` - the project's LLM, key resolved at most once.
+    """
+    embed_memo: dict[str, list[float]] = {}
+    _embedder: list = []
+    _llm_instance: list = []
+
+    def embed_query(query: str) -> list[float]:
+        vector = embed_memo.get(query)
+        if vector is None:
+            if not _embedder:
+                key = resolver.resolve_embedding_key(db, project)
+                _embedder.append(
+                    get_embedder(
+                        project.embedding_provider,
+                        project.embedding_model,
+                        key,
+                        dimensions=project.embedding_dimensions,
+                    )
+                )
+            vector = _embedder[0].embed_query(query)
+            embed_memo[query] = vector
+        return vector
+
+    def llm():
+        if not _llm_instance:
+            key = resolver.resolve_llm_key(db, project)
+            _llm_instance.append(get_llm(project.llm_provider, project.llm_model, key))
+        return _llm_instance[0]
+
+    return embed_memo, embed_query, llm
 
 
 def run_query(
@@ -95,17 +140,28 @@ def run_query(
     top_k = min(top_k_override or project.top_k, 20)
     started = time.perf_counter()
 
+    embed_memo, embed_query, _llm = _request_helpers(db, project)
+
     def retrieve_fn(query: str, k: int) -> list[dict]:
         """One retrieval pass over the brain: document chunks + relevant memories.
 
         Memories live in the same embedding space, so they're blended per query
-        and compete with chunks on similarity for grounding.
+        and compete with chunks on similarity for grounding - one shared query
+        vector (via the per-request memo) serves both searches.
         """
-        sources = retrieval.retrieve(db, project, query, k) if chunk_count else []
+        sources = (
+            retrieval.retrieve(db, project, query, k, embed_fn=embed_query)
+            if chunk_count
+            else []
+        )
         if memory_count and settings.rag_memory_blend_k > 0:
             try:
                 for mem, sim in memory_service.search_memories(
-                    db, project, query, settings.rag_memory_blend_k
+                    db,
+                    project,
+                    query,
+                    settings.rag_memory_blend_k,
+                    embed_fn=embed_query,
                 ):
                     if sim >= settings.rag_memory_min_similarity:
                         sources.append(
@@ -133,14 +189,14 @@ def run_query(
                 db.rollback()
         return sources
 
-    def _llm():
-        key = resolver.resolve_llm_key(db, project)
-        return get_llm(project.llm_provider, project.llm_model, key)
-
     # Conversation memory: load prior turns and rewrite a follow-up like
     # "summarize that" into a standalone question before retrieval. Empty history
     # (or no conversation) leaves the question untouched and costs nothing.
-    history = _conversations.get_history(conversation_id) if conversation_id else []
+    history = (
+        _conversations.get_history(str(project.id), conversation_id)
+        if conversation_id
+        else []
+    )
 
     try:
         agentic_question = (
@@ -159,7 +215,7 @@ def run_query(
                     _llm(), q, settings.agentic_max_subqueries
                 ),
                 generate_fn=lambda q, srcs, depth: generation.generate_answer(
-                    db, project, q, srcs, depth
+                    db, project, q, srcs, depth, llm_fn=_llm
                 ),
                 clarify_fn=lambda q: agentic.request_clarification(
                     _llm(), q, settings.agentic_max_clarifying
@@ -198,8 +254,13 @@ def run_query(
             cache_layer = "l1"
         else:
             hit, semantic_vector, cache_similarity = semantic_cache.lookup(
-                db, project, agentic_question, top_k, signature
+                db, project, agentic_question, top_k, signature, embed_fn=embed_query
             )
+            if semantic_vector is not None:
+                # The lookup embedded through the memo, but seed defensively in
+                # case a caller monkeypatches lookup - retrieval must never
+                # re-embed the same string.
+                embed_memo[agentic_question] = semantic_vector
             if hit is not None:
                 result = hit
                 cache_layer = "l2"
@@ -235,7 +296,7 @@ def run_query(
     # Remember this turn (the original question the user typed, plus the answer)
     # so the next follow-up has context.
     if conversation_id:
-        _conversations.append_turn(conversation_id, question, answer)
+        _conversations.append_turn(str(project.id), conversation_id, question, answer)
 
     return QueryResponse(
         answer=answer,
@@ -279,18 +340,27 @@ def run_query_stream(
     Errors are yielded (not raised): a streaming response has already sent its
     headers, so mid-stream failures cannot become HTTP status codes.
     """
-    chunk_count = (
-        db.scalar(select(func.count()).select_from(Chunk).where(Chunk.project_id == project.id))
-        or 0
-    )
-    memory_count = (
-        db.scalar(
-            select(func.count())
-            .select_from(Memory)
-            .where(Memory.project_id == project.id, Memory.embedding.isnot(None))
+    try:
+        chunk_count = (
+            db.scalar(select(func.count()).select_from(Chunk).where(Chunk.project_id == project.id))
+            or 0
         )
-        or 0
-    )
+        memory_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(Memory)
+                .where(Memory.project_id == project.id, Memory.embedding.isnot(None))
+            )
+            or 0
+        )
+    except PoolTimeoutError:
+        # Headers are already sent (200): a raised pool-checkout timeout would
+        # abort the stream mid-air - emit a proper error frame instead.
+        yield {
+            "type": "error",
+            "detail": "Server is at capacity - please retry shortly",
+        }
+        return
     if not chunk_count and not memory_count:
         yield {
             "type": "error",
@@ -301,12 +371,22 @@ def run_query_stream(
     top_k = min(top_k_override or project.top_k, 20)
     started = time.perf_counter()
 
+    embed_memo, embed_query, _llm = _request_helpers(db, project)
+
     def retrieve_fn(query: str, k: int) -> list[dict]:
-        sources = retrieval.retrieve(db, project, query, k) if chunk_count else []
+        sources = (
+            retrieval.retrieve(db, project, query, k, embed_fn=embed_query)
+            if chunk_count
+            else []
+        )
         if memory_count and settings.rag_memory_blend_k > 0:
             try:
                 for mem, sim in memory_service.search_memories(
-                    db, project, query, settings.rag_memory_blend_k
+                    db,
+                    project,
+                    query,
+                    settings.rag_memory_blend_k,
+                    embed_fn=embed_query,
                 ):
                     if sim >= settings.rag_memory_min_similarity:
                         sources.append(
@@ -329,11 +409,11 @@ def run_query_stream(
                 db.rollback()
         return sources
 
-    def _llm():
-        key = resolver.resolve_llm_key(db, project)
-        return get_llm(project.llm_provider, project.llm_model, key)
-
-    history = _conversations.get_history(conversation_id) if conversation_id else []
+    history = (
+        _conversations.get_history(str(project.id), conversation_id)
+        if conversation_id
+        else []
+    )
     signature = f"{chunk_count}:{memory_count}"
     cache_layer: str | None = None
     cache_similarity: float | None = None
@@ -361,8 +441,11 @@ def run_query_stream(
             cache_layer = "l1"
         else:
             hit, semantic_vector, cache_similarity = semantic_cache.lookup(
-                db, project, agentic_question, top_k, signature
+                db, project, agentic_question, top_k, signature, embed_fn=embed_query
             )
+            if semantic_vector is not None:
+                # Seed the memo with the lookup's vector - see run_query.
+                embed_memo[agentic_question] = semantic_vector
             if hit is not None:
                 result = hit
                 cache_layer = "l2"
@@ -409,7 +492,7 @@ def run_query_stream(
             else:
                 acc: list[str] = []
                 for tok in generation.generate_answer_stream(
-                    db, project, agentic_question, ctx.sources, ctx.depth
+                    db, project, agentic_question, ctx.sources, ctx.depth, llm_fn=_llm
                 ):
                     acc.append(tok)
                     yield {"type": "token", "text": tok}
@@ -456,7 +539,7 @@ def run_query_stream(
         else final.answer
     )
     if conversation_id:
-        _conversations.append_turn(conversation_id, question, answer)
+        _conversations.append_turn(str(project.id), conversation_id, question, answer)
 
     yield {
         "type": "done",

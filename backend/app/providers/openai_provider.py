@@ -1,15 +1,26 @@
+import httpx
 from openai import OpenAI
 
 from .base import ProviderUnavailableError
 
+# SDK defaults are 600s + 2 retries: a hung upstream would pin a threadpool
+# thread (and the request's DB connection) for ~10 minutes and triple provider
+# load during incidents. Bound both, sized per call type: embeddings answer in
+# seconds, but a long non-streaming generation legitimately needs minutes
+# (Anthropic's own SDK sizes ~230s for an 8k-token budget). Streaming applies
+# `read` per delta, so a healthy stream is never cut off mid-answer.
+EMBED_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+GENERATE_TIMEOUT = httpx.Timeout(300.0, connect=5.0)
+MAX_RETRIES = 1
 
-def _client(api_key: str | None) -> OpenAI:
+
+def _client(api_key: str | None, timeout: httpx.Timeout) -> OpenAI:
     if not api_key:
         raise ProviderUnavailableError(
             "No OpenAI API key configured. Add one in Settings → API keys "
             "or set a per-project key."
         )
-    return OpenAI(api_key=api_key)
+    return OpenAI(api_key=api_key, timeout=timeout, max_retries=MAX_RETRIES)
 
 
 class OpenAIEmbedder:
@@ -20,7 +31,7 @@ class OpenAIEmbedder:
     def __init__(self, model: str, dimensions: int, api_key: str | None = None):
         self.model = model
         self.dimensions = dimensions
-        self.client = _client(api_key)
+        self.client = _client(api_key, EMBED_TIMEOUT)
         # text-embedding-3-* are Matryoshka models: the API can return any
         # requested prefix size. Older models reject the parameter.
         self._sized = model.startswith("text-embedding-3")
@@ -42,7 +53,7 @@ class OpenAIEmbedder:
 class OpenAILLM:
     def __init__(self, model: str, api_key: str | None = None):
         self.model = model
-        self.client = _client(api_key)
+        self.client = _client(api_key, GENERATE_TIMEOUT)
 
     def _params(self) -> dict:
         # GPT-5.x reasoning models reject `temperature` unless reasoning_effort

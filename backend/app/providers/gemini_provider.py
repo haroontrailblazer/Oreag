@@ -35,11 +35,18 @@ def _client(api_key: str | None):
         raise ProviderUnavailableError(
             "google-genai is not installed. Run 'pip install -r requirements.txt'."
         )
+    from google.genai import types
+
+    # google-genai has NO default timeout: a hung upstream would pin the calling
+    # thread indefinitely. Timeout is in milliseconds; 300s leaves room for a
+    # full-budget non-streaming generation (the client is shared with the
+    # embedder, which never gets near it).
+    http_options = types.HttpOptions(timeout=300_000)
     # Both key kinds work through the same SDK - express keys just need the
     # Vertex backend selected.
     if is_vertex_express_key(api_key):
-        return genai.Client(vertexai=True, api_key=api_key)
-    return genai.Client(api_key=api_key)
+        return genai.Client(vertexai=True, api_key=api_key, http_options=http_options)
+    return genai.Client(api_key=api_key, http_options=http_options)
 
 
 class GeminiEmbedder:

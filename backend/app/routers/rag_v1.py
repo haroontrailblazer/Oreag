@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from fastapi import File as FastAPIFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -160,22 +161,34 @@ async def public_upload_files(
     created: list[File] = []
     for upload in uploads:
         filename = upload.filename or "upload"
-        data = await upload.read()
-        if not is_ingestable(filename, data):
+        # Enforce the size cap BEFORE buffering/decoding: the multipart parser
+        # reports the part size, so an oversized file 413s without loading
+        # ~50MB into RAM or text-sniffing it first.
+        if upload.size is not None and upload.size > settings.max_upload_bytes:
             raise HTTPException(
-                400, f"Unsupported file type: {filename} (no text could be extracted)"
+                413,
+                f"{filename} exceeds the "
+                f"{settings.max_upload_bytes // (1024 * 1024)} MB limit",
             )
+        data = await upload.read()
         if len(data) > settings.max_upload_bytes:
             raise HTTPException(
                 413,
                 f"{filename} exceeds the "
                 f"{settings.max_upload_bytes // (1024 * 1024)} MB limit",
             )
+        if not is_ingestable(filename, data):
+            raise HTTPException(
+                400, f"Unsupported file type: {filename} (no text could be extracted)"
+            )
         file_id = uuid.uuid4()
         extension = source_extension(filename)
         content_type = content_type_for(filename, upload.content_type)
         path = f"{project.owner_id}/{project.id}/{file_id}{extension}"
-        storage.upload_file(path, data, content_type)
+        # supabase-py's storage call is synchronous: run it in the threadpool so
+        # a multi-second 50MB PUT doesn't freeze the event loop (this handler is
+        # async, so blocking here would stall every request and SSE stream).
+        await run_in_threadpool(storage.upload_file, path, data, content_type)
         record = File(
             id=file_id,
             project_id=project.id,

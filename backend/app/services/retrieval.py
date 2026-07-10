@@ -88,15 +88,28 @@ def rrf_merge(
     return out
 
 
-def retrieve(db: Session, project: Project, question: str, top_k: int) -> list[dict]:
-    api_key = resolver.resolve_embedding_key(db, project)
-    embedder = get_embedder(
-        project.embedding_provider,
-        project.embedding_model,
-        api_key,
-        dimensions=project.embedding_dimensions,
-    )
-    query_vector = embedder.embed_query(question)
+def retrieve(
+    db: Session,
+    project: Project,
+    question: str,
+    top_k: int,
+    embed_fn=None,
+) -> list[dict]:
+    # query.py passes its per-request memoized embedder as ``embed_fn`` so the
+    # same string is never embedded twice in one request (each embed is a
+    # blocking provider round-trip). Standalone callers omit it and embedding
+    # is resolved here as before.
+    if embed_fn is None:
+        api_key = resolver.resolve_embedding_key(db, project)
+        embedder = get_embedder(
+            project.embedding_provider,
+            project.embedding_model,
+            api_key,
+            dimensions=project.embedding_dimensions,
+        )
+        query_vector = embedder.embed_query(question)
+    else:
+        query_vector = embed_fn(question)
     qvec = "[" + ",".join(repr(v) for v in query_vector) + "]"
     params = {"qvec": qvec, "project_id": str(project.id), "limit": top_k}
 

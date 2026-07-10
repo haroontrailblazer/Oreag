@@ -1,5 +1,6 @@
 """Sarvam AI provider (chat only). Sarvam exposes an OpenAI-compatible
 chat-completions API, so we reuse the OpenAI SDK pointed at Sarvam's base URL."""
+import httpx
 from openai import OpenAI
 
 from .base import ProviderUnavailableError
@@ -13,7 +14,13 @@ def _client(api_key: str | None) -> OpenAI:
             "No Sarvam AI API key configured. Add one in Settings → API keys "
             "or set a per-project key."
         )
-    return OpenAI(api_key=api_key, base_url=SARVAM_BASE_URL)
+    # Bound the SDK defaults (600s, 2 retries) - see openai_provider.
+    return OpenAI(
+        api_key=api_key,
+        base_url=SARVAM_BASE_URL,
+        timeout=httpx.Timeout(300.0, connect=5.0),
+        max_retries=1,
+    )
 
 
 class SarvamLLM:

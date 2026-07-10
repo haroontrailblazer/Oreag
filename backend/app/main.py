@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from .config import settings
 from .routers import (
@@ -24,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Every sync-def endpoint runs on this AnyIO threadpool (default 40 tokens).
+    # LLM-bound requests hold a thread for seconds, so 40 in-flight queries
+    # would stall everything behind them; raise the ceiling to match the DB
+    # pool (10+30 connections) so threads aren't the first limit hit.
+    import anyio.to_thread
+
+    anyio.to_thread.current_default_thread_limiter().total_tokens = 100
+
     if settings.database_url:
         from .services.ingestion import fail_stale_jobs
 
@@ -59,6 +69,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# The engine fails DB-connection checkout fast (pool_timeout=5) under
+# saturation; surface that as a deliberate "at capacity, retry" instead of an
+# opaque 500 so well-behaved clients back off.
+@app.exception_handler(PoolTimeoutError)
+async def _pool_saturated(request, exc):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Server is at capacity - please retry shortly"},
+        headers={"Retry-After": "2"},
+    )
+
+
 app.include_router(projects.router)
 app.include_router(files.router)
 app.include_router(keys.router)
@@ -75,6 +97,9 @@ app.include_router(memory_graph.public_router)
 
 # GET and HEAD: uptime monitors (e.g. UptimeRobot) default to HEAD, and FastAPI
 # does not auto-add HEAD to a GET route - without this a HEAD probe gets a 405.
+# async def is load-bearing: a sync def would queue behind busy threadpool
+# threads, so saturation would fail Render's health check and restart the
+# instance exactly when it's busiest.
 @app.api_route("/healthz", methods=["GET", "HEAD"])
-def healthz():
+async def healthz():
     return {"status": "ok"}

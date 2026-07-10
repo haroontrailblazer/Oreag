@@ -769,7 +769,7 @@ class TestOpenAIProviderCompat:
 
         calls: list[dict] = []
         monkeypatch.setattr(
-            openai_provider, "_client", lambda key: self._fake_client(calls)
+            openai_provider, "_client", lambda key, timeout=None: self._fake_client(calls)
         )
         llm = openai_provider.OpenAILLM("gpt-5.5", "k")
         assert llm.generate("sys", "user") == "ok"
@@ -781,7 +781,7 @@ class TestOpenAIProviderCompat:
 
         calls: list[dict] = []
         monkeypatch.setattr(
-            openai_provider, "_client", lambda key: self._fake_client(calls)
+            openai_provider, "_client", lambda key, timeout=None: self._fake_client(calls)
         )
         llm = openai_provider.OpenAILLM("gpt-4o-mini", "k")
         assert llm.generate("sys", "user") == "ok"

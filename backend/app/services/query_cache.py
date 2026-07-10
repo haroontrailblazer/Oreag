@@ -18,11 +18,20 @@ On top of a backend:
   * ``ConversationStore`` - server-side chat memory keyed by ``conversation_id``.
 """
 import json
+import logging
 import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Returned by a backend `get` when the backend itself failed (vs. a genuine
+# miss). Plain readers treat it as a miss; read-modify-write callers
+# (ConversationStore.append_turn) must NOT write afterwards - overwriting a
+# 20-turn history with 1 turn because one read timed out would be data loss.
+UNAVAILABLE = object()
 
 
 def normalize_question(question: str) -> str:
@@ -100,22 +109,38 @@ class InMemoryBackend:
 
 
 class RedisBackend:
-    """Same interface, backed by a redis client (injected, so it's testable)."""
+    """Same interface, backed by a redis client (injected, so it's testable).
+
+    Every operation is best-effort: this backend holds a CACHE and conversation
+    memory, so a Redis outage must degrade to "miss" - never take the query
+    path down with a 500 or block a thread on an unbounded socket wait (the
+    client is built with short socket timeouts in ``make_backend``).
+    """
 
     def __init__(self, client):
         self._r = client
 
-    def get(self, key: str) -> str | None:
-        raw = self._r.get(key)
+    def get(self, key: str):
+        try:
+            raw = self._r.get(key)
+        except Exception as exc:
+            logger.warning("Redis get failed (%s) - treating as miss", type(exc).__name__)
+            return UNAVAILABLE
         if raw is None:
             return None
         return raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
 
     def set(self, key: str, value: str, ttl_seconds: float) -> None:
-        self._r.set(key, value, ex=int(ttl_seconds))
+        try:
+            self._r.set(key, value, ex=int(ttl_seconds))
+        except Exception as exc:
+            logger.warning("Redis set failed (%s) - skipping", type(exc).__name__)
 
     def delete(self, key: str) -> None:
-        self._r.delete(key)
+        try:
+            self._r.delete(key)
+        except Exception as exc:
+            logger.warning("Redis delete failed (%s) - skipping", type(exc).__name__)
 
     def clear(self) -> None:
         # Never flush a shared Redis; entries expire by TTL.
@@ -131,7 +156,18 @@ def make_backend(
     if redis_url:
         import redis  # lazy - only required when actually configured
 
-        return RedisBackend(redis.from_url(redis_url))
+        # Short socket timeouts: redis-py defaults to NO timeout, so a hung
+        # (not refused) Redis would block request threads indefinitely. A
+        # cache lookup that can't answer in ~1s should just be a miss.
+        return RedisBackend(
+            redis.from_url(
+                redis_url,
+                socket_connect_timeout=1.0,
+                socket_timeout=1.0,
+                retry_on_timeout=False,
+                health_check_interval=30,
+            )
+        )
     return InMemoryBackend(clock=clock, max_entries=max_entries)
 
 
@@ -163,7 +199,9 @@ class QueryCache:
 
     def get(self, key: str) -> Any:
         raw = self._backend.get(self._namespaced(key))
-        return None if raw is None else self._deserialize(raw)
+        if raw is None or raw is UNAVAILABLE:
+            return None
+        return self._deserialize(raw)
 
     def set(self, key: str, value: Any) -> None:
         self._backend.set(self._namespaced(key), self._serialize(value), self._ttl)
@@ -185,21 +223,39 @@ class QueryCache:
         On a miss the first caller computes while holding the key's lock;
         concurrent callers for the same key block, then reuse the cached value.
         Exceptions from ``compute`` propagate and are not cached.
+
+        The wait is bounded: if the leader is stuck - or cache writes are
+        no-oping during a backend outage, so followers would otherwise
+        recompute one-at-a-time forever - a waiter gives up after 30s and
+        computes independently.
         """
         hit = self.get(key)
         if hit is not None:
             return hit
-        with self._lock_for(key):
-            hit = self.get(key)
-            if hit is not None:
-                return hit
+        lock = self._lock_for(key)
+        acquired = lock.acquire(timeout=30.0)
+        try:
+            if acquired:
+                hit = self.get(key)
+                if hit is not None:
+                    return hit
             value = compute()
             self.set(key, value)
             return value
+        finally:
+            if acquired:
+                lock.release()
 
 
 class ConversationStore:
-    """Server-side conversation memory keyed by conversation_id.
+    """Server-side conversation memory keyed by (scope, conversation_id).
+
+    ``scope`` is the project id: conversation_id is a caller-chosen string, so
+    without the scope two tenants independently picking "session-1" would read
+    and corrupt each other's chat history on a shared backend. (Histories
+    written under the pre-scope ``conv:{id}`` key format are deliberately left
+    to expire rather than dual-read - a legacy fallback would reintroduce the
+    cross-tenant collision this fixes. One-time reset on deploy.)
 
     The whole turn list is stored as one JSON document and capped to the most
     recent ``max_turns`` on every append, so it stays small and bounded.
@@ -211,20 +267,37 @@ class ConversationStore:
         self._max_turns = max_turns
 
     @staticmethod
-    def _namespaced(conversation_id: str) -> str:
-        return f"conv:{conversation_id}"
+    def _namespaced(scope: str, conversation_id: str) -> str:
+        return f"conv:{scope}:{conversation_id}"
 
-    def get_history(self, conversation_id: str) -> list[dict]:
-        raw = self._backend.get(self._namespaced(conversation_id))
-        return json.loads(raw) if raw else []
+    def _read(self, scope: str, conversation_id: str) -> tuple[list[dict], bool]:
+        """Returns (history, degraded). ``degraded`` means the backend failed -
+        the caller must not write back what may be a truncated view."""
+        raw = self._backend.get(self._namespaced(scope, conversation_id))
+        if raw is UNAVAILABLE:
+            return [], True
+        return (json.loads(raw) if raw else []), False
+
+    def get_history(self, scope: str, conversation_id: str) -> list[dict]:
+        return self._read(scope, conversation_id)[0]
 
     def append_turn(
-        self, conversation_id: str, question: str, answer: str
+        self, scope: str, conversation_id: str, question: str, answer: str
     ) -> list[dict]:
-        history = self.get_history(conversation_id)
+        history, degraded = self._read(scope, conversation_id)
         history.append({"question": question, "answer": answer})
         history = history[-self._max_turns :]
+        if degraded:
+            # The read failed, so `history` holds only this turn. Writing it
+            # would OVERWRITE the stored conversation with a one-turn stub the
+            # moment the backend recovers - dropping the turn is the lesser
+            # loss.
+            logger.warning(
+                "Conversation backend unavailable - turn not recorded for %s",
+                conversation_id,
+            )
+            return history
         self._backend.set(
-            self._namespaced(conversation_id), json.dumps(history), self._ttl
+            self._namespaced(scope, conversation_id), json.dumps(history), self._ttl
         )
         return history

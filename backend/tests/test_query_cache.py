@@ -255,13 +255,13 @@ class TestConversationStore:
         )
 
     def test_unknown_conversation_has_empty_history(self):
-        assert self._store().get_history("cid-1") == []
+        assert self._store().get_history("p1", "cid-1") == []
 
     def test_append_then_get_returns_turns_in_order(self):
         store = self._store()
-        store.append_turn("cid", "q1", "a1")
-        store.append_turn("cid", "q2", "a2")
-        assert store.get_history("cid") == [
+        store.append_turn("p1", "cid", "q1", "a1")
+        store.append_turn("p1", "cid", "q2", "a2")
+        assert store.get_history("p1", "cid") == [
             {"question": "q1", "answer": "a1"},
             {"question": "q2", "answer": "a2"},
         ]
@@ -269,14 +269,105 @@ class TestConversationStore:
     def test_history_is_capped_to_max_turns(self):
         store = self._store(max_turns=2)
         for i in range(4):
-            store.append_turn("cid", f"q{i}", f"a{i}")
-        history = store.get_history("cid")
+            store.append_turn("p1", "cid", f"q{i}", f"a{i}")
+        history = store.get_history("p1", "cid")
         assert len(history) == 2
         assert history[0]["question"] == "q2"  # oldest dropped
 
     def test_conversations_are_isolated_by_id(self):
         store = self._store()
-        store.append_turn("a", "qa", "aa")
-        store.append_turn("b", "qb", "ab")
-        assert store.get_history("a") == [{"question": "qa", "answer": "aa"}]
-        assert store.get_history("b") == [{"question": "qb", "answer": "ab"}]
+        store.append_turn("p1", "a", "qa", "aa")
+        store.append_turn("p1", "b", "qb", "ab")
+        assert store.get_history("p1", "a") == [{"question": "qa", "answer": "aa"}]
+        assert store.get_history("p1", "b") == [{"question": "qb", "answer": "ab"}]
+
+    def test_same_conversation_id_is_isolated_across_scopes(self):
+        """conversation_id is caller-chosen: two tenants both picking "session-1"
+        must never read or corrupt each other's history on a shared backend."""
+        store = self._store()
+        store.append_turn("project-A", "session-1", "qa", "aa")
+        store.append_turn("project-B", "session-1", "qb", "ab")
+        assert store.get_history("project-A", "session-1") == [
+            {"question": "qa", "answer": "aa"}
+        ]
+        assert store.get_history("project-B", "session-1") == [
+            {"question": "qb", "answer": "ab"}
+        ]
+
+
+class _ExplodingRedis:
+    """Mimics redis-py's surface but every call fails like an outage would."""
+
+    def get(self, key):
+        raise ConnectionError("redis down")
+
+    def set(self, key, value, ex=None):
+        raise ConnectionError("redis down")
+
+    def delete(self, key):
+        raise ConnectionError("redis down")
+
+
+class _FlakyGetRedis:
+    """The dangerous outage shape: reads fail but writes succeed (redis-py
+    discards a timed-out connection, so the next command gets a fresh one)."""
+
+    def __init__(self):
+        self.store = {}
+
+    def get(self, key):
+        raise ConnectionError("redis read timed out")
+
+    def set(self, key, value, ex=None):
+        self.store[key] = value
+
+    def delete(self, key):
+        self.store.pop(key, None)
+
+
+class TestRedisBackendDegradesOnOutage:
+    """A cache/conversation backend must degrade to 'miss', never raise: an
+    unhandled Redis error here would 500 every /v1 query."""
+
+    def _backend(self):
+        from app.services.query_cache import RedisBackend
+
+        return RedisBackend(_ExplodingRedis())
+
+    def test_cache_get_treats_outage_as_miss(self):
+        import json
+
+        from app.services.query_cache import QueryCache
+
+        cache = QueryCache(self._backend(), ttl_seconds=60, serialize=json.dumps,
+                           deserialize=json.loads)
+        assert cache.get("k") is None
+
+    def test_set_is_a_noop(self):
+        self._backend().set("k", "v", 60)  # must not raise
+
+    def test_delete_is_a_noop(self):
+        self._backend().delete("k")  # must not raise
+
+    def test_history_read_degrades_to_empty(self):
+        from app.services.query_cache import ConversationStore
+
+        store = ConversationStore(self._backend(), ttl_seconds=60)
+        assert store.get_history("p1", "cid") == []
+
+    def test_append_turn_never_overwrites_history_after_failed_read(self):
+        """append_turn is read-modify-write: if the read degraded to [] but the
+        write would succeed, writing must be SKIPPED - otherwise a 20-turn
+        conversation gets silently replaced by a one-turn stub."""
+        from app.services.query_cache import ConversationStore, RedisBackend
+
+        flaky = _FlakyGetRedis()
+        flaky.store["conv:p1:cid"] = '[{"question": "old", "answer": "history"}]'
+        store = ConversationStore(RedisBackend(flaky), ttl_seconds=60)
+
+        returned = store.append_turn("p1", "cid", "new q", "new a")
+
+        # The caller still gets the turn it just made...
+        assert returned == [{"question": "new q", "answer": "new a"}]
+        # ...but the stored history was NOT clobbered.
+        assert flaky.store["conv:p1:cid"] == '[{"question": "old", "answer": "history"}]'

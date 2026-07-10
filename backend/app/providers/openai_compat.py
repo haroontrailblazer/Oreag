@@ -13,13 +13,28 @@ from ..config import settings
 from .base import ProviderUnavailableError
 
 
-def _client(api_key: str | None, base_url: str, provider_label: str) -> OpenAI:
+# Bound the SDK defaults (600s, 2 retries) so a hung vendor can't pin a
+# threadpool thread for minutes. Embeddings answer in seconds; non-streaming
+# generations legitimately need minutes; `read` applies per streamed delta.
+EMBED_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+GENERATE_TIMEOUT = httpx.Timeout(300.0, connect=5.0)
+MAX_RETRIES = 1
+
+
+def _client(
+    api_key: str | None, base_url: str, provider_label: str, timeout: httpx.Timeout
+) -> OpenAI:
     if not api_key:
         raise ProviderUnavailableError(
             f"No {provider_label} API key configured. Add one in Settings → "
             "API keys or set a per-project key."
         )
-    return OpenAI(api_key=api_key, base_url=base_url)
+    return OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        max_retries=MAX_RETRIES,
+    )
 
 
 # Azure OpenAI needs a per-user resource endpoint alongside the key. Both are
@@ -63,7 +78,7 @@ class CompatLLM:
         provider_label: str,
     ):
         self.model = model
-        self.client = _client(api_key, base_url, provider_label)
+        self.client = _client(api_key, base_url, provider_label, GENERATE_TIMEOUT)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         # No temperature: several of these vendors serve reasoning models that
@@ -112,7 +127,7 @@ class CompatEmbedder:
         # Only Matryoshka-capable models accept a dimensions param; sending it
         # to others is a 400 on most vendors.
         self._send_dimensions = send_dimensions
-        self.client = _client(api_key, base_url, provider_label)
+        self.client = _client(api_key, base_url, provider_label, EMBED_TIMEOUT)
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         params: dict = {"dimensions": self.dimensions} if self._send_dimensions else {}

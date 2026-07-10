@@ -10,6 +10,13 @@ def _make_engine():
     return create_engine(
         settings.database_url,
         pool_pre_ping=True,
+        # Explicit pool sizing (defaults are 5+10): sized against the request
+        # threadpool so concurrent queries aren't capped at 15 connections, and
+        # failing checkout fast (5s, not 30s) so overload surfaces as a quick
+        # error instead of a pile-up of stalled threads.
+        pool_size=10,
+        max_overflow=30,
+        pool_timeout=5,
         # Supabase's pooler (pgbouncer) does not support prepared statements
         connect_args={"prepare_threshold": None},
     )

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import Project, SemanticQueryCache
 from ..providers import resolver
+from ..providers.base import ProviderUnavailableError
 from ..providers.registry import get_embedder
 from . import agentic
 
@@ -63,16 +64,26 @@ def lookup(
     question: str,
     top_k: int,
     signature: str,
+    embed_fn=None,
 ) -> tuple["agentic.AgenticResult | None", list[float] | None, float | None]:
     """Return (cached result, the question's embedding, hit similarity).
 
     The embedding comes back even on a miss so store() never re-embeds; the
-    similarity comes back only on a hit (for response transparency).
+    similarity comes back only on a hit (for response transparency). query.py
+    passes its per-request memoized embedder as ``embed_fn`` so this embed is
+    shared with retrieval instead of being a separate provider round-trip.
     """
     if not settings.semantic_cache_enabled:
         return None, None, None
     try:
-        vector = _embed_question(db, project, question)
+        try:
+            vector = (
+                embed_fn(question) if embed_fn else _embed_question(db, project, question)
+            )
+        except ProviderUnavailableError:
+            # No usable embedding key - same graceful miss `_embed_question`
+            # signals with None; retrieval will surface the real 503 later.
+            vector = None
         if vector is None:
             return None, None, None
         qvec = "[" + ",".join(repr(v) for v in vector) + "]"
