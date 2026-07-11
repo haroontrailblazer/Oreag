@@ -13,9 +13,90 @@ from ..models import Chunk, File, Project
 from ..providers import resolver
 from ..providers.registry import get_embedder
 from . import storage
-from .conversion import convert_to_markdown, markdown_path_for
+from .conversion import (
+    AUDIO_EXTENSIONS,
+    IMAGE_CAPTION_EXTENSIONS,
+    convert_to_markdown,
+    markdown_path_for,
+    source_extension,
+)
 
 logger = logging.getLogger(__name__)
+
+# Gemini's OpenAI-compatible surface - lets MarkItDown's captioning (which
+# speaks the OpenAI chat-completions format) run on Gemini keys too.
+GEMINI_OPENAI_COMPAT_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def vision_llm_for(project: Project, api_key: str | None):
+    """(client, model) for MarkItDown image captioning, or (None, None).
+
+    Reuses the project's ANSWER model: OpenAI chat models and all Gemini
+    models are vision-capable and both speak the OpenAI wire format MarkItDown
+    expects. Other providers (Anthropic, local, compat vendors) don't fit that
+    slot, so their projects skip captioning and image ingestion fails with a
+    clear message instead of a provider 400.
+    """
+    if not api_key:
+        return None, None
+    if project.llm_provider == "openai":
+        from ..providers.openai_provider import GENERATE_TIMEOUT, MAX_RETRIES
+
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key, timeout=GENERATE_TIMEOUT, max_retries=MAX_RETRIES)
+        return client, project.llm_model
+    if project.llm_provider == "gemini":
+        from ..providers.gemini_provider import is_vertex_express_key
+
+        if is_vertex_express_key(api_key):
+            return None, None  # express keys only work on the Vertex backend
+        from ..providers.openai_provider import GENERATE_TIMEOUT, MAX_RETRIES
+
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=GEMINI_OPENAI_COMPAT_URL,
+            timeout=GENERATE_TIMEOUT,
+            max_retries=MAX_RETRIES,
+        )
+        return client, project.llm_model
+    return None, None
+
+
+def audio_transcribers_for(db: Session, project: Project) -> list[tuple[str, object]]:
+    """Ordered BYOK transcription chain from the uploader's own keys.
+
+    Every STT-capable provider the uploader holds a key for (project override
+    or account key) gets a slot, the project's own answer-model provider
+    first - so a Gemini project transcribes with the user's Gemini key, a
+    Sarvam project with Saarika, and so on. An empty chain (or every entry
+    failing) means conversion falls back to the free Google endpoint.
+    """
+    from ..providers import transcription
+
+    chain: list[tuple[str, object]] = []
+    ordered = [project.llm_provider] + [
+        p for p in transcription.STT_PROVIDERS if p != project.llm_provider
+    ]
+    for provider in ordered:
+        if provider not in transcription.STT_PROVIDERS:
+            continue
+        api_key = resolver.resolve_key_for_provider(db, project, provider)
+        if not api_key:
+            continue
+        gemini_model = (
+            project.llm_model
+            if provider == "gemini" and project.llm_provider == "gemini"
+            else transcription.DEFAULT_GEMINI_STT_MODEL
+        )
+        transcriber = transcription.transcriber_for(
+            provider, api_key, gemini_model=gemini_model
+        )
+        if transcriber is not None:
+            chain.append((provider, transcriber))
+    return chain
 
 
 def embed_batch_size(embedder) -> int:
@@ -85,6 +166,7 @@ def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
         file.status = "failed"
         file.error = message[:500]
         file.conversion_error = message[:500]
+        file.conversion_note = None  # a failed file's caveat would only confuse
         project = db.get(Project, file.project_id)
         if project is not None:
             recompute_project_status(db, project)
@@ -111,7 +193,28 @@ def ingest_file(file_id: uuid.UUID) -> None:
         db.commit()
 
         source_bytes = storage.download(file.storage_path)
-        converted = convert_to_markdown(source_bytes, file.filename)
+        # Rich-media conversion runs on the uploader's own keys (BYOK):
+        #   images -> AI caption via the project's answer model (OpenAI/Gemini
+        #            speak the OpenAI format MarkItDown's captioner expects);
+        #   audio  -> speech-to-text through whichever STT-capable provider
+        #            keys the uploader holds (own provider first); the free
+        #            Google endpoint runs only when the whole chain fails.
+        extension = source_extension(file.filename)
+        llm_client = llm_model = None
+        transcribers: list = []
+        if extension in IMAGE_CAPTION_EXTENSIONS:
+            llm_client, llm_model = vision_llm_for(
+                project, resolver.resolve_llm_key(db, project)
+            )
+        elif extension in AUDIO_EXTENSIONS:
+            transcribers = audio_transcribers_for(db, project)
+        converted = convert_to_markdown(
+            source_bytes,
+            file.filename,
+            llm_client=llm_client,
+            llm_model=llm_model,
+            transcribers=transcribers,
+        )
 
         # The user may have deleted the file while we were converting - bail
         # before uploading markdown / paying for embeddings on a ghost.
@@ -121,6 +224,9 @@ def ingest_file(file_id: uuid.UUID) -> None:
 
         file.page_count = converted.page_count
         file.conversion_error = None
+        # e.g. "audio used the free fallback endpoint" - shown on the file row
+        # and toasted by the Files tab when indexing completes.
+        file.conversion_note = converted.note
 
         markdown_path = file.markdown_storage_path or markdown_path_for(file.storage_path)
         storage.upload_file(

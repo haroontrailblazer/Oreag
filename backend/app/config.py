@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     max_files_per_project: int = 1000      # total files a project may hold
     upload_rate_per_minute: int = 60       # files ingested per project per minute
 
+    # Audio ingestion: BYOK transcription through the uploader's own provider
+    # keys - every STT-capable provider they hold a key for is tried in order
+    # (own answer-model provider first): OpenAI Whisper, Gemini, Groq, Mistral
+    # Voxtral, Sarvam Saarika. MarkItDown's free Google Web Speech endpoint
+    # (short clips only) runs only when the whole chain yields nothing. This
+    # setting picks the OpenAI model used in that chain.
+    audio_transcription_model: str = "whisper-1"
+
     # "Brain": blend relevant agent memories into RAG answers, and link memories
     # into the memory graph alongside document chunks (same embedding space).
     rag_memory_blend_k: int = 4            # max memories blended into one answer

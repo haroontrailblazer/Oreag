@@ -71,6 +71,8 @@ export interface FileRecord {
   status: "pending" | "processing" | "indexed" | "failed"
   error: string | null
   conversion_error: string | null
+  // Non-fatal caveat (e.g. audio used the free transcription fallback).
+  conversion_note: string | null
   created_at: string
   indexed_at: string | null
 }

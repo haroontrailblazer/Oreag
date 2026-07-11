@@ -44,3 +44,16 @@ def resolve_llm_key(db: Session, project: Project) -> str | None:
     if project.llm_key_encrypted:
         return crypto.decrypt(project.llm_key_encrypted)
     return _account_key(db, project.owner_id, project.llm_provider)
+
+
+def resolve_key_for_provider(db: Session, project: Project, provider: str) -> str | None:
+    """Any usable key for a SPECIFIC provider in this project's context.
+
+    Used for capability lookups that aren't tied to the project's chosen
+    models - e.g. audio transcription needs an OpenAI key (Whisper) even when
+    the project answers with Anthropic. The project's own override wins when
+    its LLM already uses that provider; otherwise the owner's account key.
+    """
+    if project.llm_provider == provider and project.llm_key_encrypted:
+        return crypto.decrypt(project.llm_key_encrypted)
+    return _account_key(db, project.owner_id, provider)

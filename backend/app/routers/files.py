@@ -220,6 +220,7 @@ async def upload_files(
             f.chunk_count = 0
             f.error = None
             f.conversion_error = None
+            f.conversion_note = None
 
     project.status = "indexing"
     db.commit()
@@ -268,6 +269,7 @@ def retry_file(
     file.status = "pending"
     file.error = None
     file.conversion_error = None
+    file.conversion_note = None
     project.status = "indexing"
     db.commit()
     background_tasks.add_task(ingest_file, file.id)
@@ -337,6 +339,7 @@ def reindex_project(
         file.chunk_count = 0
         file.error = None
         file.conversion_error = None
+        file.conversion_note = None
     project.status = "indexing" if files else "empty"
     db.commit()
 

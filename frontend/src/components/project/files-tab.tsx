@@ -215,6 +215,31 @@ export function FilesTab({
     }
   )
 
+  // Toast a file's conversion caveat (e.g. "audio used the free transcription
+  // endpoint - none of your keys support speech-to-text") the moment it
+  // finishes indexing. Only status TRANSITIONS toast: files that were already
+  // indexed when the tab mounted stay quiet (their note shows on the row).
+  const prevStatuses = useRef<Map<string, FileRecord["status"]> | null>(null)
+  useEffect(() => {
+    if (!files) return
+    if (prevStatuses.current !== null) {
+      for (const file of files) {
+        const prev = prevStatuses.current.get(file.id)
+        if (
+          file.conversion_note &&
+          file.status === "indexed" &&
+          (prev === "pending" || prev === "processing")
+        ) {
+          toast.info(file.filename, {
+            description: file.conversion_note,
+            duration: 10000,
+          })
+        }
+      }
+    }
+    prevStatuses.current = new Map(files.map((f) => [f.id, f.status]))
+  }, [files])
+
   // Scroll to and briefly highlight the file targeted by a ?file=<id> link or
   // the Visualize tab's "View file" button (focusToken re-arms same-file hits).
   useEffect(() => {
@@ -336,7 +361,7 @@ export function FilesTab({
                 visual: <DocTypesViz />,
                 title: "Mind the 50 MB limit",
                 detail:
-                  "Any file with extractable text works: rich formats (PDF, DOCX, PPTX, XLSX, HTML, images, audio...) are converted with MarkItDown, everything else (code, configs, logs) ingests as plain text. Only opaque binary is rejected. Clean source documents index best.",
+                  "Documents (PDF, DOCX, PPTX, XLSX, HTML, EPUB...) are converted to Markdown with MarkItDown. Images (JPG, JPEG, PNG) are AI-captioned with your OpenAI or Gemini answer model, transcribing any text in them verbatim. Audio (MP3, WAV, M4A) is transcribed with your own provider keys (OpenAI, Gemini, Groq, Mistral, Sarvam), with a free fallback for short clips. Everything else with readable text (code, configs, logs) ingests as plain text. Only opaque binary is rejected.",
               },
               {
                 visual: <ChunkingViz />,
@@ -472,6 +497,14 @@ export function FilesTab({
                         {file.conversion_error}
                       </p>
                     )}
+                  {file.conversion_note && !file.error && (
+                    <p
+                      className="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400"
+                      title={file.conversion_note}
+                    >
+                      {file.conversion_note}
+                    </p>
+                  )}
                 </div>
                 <FileStatus status={file.status} />
                 <DropdownMenu>

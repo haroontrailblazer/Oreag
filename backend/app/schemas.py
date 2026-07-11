@@ -92,6 +92,7 @@ class FileOut(BaseModel):
     status: str
     error: str | None
     conversion_error: str | None = None
+    conversion_note: str | None = None
     created_at: datetime
     indexed_at: datetime | None
 

@@ -62,6 +62,9 @@ class File(Base):
     status: Mapped[str] = mapped_column(Text, default="pending")  # pending|processing|indexed|failed
     error: Mapped[str | None] = mapped_column(Text)
     conversion_error: Mapped[str | None] = mapped_column(Text)
+    # Non-fatal: the file indexed, but the uploader should know how (e.g. audio
+    # fell back to the free transcription endpoint - no capable provider key).
+    conversion_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

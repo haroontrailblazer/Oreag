@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import uuid
 
@@ -947,6 +948,235 @@ class TestConversion:
 
     def test_cp1252_fallback_decodes_legacy_text(self):
         assert try_decode_text("caf\xe9 menu".encode("cp1252")) == "caf\xe9 menu"
+
+
+# 1x1 transparent PNG - a real, valid image so MarkItDown's converter accepts it.
+_TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+class _FakeVisionClient:
+    """OpenAI-SDK-shaped client that records the captioning request."""
+
+    def __init__(self, caption="A tiny test pixel."):
+        self.requests: list[dict] = []
+        outer = self
+
+        class _Completions:
+            def create(self, **kwargs):
+                outer.requests.append(kwargs)
+                msg = type("M", (), {"content": outer.caption})()
+                choice = type("C", (), {"message": msg})()
+                return type("R", (), {"choices": [choice]})()
+
+        class _Chat:
+            completions = _Completions()
+
+        self.caption = caption
+        self.chat = _Chat()
+
+
+def _transcriber(text=None, fail=False):
+    """A (data, filename) -> text stand-in for one provider's STT."""
+
+    def transcribe(data, filename):
+        if fail:
+            raise RuntimeError("provider STT unavailable")
+        return text
+
+    return transcribe
+
+
+class TestRichMediaIngestion:
+    def test_image_is_ai_captioned_through_llm_client(self):
+        client = _FakeVisionClient(caption="Screenshot of an invoice, total 42 USD.")
+        doc = convert_to_markdown(
+            _TINY_PNG, "shot.png", llm_client=client, llm_model="gpt-4o-mini"
+        )
+        assert "Screenshot of an invoice, total 42 USD." in doc.markdown
+        # The captioning request carried the image and our verbatim-text prompt.
+        [request] = client.requests
+        assert request["model"] == "gpt-4o-mini"
+        content = request["messages"][0]["content"]
+        assert any(part.get("type") == "image_url" for part in content)
+        assert any("verbatim" in part.get("text", "") for part in content)
+
+    def test_image_without_vision_model_fails_with_guidance(self):
+        with pytest.raises(ValueError, match="OpenAI or Gemini"):
+            convert_to_markdown(_TINY_PNG, "shot.png")
+
+    def test_audio_uses_byok_transcriber_and_skips_markitdown(self, monkeypatch):
+        import markitdown
+
+        def _boom(*a, **k):
+            raise AssertionError("MarkItDown must not run when BYOK succeeds")
+
+        monkeypatch.setattr(markitdown, "MarkItDown", _boom)
+        doc = convert_to_markdown(
+            b"not-really-audio", "meeting.mp3",
+            transcribers=[("openai", _transcriber("quarterly numbers are up"))],
+        )
+        assert doc.markdown == "quarterly numbers are up"
+        assert doc.page_count is None
+
+    def test_audio_chain_moves_to_next_provider_on_failure(self, monkeypatch):
+        import markitdown
+
+        def _boom(*a, **k):
+            raise AssertionError("MarkItDown must not run when the chain succeeds")
+
+        monkeypatch.setattr(markitdown, "MarkItDown", _boom)
+        doc = convert_to_markdown(
+            b"not-really-audio", "meeting.mp3",
+            transcribers=[
+                ("gemini", _transcriber(fail=True)),
+                ("sarvam", _transcriber("nammalude quarterly report")),
+            ],
+        )
+        assert doc.markdown == "nammalude quarterly report"
+
+    def test_audio_falls_back_to_free_endpoint_when_chain_exhausted(self, monkeypatch):
+        import markitdown
+
+        class _FakeMD:
+            def __init__(self, **kwargs):
+                pass
+
+            def convert(self, path):
+                return type("R", (), {"text_content": "google transcript"})()
+
+        monkeypatch.setattr(markitdown, "MarkItDown", _FakeMD)
+        doc = convert_to_markdown(
+            b"not-really-audio", "meeting.mp3",
+            transcribers=[
+                ("openai", _transcriber(fail=True)),
+                ("mistral", _transcriber(text=None)),  # succeeded but empty
+            ],
+        )
+        assert doc.markdown == "google transcript"
+        # The uploader is told their keys were bypassed - and which ones.
+        assert "free Google speech endpoint" in doc.note
+        assert "openai, mistral" in doc.note
+
+    def test_audio_fallback_note_names_missing_keys(self, monkeypatch):
+        import markitdown
+
+        class _FakeMD:
+            def __init__(self, **kwargs):
+                pass
+
+            def convert(self, path):
+                return type("R", (), {"text_content": "google transcript"})()
+
+        monkeypatch.setattr(markitdown, "MarkItDown", _FakeMD)
+        doc = convert_to_markdown(b"not-really-audio", "meeting.mp3", transcribers=[])
+        assert "none of your API keys support speech-to-text" in doc.note
+
+    def test_byok_transcription_carries_no_note(self, monkeypatch):
+        import markitdown
+
+        def _boom(*a, **k):
+            raise AssertionError("MarkItDown must not run when BYOK succeeds")
+
+        monkeypatch.setattr(markitdown, "MarkItDown", _boom)
+        doc = convert_to_markdown(
+            b"not-really-audio", "meeting.mp3",
+            transcribers=[("openai", _transcriber("clean transcript"))],
+        )
+        assert doc.note is None
+
+    def test_non_audio_files_carry_no_note(self):
+        doc = convert_to_markdown(b"server:\n  port: 8080\n", "config.yaml")
+        assert doc.note is None
+
+
+class TestVisionAndTranscriptionClients:
+    def _project(self, provider, model="gpt-4o-mini"):
+        return Project(llm_provider=provider, llm_model=model)
+
+    def test_openai_project_gets_vision_client(self):
+        from app.services.ingestion import vision_llm_for
+
+        client, model = vision_llm_for(self._project("openai"), "sk-test")
+        assert client is not None and model == "gpt-4o-mini"
+
+    def test_gemini_project_routes_through_openai_compat_endpoint(self):
+        from app.services.ingestion import vision_llm_for
+
+        client, model = vision_llm_for(
+            self._project("gemini", "gemini-2.5-flash"), "AIza-test"
+        )
+        assert client is not None and model == "gemini-2.5-flash"
+        assert "generativelanguage.googleapis.com" in str(client.base_url)
+
+    def test_gemini_vertex_express_key_is_skipped(self):
+        from app.services.ingestion import vision_llm_for
+
+        assert vision_llm_for(self._project("gemini"), "AQ.express") == (None, None)
+
+    def test_other_providers_get_no_captioning(self):
+        from app.services.ingestion import vision_llm_for
+
+        assert vision_llm_for(self._project("anthropic"), "sk-ant") == (None, None)
+        assert vision_llm_for(self._project("openai"), None) == (None, None)
+
+    def test_every_stt_provider_yields_a_transcriber(self):
+        from app.providers.transcription import STT_PROVIDERS, transcriber_for
+
+        for provider in STT_PROVIDERS:
+            assert callable(transcriber_for(provider, "key-123")), provider
+        assert transcriber_for("anthropic", "key-123") is None
+
+    def test_transcriber_chain_prefers_the_projects_own_provider(self, monkeypatch):
+        from app.services import ingestion
+
+        keys = {"gemini": "AIza-x", "sarvam": "sv-x", "openai": None,
+                "groq": None, "mistral": None}
+        monkeypatch.setattr(
+            ingestion.resolver,
+            "resolve_key_for_provider",
+            lambda db, project, provider: keys.get(provider),
+        )
+        chain = ingestion.audio_transcribers_for(
+            None, self._project("gemini", "gemini-2.5-flash")
+        )
+        assert [name for name, _ in chain] == ["gemini", "sarvam"]
+
+    def test_transcriber_chain_finds_other_keys_for_sttless_providers(self, monkeypatch):
+        """An Anthropic-answering project still transcribes with the owner's
+        OpenAI key - Anthropic itself has no speech-to-text."""
+        from app.services import ingestion
+
+        keys = {"openai": "sk-x"}
+        monkeypatch.setattr(
+            ingestion.resolver,
+            "resolve_key_for_provider",
+            lambda db, project, provider: keys.get(provider),
+        )
+        chain = ingestion.audio_transcribers_for(None, self._project("anthropic"))
+        assert [name for name, _ in chain] == ["openai"]
+
+    def test_transcriber_chain_empty_without_stt_keys(self, monkeypatch):
+        from app.services import ingestion
+
+        monkeypatch.setattr(
+            ingestion.resolver,
+            "resolve_key_for_provider",
+            lambda db, project, provider: None,
+        )
+        assert ingestion.audio_transcribers_for(None, self._project("anthropic")) == []
+
+    def test_resolve_key_for_provider_uses_account_key(self, monkeypatch):
+        from app.providers import resolver
+
+        monkeypatch.setattr(
+            resolver, "_account_key", lambda db, owner, provider: f"acct-{provider}"
+        )
+        project = Project(
+            owner_id=uuid.uuid4(), llm_provider="anthropic", llm_key_encrypted=None
+        )
+        assert resolver.resolve_key_for_provider(None, project, "openai") == "acct-openai"
 
 
 class TestMemoryGraph:
