@@ -43,9 +43,6 @@ class Settings(BaseSettings):
     query_rate_per_minute_per_project: int = 300
     heavy_rate_per_minute_per_key: int = 10
     heavy_rate_per_minute_per_project: int = 20
-    # Public identifier-first login helper (/auth/methods): per-IP cap to blunt
-    # email enumeration.
-    auth_methods_rate_per_minute: int = 30
     # /explore hop budget for API-key callers (each hop multiplies exact
     # vector scans; the dashboard is not clamped).
     explore_max_hops_api: int = 1

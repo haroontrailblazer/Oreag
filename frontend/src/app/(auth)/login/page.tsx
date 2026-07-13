@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoaderOne } from "@/components/ui/loader"
 import { PasswordInput } from "@/components/ui/password-input"
-import { ApiError, api } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 
 const FIELD = "h-11 sm:h-12 rounded-xl bg-muted/50"
@@ -53,31 +52,36 @@ export default function LoginPage() {
     setChecking(true)
     setNotFound(false)
     try {
-      const m = await api<AuthMethods>("/auth/methods", {
+      // Same-origin Next.js route (always up with this page), so the routing
+      // works even when the FastAPI backend is asleep.
+      const res = await fetch("/api/auth/methods", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: value }),
       })
+      if (res.status === 429) {
+        toast.error("Too many attempts - please wait a moment and retry.")
+        return
+      }
+      if (!res.ok) {
+        // Lookup unavailable (not configured / DB error) - degrade to the
+        // classic password step so login is never blocked by this hint.
+        setStep("password")
+        return
+      }
+      const m = (await res.json()) as AuthMethods
       if (!m.exists) {
         setNotFound(true)
-      } else if (m.has_password) {
-        setMethods(m)
-        setStep("password")
-      } else if (m.providers.length > 0) {
+      } else if (m.providers.length > 0 && !m.has_password) {
+        // OAuth-only account -> steer to the provider, never a dead-end.
         setMethods(m)
         setStep("oauth")
       } else {
-        // Account exists with neither a password nor a known OAuth provider
-        // (shouldn't happen) - let them try the password field anyway.
+        setMethods(m)
         setStep("password")
       }
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 429) {
-        toast.error("Too many attempts - please wait a moment and retry.")
-      } else {
-        // Lookup unavailable (backend down / cold) - degrade gracefully to the
-        // classic password step so login is never blocked by this hint.
-        setStep("password")
-      }
+    } catch {
+      setStep("password") // network error - degrade gracefully
     } finally {
       setChecking(false)
     }
@@ -139,7 +143,13 @@ export default function LoginPage() {
       title="Welcome back"
       subtitle="Sign in to your workspace to continue"
     >
-      {step === "email" && (
+      {/* key={step} remounts this on every step change so the fade+slide
+          replays; the footer below stays put and doesn't re-animate. */}
+      <div
+        key={step}
+        className="space-y-6 animate-[auth-step-in_0.28s_ease-out]"
+      >
+        {step === "email" && (
         <>
           <form onSubmit={handleContinue} className="space-y-3">
             <div className="space-y-1.5">
@@ -150,7 +160,6 @@ export default function LoginPage() {
                 id="email"
                 type="email"
                 required
-                autoFocus
                 placeholder="Email"
                 value={email}
                 onChange={(e) => {
@@ -201,7 +210,6 @@ export default function LoginPage() {
               <PasswordInput
                 id="password"
                 required
-                autoFocus
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -267,7 +275,8 @@ export default function LoginPage() {
             </button>
           </p>
         </div>
-      )}
+        )}
+      </div>
 
       <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
         Don&apos;t have an account?

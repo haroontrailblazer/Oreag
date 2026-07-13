@@ -10,7 +10,6 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from .config import settings
 from .routers import (
     account,
-    auth_methods,
     files,
     keys,
     memory,
@@ -94,7 +93,6 @@ async def _pool_saturated(request, exc):
     )
 
 
-app.include_router(auth_methods.router)
 app.include_router(projects.router)
 app.include_router(files.router)
 app.include_router(keys.router)

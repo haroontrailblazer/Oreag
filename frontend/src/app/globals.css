@@ -141,6 +141,30 @@
   }
 }
 
+/* Identifier-first auth steps: a keyed wrapper replays this on each step
+   change (email -> password/oauth), so the swap fades and eases up instead of
+   snapping. Referenced via arbitrary `animate-[auth-step-in_...]`. */
+@keyframes auth-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes auth-step-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
 /* Drawer (Sheet) enter/leave - referenced via arbitrary `animate-[...]` classes
    in components/ui/sheet.tsx. Radix keeps the element mounted for the duration
    of these so the close animation can play. */

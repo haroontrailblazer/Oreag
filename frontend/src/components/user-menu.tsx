@@ -14,6 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { LoaderOne } from "@/components/ui/loader"
 import { gravatarUrl } from "@/lib/avatar"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -24,6 +25,8 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
   const [name, setName] = useState<string | null>(null)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [gravatar, setGravatar] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
     const supabase = createClient()
@@ -45,6 +48,7 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
   }, [])
 
   async function handleSignOut() {
+    setSigningOut(true)
     await createClient().auth.signOut()
     router.push("/login")
     router.refresh()
@@ -54,7 +58,14 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
   const src = avatarUrl || gravatar
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      open={open}
+      // Stay open while signing out so the spinner is visible instead of the
+      // menu snapping shut with no feedback.
+      onOpenChange={(next) => {
+        if (!signingOut) setOpen(next)
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <button
           className={cn(
@@ -90,8 +101,24 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
             <UserIcon className="size-4" /> Profile
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem variant="destructive" onClick={handleSignOut}>
-          <LogOut className="size-4" /> Sign out
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={signingOut}
+          // preventDefault keeps the menu open so the loading state shows.
+          onSelect={(e) => {
+            e.preventDefault()
+            handleSignOut()
+          }}
+        >
+          {signingOut ? (
+            <>
+              <LoaderOne /> Signing out…
+            </>
+          ) : (
+            <>
+              <LogOut className="size-4" /> Sign out
+            </>
+          )}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
