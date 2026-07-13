@@ -400,9 +400,12 @@ class TestQueryCaching:
         query = self._wire(monkeypatch, gen_calls)
         project = _project()
 
+        project.content_version = 1
         query.run_query(FakeDB([10, 0]), project, "What is X?", None, None)
-        # A newly ingested file changes the chunk count → fresh answer.
-        query.run_query(FakeDB([11, 0]), project, "What is X?", None, None)
+        # Any content write bumps content_version → new signature → fresh
+        # answer, even when counts happen to stay identical (in-place edits).
+        project.content_version = 2
+        query.run_query(FakeDB([10, 0]), project, "What is X?", None, None)
 
         assert len(gen_calls) == 2
 

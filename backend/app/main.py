@@ -1,4 +1,5 @@
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -34,16 +35,27 @@ async def lifespan(app: FastAPI):
 
     anyio.to_thread.current_default_thread_limiter().total_tokens = 100
 
+    stop_workers = threading.Event()
     if settings.database_url:
-        from .services.ingestion import fail_stale_jobs
+        # Durable ingestion: worker threads claim pending files from the DB
+        # queue. A restart loses nothing - pending rows are re-claimed at boot
+        # and interrupted (leased) rows re-queue when their lease expires.
+        # (Replaces the old fail_stale_jobs boot hook, which bulk-failed every
+        # in-flight file platform-wide on each deploy.)
+        from .services.ingest_queue import start_workers
+        from .services.maintenance import maintenance_loop
 
-        try:
-            fail_stale_jobs()
-        except Exception:
-            logger.exception("Stale-job cleanup failed (is the database reachable?)")
+        start_workers(stop_workers)
+        threading.Thread(
+            target=maintenance_loop,
+            args=(stop_workers,),
+            name="maintenance",
+            daemon=True,
+        ).start()
     else:
         logger.warning("DATABASE_URL is not set - only /healthz will work")
     yield
+    stop_workers.set()
 
 
 app = FastAPI(title="Oreag API", version="0.1.0", lifespan=lifespan)

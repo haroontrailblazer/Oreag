@@ -36,6 +36,9 @@ class Project(Base):
     # When true, all external access (public /v1 API + MCP) is blocked with a
     # 403 - the keys and data are kept, but the project is paused until resumed.
     suspended: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Monotonic counter bumped on every chunk/memory write - the cache
+    # signature for both answer-cache layers (replaces per-request COUNT(*)s).
+    content_version: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -65,6 +68,11 @@ class File(Base):
     # Non-fatal: the file indexed, but the uploader should know how (e.g. audio
     # fell back to the free transcription endpoint - no capable provider key).
     conversion_note: Mapped[str | None] = mapped_column(Text)
+    # Durable-queue bookkeeping: workers claim pending rows, take a lease and
+    # bump attempts; an expired lease means the worker died mid-ingest and the
+    # file is re-queued (up to the retry cap) instead of bulk-failed.
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -181,4 +189,32 @@ class QueryLog(Base):
     # Which cache served this query: "l1" (exact), "l2" (semantic), or NULL when
     # it was computed fresh. Powers the project-wide cache hit rate.
     cache_layer: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SuspendedAccount(Base):
+    """Operator kill switch: an owner listed here has every project's public
+    API traffic rejected (403). Inserted manually - there is no UI."""
+
+    __tablename__ = "suspended_accounts"
+
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UsageEvent(Base):
+    """One row per public /v1 request - the attribution/billing trail that
+    /retrieve, /explore and /memory-graph previously never wrote."""
+
+    __tablename__ = "usage_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    endpoint: Mapped[str] = mapped_column(Text)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,12 +1,24 @@
+import logging
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..models import Chunk, File, Memory, Project
 from ..schemas import MemoryGraphEdge, MemoryGraphNode, MemoryGraphResponse, ProjectInfo
-from . import storage
+from . import query_cache, storage
+
+logger = logging.getLogger(__name__)
+
+# The graph is derived data that only changes when content changes - cache the
+# built response per (project, content_version) so repeat calls between
+# ingests are free instead of re-walking every file and chunk. Small entry
+# cap: graph JSON can run to megabytes.
+_graph_cache = query_cache.make_backend(settings.redis_url, max_entries=8)
+GRAPH_CACHE_TTL_SECONDS = 600
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 
@@ -268,6 +280,24 @@ def _memory_related_edges(
 
 
 def build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
+    cache_key = f"graph:{project.id}:v{project.content_version}"
+    cached = _graph_cache.get(cache_key)
+    if isinstance(cached, str):
+        try:
+            return MemoryGraphResponse.model_validate_json(cached)
+        except Exception:  # schema drift - rebuild
+            pass
+
+    response = _build_memory_graph(db, project)
+
+    try:
+        _graph_cache.set(cache_key, response.model_dump_json(), GRAPH_CACHE_TTL_SECONDS)
+    except Exception:  # cache write is best-effort (e.g. value too large)
+        logger.warning("Memory-graph cache write failed", exc_info=True)
+    return response
+
+
+def _build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
     files = db.scalars(
         select(File).where(File.project_id == project.id).order_by(File.created_at)
     ).all()
@@ -285,6 +315,25 @@ def build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
         )
     ]
     edges: list[MemoryGraphEdge] = []
+
+    # ONE project-scoped query for every file's chunks, selecting only the
+    # columns the graph uses. The old per-file SELECT * was an N+1 that also
+    # shipped each chunk's full embedding vector (tens of KB per row, never
+    # used here) over the wire - 1000 files meant 1000 queries of dead weight.
+    chunks_by_file: dict = defaultdict(list)
+    chunk_rows = db.execute(
+        select(
+            Chunk.id,
+            Chunk.file_id,
+            Chunk.chunk_index,
+            Chunk.page_number,
+            Chunk.content,
+        )
+        .where(Chunk.project_id == project.id)
+        .order_by(Chunk.file_id, Chunk.chunk_index)
+    ).all()
+    for row in chunk_rows:
+        chunks_by_file[row.file_id].append(row)
 
     for file in files:
         file_node_id = f"file:{file.id}"
@@ -333,9 +382,7 @@ def build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
                 MemoryGraphEdge(source=file_node_id, target=section.id, type="contains")
             )
 
-        chunks = db.scalars(
-            select(Chunk).where(Chunk.file_id == file.id).order_by(Chunk.chunk_index)
-        ).all()
+        chunks = chunks_by_file.get(file.id, [])
         cursor = 0
         previous_chunk_node_id: str | None = None
         for chunk in chunks:

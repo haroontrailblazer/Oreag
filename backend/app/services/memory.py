@@ -1,15 +1,18 @@
 import logging
 import uuid
 
-from sqlalchemy import select, text
+from fastapi import HTTPException
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..db import SessionLocal
 from ..models import Memory, Project
 from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
 from ..providers.registry import get_embedder
 from ..schemas import MemoryCreate
+from .content_version import bump_content_version
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,7 @@ def reembed_project_memories(project_id: uuid.UUID) -> None:
         ).all()
         for memory in memories:
             memory.embedding = _embed(db, project, memory.content)
+        bump_content_version(db, project_id)
         db.commit()
         logger.info(
             "Re-embedded %d memories for project %s with %s/%s",
@@ -66,6 +70,22 @@ def reembed_project_memories(project_id: uuid.UUID) -> None:
 
 
 def save_memory(db: Session, project: Project, body: MemoryCreate) -> Memory:
+    # Memories were the one uncapped content type (files stop at 1000/project);
+    # without this, any key could grow the table and embedding spend forever.
+    count = (
+        db.scalar(
+            select(func.count())
+            .select_from(Memory)
+            .where(Memory.project_id == project.id)
+        )
+        or 0
+    )
+    if count >= settings.max_memories_per_project:
+        raise HTTPException(
+            413,
+            f"Project memory limit reached (max {settings.max_memories_per_project}). "
+            "Delete old memories to add new ones.",
+        )
     memory = Memory(
         project_id=project.id,
         content=body.content,
@@ -75,6 +95,7 @@ def save_memory(db: Session, project: Project, body: MemoryCreate) -> Memory:
         embedding=_embed(db, project, body.content),
     )
     db.add(memory)
+    bump_content_version(db, project.id)
     db.commit()
     db.refresh(memory)
     return memory

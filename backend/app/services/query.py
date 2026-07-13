@@ -3,16 +3,18 @@ import json
 import logging
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Chunk, Memory, Project, QueryLog
 from ..providers import resolver
-from ..providers.base import ProviderUnavailableError
+from ..providers.base import ProviderUnavailableError, is_provider_rate_limit
 from ..providers.registry import get_embedder, get_llm
 from ..schemas import QueryResponse, SourceChunk
 from . import agentic
@@ -119,19 +121,19 @@ def run_query(
     conversation_id is given, the prior turns are loaded and this question is
     rewritten to be self-contained before retrieval, then the new turn is saved.
     """
-    chunk_count = (
-        db.scalar(select(func.count()).select_from(Chunk).where(Chunk.project_id == project.id))
-        or 0
+    # Existence checks only (LIMIT 1 index probes) - the cache signature no
+    # longer needs counts, it rides on project.content_version.
+    has_chunks = bool(
+        db.scalar(select(Chunk.id).where(Chunk.project_id == project.id).limit(1))
     )
-    memory_count = (
+    has_memories = bool(
         db.scalar(
-            select(func.count())
-            .select_from(Memory)
+            select(Memory.id)
             .where(Memory.project_id == project.id, Memory.embedding.isnot(None))
+            .limit(1)
         )
-        or 0
     )
-    if not chunk_count and not memory_count:
+    if not has_chunks and not has_memories:
         raise HTTPException(
             status_code=409,
             detail="Project has no indexed content yet - upload files (or save memories) and wait for indexing",
@@ -151,10 +153,10 @@ def run_query(
         """
         sources = (
             retrieval.retrieve(db, project, query, k, embed_fn=embed_query)
-            if chunk_count
+            if has_chunks
             else []
         )
-        if memory_count and settings.rag_memory_blend_k > 0:
+        if has_memories and settings.rag_memory_blend_k > 0:
             try:
                 for mem, sim in memory_service.search_memories(
                     db,
@@ -230,9 +232,9 @@ def run_query(
         # normalized question repeats EXACTLY. L2 (pgvector) hits when a
         # SIMILAR question was already answered - cosine similarity above the
         # threshold reuses the cached answer, below it the query runs for real.
-        # Both are scoped by models + top_k + content signature, so new
-        # files/memories or a model change can never serve a stale answer.
-        signature = f"{chunk_count}:{memory_count}"
+        # Both are scoped by models + top_k + content_version, so ANY content
+        # write (including in-place edits) instantly orphans stale answers.
+        signature = f"v{project.content_version}"
         semantic_vector: list[float] | None = None
         cache_layer: str | None = None
         cache_similarity: float | None = None
@@ -273,6 +275,16 @@ def run_query(
                 result = compute_and_remember()
     except ProviderUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        # Upstream 429s become OUR 429 so callers back off instead of seeing
+        # an opaque 500 (the SDKs already retried once by then).
+        if is_provider_rate_limit(exc):
+            raise HTTPException(
+                status_code=429,
+                detail="The AI provider is rate limiting this project's key - retry shortly.",
+                headers={"Retry-After": "10"},
+            )
+        raise
     latency_ms = int((time.perf_counter() - started) * 1000)
 
     db.add(
@@ -341,17 +353,15 @@ def run_query_stream(
     headers, so mid-stream failures cannot become HTTP status codes.
     """
     try:
-        chunk_count = (
-            db.scalar(select(func.count()).select_from(Chunk).where(Chunk.project_id == project.id))
-            or 0
+        has_chunks = bool(
+            db.scalar(select(Chunk.id).where(Chunk.project_id == project.id).limit(1))
         )
-        memory_count = (
+        has_memories = bool(
             db.scalar(
-                select(func.count())
-                .select_from(Memory)
+                select(Memory.id)
                 .where(Memory.project_id == project.id, Memory.embedding.isnot(None))
+                .limit(1)
             )
-            or 0
         )
     except PoolTimeoutError:
         # Headers are already sent (200): a raised pool-checkout timeout would
@@ -361,7 +371,7 @@ def run_query_stream(
             "detail": "Server is at capacity - please retry shortly",
         }
         return
-    if not chunk_count and not memory_count:
+    if not has_chunks and not has_memories:
         yield {
             "type": "error",
             "detail": "Project has no indexed content yet - upload files (or save memories) and wait for indexing",
@@ -376,10 +386,10 @@ def run_query_stream(
     def retrieve_fn(query: str, k: int) -> list[dict]:
         sources = (
             retrieval.retrieve(db, project, query, k, embed_fn=embed_query)
-            if chunk_count
+            if has_chunks
             else []
         )
-        if memory_count and settings.rag_memory_blend_k > 0:
+        if has_memories and settings.rag_memory_blend_k > 0:
             try:
                 for mem, sim in memory_service.search_memories(
                     db,
@@ -414,7 +424,7 @@ def run_query_stream(
         if conversation_id
         else []
     )
-    signature = f"{chunk_count}:{memory_count}"
+    signature = f"v{project.content_version}"
     cache_layer: str | None = None
     cache_similarity: float | None = None
     semantic_vector: list[float] | None = None
@@ -452,67 +462,117 @@ def run_query_stream(
                 if key is not None:
                     _cache.set(key, hit)
 
-        if result is not None:
-            text = (
-                agentic.clarification_message(result.clarification_questions)
-                if result.needs_clarification
-                else (result.answer or "")
-            )
-            for piece in _slice_text(text):
-                yield {"type": "token", "text": piece}
-            final = result
-        else:
-            ctx = agentic.gather_context(
-                question=agentic_question,
-                retrieve_fn=retrieve_fn,
-                plan_fn=lambda q: agentic.plan_subqueries(
-                    _llm(), q, settings.agentic_max_subqueries
-                ),
-                clarify_fn=lambda q: agentic.request_clarification(
-                    _llm(), q, settings.agentic_max_clarifying
-                ),
-                top_k=top_k,
-                min_similarity=settings.agentic_min_similarity,
-                min_strong=settings.agentic_min_strong,
-                max_rounds=settings.agentic_max_rounds,
-            )
-            if ctx.needs_clarification:
-                text = agentic.clarification_message(ctx.clarification_questions)
+        # Single-flight: N simultaneous identical questions used to each run
+        # the full retrieval + LLM pipeline on this path (only the
+        # non-streaming path deduplicated). The first asker leads; followers
+        # wait (bounded) and stream the leader's cached answer in slices.
+        lead_lock = None
+        if result is None and key is not None:
+            flight = _cache.flight_lock(key)
+            if flight.acquire(blocking=False):
+                lead_lock = flight
+                refreshed = _cache.get(key)  # leader may have JUST finished
+                if refreshed is not None:
+                    result = refreshed
+                    cache_layer = "l1"
+            else:
+                if flight.acquire(timeout=120.0):
+                    flight.release()
+                refreshed = _cache.get(key)
+                if refreshed is not None:
+                    result = refreshed
+                    cache_layer = "l1"
+                # else: the leader failed or timed out - compute ourselves,
+                # unlocked (correctness over dedup in the degraded case).
+
+        try:
+            if result is not None:
+                text = (
+                    agentic.clarification_message(result.clarification_questions)
+                    if result.needs_clarification
+                    else (result.answer or "")
+                )
                 for piece in _slice_text(text):
                     yield {"type": "token", "text": piece}
-                final = agentic.AgenticResult(
-                    answer=None,
-                    sources=ctx.sources,
-                    depth=ctx.depth,
-                    sub_queries=ctx.sub_queries,
-                    rounds=ctx.rounds,
-                    needs_clarification=True,
-                    clarification_questions=ctx.clarification_questions,
-                )
+                final = result
             else:
-                acc: list[str] = []
-                for tok in generation.generate_answer_stream(
-                    db, project, agentic_question, ctx.sources, ctx.depth, llm_fn=_llm
-                ):
-                    acc.append(tok)
-                    yield {"type": "token", "text": tok}
-                final = agentic.AgenticResult(
-                    answer="".join(acc),
-                    sources=ctx.sources,
-                    depth=ctx.depth,
-                    sub_queries=ctx.sub_queries,
-                    rounds=ctx.rounds,
-                    needs_clarification=False,
-                )
-                if key is not None:
-                    _cache.set(key, final)
-                semantic_cache.store(
-                    db, project, agentic_question, top_k, signature, final, semantic_vector
-                )
+                # Context gathering is the silent phase (no tokens yet) - run
+                # it on a helper thread and emit keep-alive pings so proxies
+                # don't kill the idle stream. The request thread only WAITS
+                # while the helper uses the db session, so access stays
+                # sequential.
+                executor = ThreadPoolExecutor(max_workers=1)
+                try:
+                    future = executor.submit(
+                        agentic.gather_context,
+                        question=agentic_question,
+                        retrieve_fn=retrieve_fn,
+                        plan_fn=lambda q: agentic.plan_subqueries(
+                            _llm(), q, settings.agentic_max_subqueries
+                        ),
+                        clarify_fn=lambda q: agentic.request_clarification(
+                            _llm(), q, settings.agentic_max_clarifying
+                        ),
+                        top_k=top_k,
+                        min_similarity=settings.agentic_min_similarity,
+                        min_strong=settings.agentic_min_strong,
+                        max_rounds=settings.agentic_max_rounds,
+                    )
+                    while True:
+                        try:
+                            ctx = future.result(timeout=10.0)
+                            break
+                        except FuturesTimeout:
+                            yield {"type": "ping"}
+                finally:
+                    executor.shutdown(wait=False)
+                if ctx.needs_clarification:
+                    text = agentic.clarification_message(ctx.clarification_questions)
+                    for piece in _slice_text(text):
+                        yield {"type": "token", "text": piece}
+                    final = agentic.AgenticResult(
+                        answer=None,
+                        sources=ctx.sources,
+                        depth=ctx.depth,
+                        sub_queries=ctx.sub_queries,
+                        rounds=ctx.rounds,
+                        needs_clarification=True,
+                        clarification_questions=ctx.clarification_questions,
+                    )
+                else:
+                    acc: list[str] = []
+                    for tok in generation.generate_answer_stream(
+                        db, project, agentic_question, ctx.sources, ctx.depth, llm_fn=_llm
+                    ):
+                        acc.append(tok)
+                        yield {"type": "token", "text": tok}
+                    final = agentic.AgenticResult(
+                        answer="".join(acc),
+                        sources=ctx.sources,
+                        depth=ctx.depth,
+                        sub_queries=ctx.sub_queries,
+                        rounds=ctx.rounds,
+                        needs_clarification=False,
+                    )
+                    if key is not None:
+                        _cache.set(key, final)
+                    semantic_cache.store(
+                        db, project, agentic_question, top_k, signature, final, semantic_vector
+                    )
+        finally:
+            if lead_lock is not None:
+                lead_lock.release()
     except ProviderUnavailableError as exc:
         yield {"type": "error", "detail": str(exc)}
         return
-    except Exception:
+    except Exception as exc:
+        if is_provider_rate_limit(exc):
+            yield {
+                "type": "error",
+                "detail": "The AI provider is rate limiting this project's key - retry shortly.",
+                "code": 429,
+            }
+            return
         logger.exception("Streaming query failed for project %s", project.id)
         yield {"type": "error", "detail": "The query failed. Please try again."}
         return

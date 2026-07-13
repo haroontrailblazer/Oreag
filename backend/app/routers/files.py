@@ -16,8 +16,9 @@ from ..models import Chunk, File, Project
 from ..providers import registry
 from ..schemas import FileOut, ReindexRequest
 from ..services import storage
+from ..services.content_version import bump_content_version
 from ..services.conversion import content_type_for, is_ingestable, source_extension
-from ..services.ingestion import ingest_file, recompute_project_status
+from ..services.ingestion import recompute_project_status
 from ..services.memory import reembed_project_memories
 from .deps import get_owned_project
 
@@ -160,7 +161,9 @@ async def upload_files(
     if pair is not None:
         project.embedding_key_encrypted, project.embedding_key_last4 = pair
 
-    created: list[File] = []
+    # Validate EVERY file before uploading ANY to storage - a mid-batch
+    # rejection then can't strand already-uploaded objects (see public route).
+    validated: list[tuple[str, bytes, str, str]] = []
     for upload in uploads:
         filename = upload.filename or "upload"
         # Size cap BEFORE buffering/decoding - see the public route for why.
@@ -181,9 +184,18 @@ async def upload_files(
             raise HTTPException(
                 400, f"Unsupported file type: {filename} (no text could be extracted)"
             )
+        validated.append(
+            (
+                filename,
+                data,
+                source_extension(filename),
+                content_type_for(filename, upload.content_type),
+            )
+        )
+
+    created: list[File] = []
+    for filename, data, extension, content_type in validated:
         file_id = uuid.uuid4()
-        extension = source_extension(filename)
-        content_type = content_type_for(filename, upload.content_type)
         path = f"{project.owner_id}/{project.id}/{file_id}{extension}"
         # Sync storage PUT off the event loop - this handler is async.
         await run_in_threadpool(storage.upload_file, path, data, content_type)
@@ -208,6 +220,7 @@ async def upload_files(
         new_ids = {record.id for record in created}
         db.execute(sql_delete(Chunk).where(Chunk.project_id == project.id))
         db.execute(_CLEAR_MEMORY_EMBEDDINGS_SQL, {"project_id": str(project.id)})
+        bump_content_version(db, project.id)
         existing = [
             f
             for f in db.scalars(
@@ -221,18 +234,16 @@ async def upload_files(
             f.error = None
             f.conversion_error = None
             f.conversion_note = None
+            f.attempts = 0  # fresh retry budget for the re-ingest
 
     project.status = "indexing"
     db.commit()
 
-    # Background tasks run sequentially - re-embed memories FIRST (they're
-    # quick) so memory search is back long before large file queues finish.
+    # Memories re-embed as a background task (quick); files sit in
+    # status='pending' for the durable queue workers - no in-process queue to
+    # lose on a restart.
     if reindex_existing:
         background_tasks.add_task(reembed_project_memories, project.id)
-    for record in created:
-        background_tasks.add_task(ingest_file, record.id)
-    for f in existing:
-        background_tasks.add_task(ingest_file, f.id)
     return created
 
 
@@ -249,6 +260,7 @@ def delete_file(
     if file.markdown_storage_path:
         paths.append(file.markdown_storage_path)
     db.delete(file)  # cascades to its chunks
+    bump_content_version(db, project.id)
     recompute_project_status(db, project)
     db.commit()
     storage.delete(paths)
@@ -257,7 +269,6 @@ def delete_file(
 @router.post("/files/{file_id}/retry", response_model=FileOut)
 def retry_file(
     file_id: uuid.UUID,
-    background_tasks: BackgroundTasks,
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
 ):
@@ -266,13 +277,13 @@ def retry_file(
         raise HTTPException(404, "File not found")
     if file.status == "processing":
         raise HTTPException(409, "File is already being processed")
-    file.status = "pending"
+    file.status = "pending"  # the queue workers pick it up from here
     file.error = None
     file.conversion_error = None
     file.conversion_note = None
+    file.attempts = 0  # a manual retry gets a fresh budget
     project.status = "indexing"
     db.commit()
-    background_tasks.add_task(ingest_file, file.id)
     return file
 
 
@@ -334,19 +345,19 @@ def reindex_project(
     db.execute(sql_delete(Chunk).where(Chunk.project_id == project.id))
     if plan == "reembed":
         db.execute(_CLEAR_MEMORY_EMBEDDINGS_SQL, {"project_id": str(project.id)})
+    bump_content_version(db, project.id)
     for file in files:
-        file.status = "pending"
+        file.status = "pending"  # the durable queue workers pick these up
         file.chunk_count = 0
         file.error = None
         file.conversion_error = None
         file.conversion_note = None
+        file.attempts = 0
     project.status = "indexing" if files else "empty"
     db.commit()
 
-    # Background tasks run sequentially - re-embed memories FIRST (they're
-    # quick) so memory search is back long before large file queues finish.
+    # Memories re-embed as a background task (quick) so memory search is back
+    # long before large file queues finish; files go through the queue.
     if plan == "reembed":
         background_tasks.add_task(reembed_project_memories, project.id)
-    for file in files:
-        background_tasks.add_task(ingest_file, file.id)
     return files

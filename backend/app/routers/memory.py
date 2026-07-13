@@ -15,6 +15,9 @@ from ..schemas import (
     MemorySearchResult,
 )
 from ..services import memory as memory_service
+from ..services.content_version import bump_content_version
+from ..services.rate_limit import enforce_rate_limit
+from ..services.usage import record_usage
 from .deps import get_owned_project
 from .rag_v1 import _get_project
 
@@ -33,7 +36,9 @@ def create_memory(
     db: Session = Depends(get_db),
 ):
     project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
     memory = memory_service.save_memory(db, project, body)
+    record_usage(db, project=project, api_key_id=api_key.id, endpoint="memory_create")
     out = MemoryOut.model_validate(memory)
     if memory.embedding is None:
         out.warning = (
@@ -50,12 +55,14 @@ def search_memory(
     db: Session = Depends(get_db),
 ):
     project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
     try:
         results = memory_service.search_memories(
             db, project, body.query, body.top_k or 5
         )
     except ProviderUnavailableError as exc:
         raise HTTPException(503, str(exc))
+    record_usage(db, project=project, api_key_id=api_key.id, endpoint="memory_search")
     return [
         MemorySearchResult(
             **MemoryOut.model_validate(m).model_dump(), similarity=sim
@@ -72,6 +79,7 @@ def recent_memory(
     db: Session = Depends(get_db),
 ):
     project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
     return memory_service.recent_memories(db, project, min(max(limit, 1), 50))
 
 
@@ -83,11 +91,13 @@ def delete_memory(
     db: Session = Depends(get_db),
 ):
     project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
     row = db.scalar(
         select(Memory).where(Memory.id == memory_id, Memory.project_id == project.id)
     )
     if row is not None:
         db.delete(row)
+        bump_content_version(db, project.id)
         db.commit()
 
 
@@ -114,4 +124,5 @@ def owner_delete_memory(
     )
     if row is not None:
         db.delete(row)
+        bump_content_version(db, project.id)
         db.commit()

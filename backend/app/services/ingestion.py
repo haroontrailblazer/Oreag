@@ -13,6 +13,7 @@ from ..models import Chunk, File, Project
 from ..providers import resolver
 from ..providers.registry import get_embedder
 from . import storage
+from .content_version import bump_content_version
 from .conversion import (
     AUDIO_EXTENSIONS,
     IMAGE_CAPTION_EXTENSIONS,
@@ -167,6 +168,10 @@ def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
         file.error = message[:500]
         file.conversion_error = message[:500]
         file.conversion_note = None  # a failed file's caveat would only confuse
+        # A failed ingest may have committed some chunk batches before dying -
+        # drop them so retrieval never serves half-indexed content.
+        db.execute(sql_delete(Chunk).where(Chunk.file_id == file.id))
+        bump_content_version(db, file.project_id)
         project = db.get(Project, file.project_id)
         if project is not None:
             recompute_project_status(db, project)
@@ -287,6 +292,9 @@ def ingest_file(file_id: uuid.UUID) -> None:
         file.chunk_count = len(chunks)
         file.indexed_at = datetime.now(timezone.utc)
         recompute_project_status(db, project)
+        # One atomic invalidation when the file's content becomes searchable -
+        # cached answers keep serving the OLD content until this lands.
+        bump_content_version(db, project.id)
         db.commit()
         logger.info("Indexed file %s (%d chunks)", file.filename, len(chunks))
     except Exception as exc:
@@ -296,23 +304,6 @@ def ingest_file(file_id: uuid.UUID) -> None:
         db.close()
 
 
-def fail_stale_jobs() -> None:
-    """Startup hook: jobs interrupted by a server restart can never finish."""
-    db = SessionLocal()
-    try:
-        stale = db.scalars(
-            select(File).where(File.status.in_(["pending", "processing"]))
-        ).all()
-        if not stale:
-            return
-        for file in stale:
-            file.status = "failed"
-            file.error = "Interrupted by server restart - retry from the Files tab"
-        for project_id in {f.project_id for f in stale}:
-            project = db.get(Project, project_id)
-            if project is not None:
-                recompute_project_status(db, project)
-        db.commit()
-        logger.warning("Marked %d interrupted file(s) as failed", len(stale))
-    finally:
-        db.close()
+# fail_stale_jobs is gone: restarts no longer bulk-fail in-flight work. The
+# durable queue (services/ingest_queue.py) re-claims pending rows immediately
+# and interrupted (leased) rows when their lease expires.

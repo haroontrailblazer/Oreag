@@ -217,6 +217,14 @@ class QueryCache:
                 self._key_locks[key] = lock
             return lock
 
+    def flight_lock(self, key: str) -> threading.Lock:
+        """The per-key single-flight lock (same one get_or_compute uses).
+
+        Exposed for the streaming path, which can't run inside
+        get_or_compute: it emits tokens WHILE computing, so it needs manual
+        lead/follow control around its own generator."""
+        return self._lock_for(key)
+
     def get_or_compute(self, key: str, compute: Callable[[], Any]) -> Any:
         """Return the cached value, or compute it exactly once.
 

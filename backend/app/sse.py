@@ -18,6 +18,13 @@ def sse_response(events: Iterable[dict]) -> StreamingResponse:
 
     def frames():
         for event in events:
+            if event.get("type") == "ping":
+                # SSE comment frame: keeps idle proxies from killing the
+                # connection during silent phases (context gathering can take
+                # tens of seconds before the first token). Spec-compliant
+                # parsers ignore comments, so clients see nothing.
+                yield ": keep-alive\n\n"
+                continue
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(

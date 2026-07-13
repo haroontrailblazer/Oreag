@@ -91,6 +91,12 @@ class TestMemoryService:
         def refresh(self, obj):
             pass
 
+        def execute(self, *args, **kwargs):  # content_version bump
+            pass
+
+        def scalar(self, *args, **kwargs):  # memory-quota count -> way below cap
+            return 0
+
     def test_save_embeds_and_stores(self, monkeypatch):
         from app.schemas import MemoryCreate
         from app.services import memory
@@ -552,6 +558,9 @@ class TestVectorMigration:
 
             def scalars(self, stmt):
                 return _FakeScalars()
+
+            def execute(self, *args, **kwargs):  # content_version bump
+                pass
 
             def commit(self):
                 self.commits += 1
@@ -1233,6 +1242,9 @@ class TestIngestionDeleteRace:
                 return self._file
             return None
 
+        def execute(self, *args, **kwargs):  # chunk cleanup + version bump
+            pass
+
         def commit(self):
             if self._commit_error:
                 raise self._commit_error
@@ -1272,11 +1284,15 @@ class TestProjectSuspend:
     MCP (both funnel through rag_v1._get_project)."""
 
     class _DB:
-        def __init__(self, project):
+        def __init__(self, project, account_suspended=False):
             self._project = project
+            self._account_suspended = account_suspended
 
         def get(self, model, key):
             return self._project
+
+        def scalar(self, *args, **kwargs):  # suspended_accounts lookup
+            return self._project.owner_id if self._account_suspended else None
 
     def test_get_project_blocks_when_suspended(self):
         from fastapi import HTTPException
@@ -1293,6 +1309,18 @@ class TestProjectSuspend:
 
         project = Project(id=uuid.uuid4(), suspended=False)
         assert _get_project(self._DB(project), project.id) is project
+
+    def test_get_project_blocks_suspended_account(self):
+        """The operator kill switch cuts off ALL of an account's projects."""
+        from fastapi import HTTPException
+
+        from app.routers.rag_v1 import _get_project
+
+        project = Project(id=uuid.uuid4(), owner_id=uuid.uuid4(), suspended=False)
+        with pytest.raises(HTTPException) as exc:
+            _get_project(self._DB(project, account_suspended=True), project.id)
+        assert exc.value.status_code == 403
+        assert "account is suspended" in exc.value.detail
 
     def test_project_out_defaults_suspended_false(self):
         cols = set(Project.__table__.columns.keys())

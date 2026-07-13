@@ -33,6 +33,37 @@ class Settings(BaseSettings):
     max_files_per_project: int = 1000      # total files a project may hold
     upload_rate_per_minute: int = 60       # files ingested per project per minute
 
+    # Public /v1 rate limits (per minute, fixed window; Redis-shared when
+    # configured). Two scopes stack: each key has a budget AND the project's
+    # keys share a project budget, so one busy integration can't starve the
+    # rest. "heavy" covers the most expensive endpoints (/explore,
+    # /memory-graph); everything else uses the standard budget.
+    rate_limit_enabled: bool = True
+    query_rate_per_minute_per_key: int = 120
+    query_rate_per_minute_per_project: int = 300
+    heavy_rate_per_minute_per_key: int = 10
+    heavy_rate_per_minute_per_project: int = 20
+    # /explore hop budget for API-key callers (each hop multiplies exact
+    # vector scans; the dashboard is not clamped).
+    explore_max_hops_api: int = 1
+    # Memories had NO quota (files cap at 1000/project) - any key could grow
+    # the table and embedding spend without bound.
+    max_memories_per_project: int = 2000
+
+    # Durable ingestion queue (the files table is the queue; see
+    # services/ingest_queue.py). Worker threads run in the web process today;
+    # a dedicated worker service can run the same loop unchanged.
+    ingest_worker_count: int = 2
+    ingest_poll_seconds: float = 3.0
+    ingest_lease_seconds: int = 1800       # a dead worker's file re-queues after this
+    ingest_max_attempts: int = 3           # then failed permanently (chunks dropped)
+
+    # Retention: query_logs and usage_events are append-only (one row per
+    # request); prune past this horizon so the dashboard's aggregates stay
+    # bounded. Expired semantic-cache rows are swept on the same schedule.
+    log_retention_days: int = 90
+    maintenance_interval_seconds: int = 6 * 3600
+
     # Audio ingestion: BYOK transcription through the uploader's own provider
     # keys - every STT-capable provider they hold a key for is tried in order
     # (own answer-model provider first): OpenAI Whisper, Gemini, Groq, Mistral

@@ -199,6 +199,12 @@ const BEST_PRACTICE_TIPS = [
     detail:
       "Responses include cache_layer (l1 exact, l2 semantic, null fresh) and cache_similarity - useful for logging cost savings on your side.",
   },
+  {
+    visual: <ServerViz />,
+    title: "Back off on 429",
+    detail:
+      "Standard endpoints allow 120 req/min per key and 300 per project; explore and memory-graph allow 10 and 20. Every 429 carries a Retry-After header - wait that many seconds, budgets reset each minute.",
+  },
 ]
 
 // Static-value "store" plumbing for useSyncExternalStore: the API base never
@@ -603,6 +609,51 @@ print(data["answer"])`
               description={ep.description}
             />
           ))}
+          {/* Exact request budgets - enforced server-side in fixed 60s windows. */}
+          <div className="border-t bg-muted/20 px-6 py-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Rate limits
+            </p>
+            <div className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">
+                  Standard endpoints
+                </span>{" "}
+                (query, query/stream, retrieve, memory):{" "}
+                <span className="font-mono text-foreground">120 req/min per key</span>
+                {" · "}
+                <span className="font-mono text-foreground">
+                  300 req/min per project
+                </span>
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Heavy endpoints</span>{" "}
+                (explore, memory-graph):{" "}
+                <span className="font-mono text-foreground">10 req/min per key</span>
+                {" · "}
+                <span className="font-mono text-foreground">
+                  20 req/min per project
+                </span>
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Uploads</span>: 20
+                files/request · 60 files/min per project · 1,000 files per project
+                total
+              </p>
+              <p>
+                All of a project&apos;s keys share the project budget. Exceeding
+                either scope returns{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                  429
+                </code>{" "}
+                with a{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                  Retry-After
+                </code>{" "}
+                header - wait that many seconds, then retry.
+              </p>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

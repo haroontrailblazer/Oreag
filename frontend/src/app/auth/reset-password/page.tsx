@@ -25,7 +25,10 @@ export default function ResetPasswordPage() {
   }, [])
 
   return (
-    <AuthShell>
+    <AuthShell
+      title="Reset password"
+      subtitle="Choose a new password for your account"
+    >
       {!ready ? (
         <p className="text-center text-sm text-muted-foreground">Loading…</p>
       ) : !hasSession ? (
