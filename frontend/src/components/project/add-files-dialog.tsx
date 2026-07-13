@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -406,7 +406,7 @@ export function AddFilesDialog({
           </Button>
           <Button onClick={handleSubmit} disabled={submitting || files.length === 0}>
             {submitting
-              ? <LoaderOne />
+              ? <Spin />
               : embeddingChanged
                 ? "Add & re-index"
                 : files.length > 0

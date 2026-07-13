@@ -34,7 +34,7 @@ import {
 import { EncryptingLoader } from "@/components/ui/encrypting-loader"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import {
   Select,
   SelectContent,
@@ -504,7 +504,7 @@ export function SettingsTab({
             />
           </div>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? <LoaderOne /> : "Save"}
+            {saving ? <Spin /> : "Save"}
           </Button>
         </CardContent>
       </Card>
@@ -596,7 +596,7 @@ export function SettingsTab({
                 </Button>
               )}
               <Button onClick={handleSaveLlm} disabled={!canSaveLlm || savingLlm}>
-                {savingLlm ? <LoaderOne /> : "Save"}
+                {savingLlm ? <Spin /> : "Save"}
               </Button>
             </div>
           )}
@@ -749,7 +749,7 @@ export function SettingsTab({
                   disabled={!embUsable || reindexing}
                 >
                   {reindexing ? (
-                    <LoaderOne />
+                    <Spin />
                   ) : hasFiles ? (
                     "Change & re-index"
                   ) : (
@@ -761,7 +761,7 @@ export function SettingsTab({
                   onClick={() => patchEmbeddingKey(embKeyInput.trim())}
                   disabled={!embKeyOnly || savingEmbKey}
                 >
-                  {savingEmbKey ? <LoaderOne /> : "Save"}
+                  {savingEmbKey ? <Spin /> : "Save"}
                 </Button>
               )}
             </div>
@@ -842,7 +842,7 @@ export function SettingsTab({
               Cancel
             </Button>
             <Button onClick={handleReindex} disabled={reindexing}>
-              {reindexing ? <LoaderOne /> : instantShrink ? "Apply" : "Re-index"}
+              {reindexing ? <Spin /> : instantShrink ? "Apply" : "Re-index"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -883,7 +883,7 @@ export function SettingsTab({
               }
             >
               {suspending ? (
-                <LoaderOne />
+                <Spin />
               ) : project.suspended ? (
                 "Resume project"
               ) : (

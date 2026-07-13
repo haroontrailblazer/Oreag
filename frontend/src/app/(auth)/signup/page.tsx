@@ -12,7 +12,7 @@ import { ConfirmPasswordField, PasswordField } from "@/components/password-field
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { passwordFailures } from "@/lib/password"
 import { createClient } from "@/lib/supabase/client"
 
@@ -135,7 +135,7 @@ export default function SignupPage() {
               disabled={loading}
             >
               {loading ? (
-                <LoaderOne />
+                <Spin />
               ) : (
                 <>
                   Sign Up

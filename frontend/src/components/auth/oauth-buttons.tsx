@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
@@ -56,6 +56,15 @@ export function OAuthButtons({ only }: { only?: Provider[] } = {}) {
   const [redirecting, setRedirecting] = useState<Provider | null>(null)
   const providers: Provider[] = only ?? ["google", "github"]
 
+  // Clear the spinner if the user comes BACK to this page (e.g. presses back
+  // from the Google/GitHub screen). Browsers restore the page from bfcache with
+  // React state frozen, so `redirecting` would otherwise stay stuck spinning.
+  useEffect(() => {
+    const reset = () => setRedirecting(null)
+    window.addEventListener("pageshow", reset)
+    return () => window.removeEventListener("pageshow", reset)
+  }, [])
+
   async function handleOAuth(provider: Provider) {
     setRedirecting(provider)
     const { error } = await createClient().auth.signInWithOAuth({
@@ -81,8 +90,9 @@ export function OAuthButtons({ only }: { only?: Provider[] } = {}) {
           onClick={() => handleOAuth("google")}
           aria-label="Continue with Google"
         >
-          {redirecting === "google" ? <LoaderOne /> : <GoogleIcon />}
+          <GoogleIcon />
           Google
+          {redirecting === "google" && <Spin />}
         </button>
       )}
       {providers.includes("github") && (
@@ -93,8 +103,9 @@ export function OAuthButtons({ only }: { only?: Provider[] } = {}) {
           onClick={() => handleOAuth("github")}
           aria-label="Continue with GitHub"
         >
-          {redirecting === "github" ? <LoaderOne /> : <GitHubIcon />}
+          <GitHubIcon />
           GitHub
+          {redirecting === "github" && <Spin />}
         </button>
       )}
     </div>

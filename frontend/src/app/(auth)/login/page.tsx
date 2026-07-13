@@ -11,7 +11,7 @@ import { OAuthButtons, OrDivider } from "@/components/auth/oauth-buttons"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { PasswordInput } from "@/components/ui/password-input"
 import { createClient } from "@/lib/supabase/client"
 
@@ -206,7 +206,7 @@ export default function LoginPage() {
               disabled={checking}
             >
               {checking ? (
-                <LoaderOne />
+                <Spin />
               ) : (
                 <>
                   Continue
@@ -256,7 +256,7 @@ export default function LoginPage() {
               {loading ? (
                 <span className="inline-flex items-center gap-1">
                   Signing in
-                  <LoaderOne />
+                  <Spin />
                 </span>
               ) : (
                 <>

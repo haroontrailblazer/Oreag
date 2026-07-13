@@ -46,7 +46,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -445,7 +445,7 @@ print(data["answer"])`
                 title="Create key"
               >
                 {creating ? (
-                  <LoaderOne />
+                  <Spin />
                 ) : (
                   <>
                     <Plus className="size-4" />

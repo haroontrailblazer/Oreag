@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { api, fetcher } from "@/lib/api"
 import { gravatarUrl } from "@/lib/avatar"
 import { createClient } from "@/lib/supabase/client"
@@ -247,10 +247,12 @@ export default function ProfilePage() {
   const previewSrc = avatarUrl || gravatar
 
   return (
-    // Fixed frame like every other page: the title never moves, the cards
-    // scroll in their own container. overflow-hidden pins the frame so only the
-    // inner region can scroll - the page itself never moves.
-    <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-6 overflow-hidden md:h-full">
+    // Desktop: a fixed frame - the title stays put and the cards scroll in
+    // their own region (md:h-full + md:overflow-hidden). Mobile: NO fixed
+    // frame - the page flows and scrolls naturally with the layout's min-h-dvh,
+    // so there's no leftover black band below a mis-sized frame. overflow-x
+    // guards against any stray horizontal scroll.
+    <div className="flex flex-col gap-6 overflow-x-hidden md:h-full md:min-h-0 md:overflow-hidden">
       <div className="shrink-0">
         <h1 className="text-2xl font-semibold">Profile</h1>
         <p className="text-sm text-muted-foreground">
@@ -258,7 +260,7 @@ export default function ProfilePage() {
         </p>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pb-1">
+      <div className="space-y-6 md:min-h-0 md:flex-1 md:overflow-y-auto md:pb-1">
         {/* Identity hero: avatar and account details side by side, full width. */}
         <Card>
           <CardContent className="flex flex-col items-center gap-6 p-6 text-center sm:flex-row sm:items-start sm:gap-8 sm:p-8 sm:text-left">
@@ -276,7 +278,7 @@ export default function ProfilePage() {
                 onClick={() => fileRef.current?.click()}
                 className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
               >
-                {uploading ? <LoaderOne /> : <Camera className="size-6" />}
+                {uploading ? <Spin /> : <Camera className="size-6" />}
               </button>
               <input
                 ref={fileRef}
@@ -300,7 +302,7 @@ export default function ProfilePage() {
                     className="max-w-72"
                   />
                   <Button onClick={handleSaveName} disabled={savingName}>
-                    {savingName ? <LoaderOne /> : "Save"}
+                    {savingName ? <Spin /> : "Save"}
                   </Button>
                 </div>
               </div>
@@ -335,7 +337,7 @@ export default function ProfilePage() {
                     disabled={resending}
                     onClick={handleResendVerification}
                   >
-                    {resending ? <LoaderOne /> : "Resend email"}
+                    {resending ? <Spin /> : "Resend email"}
                   </Button>
                 </div>
               ) : null}
@@ -428,7 +430,7 @@ export default function ProfilePage() {
                 onClick={() => handleSignOut("local")}
               >
                 {signingOut ? (
-                  <LoaderOne />
+                  <Spin />
                 ) : (
                   <>
                     <SignOut className="size-4" />
@@ -441,7 +443,7 @@ export default function ProfilePage() {
                 disabled={signingOut || signingOutAll}
                 onClick={() => handleSignOut("global")}
               >
-                {signingOutAll ? <LoaderOne /> : "Sign out of all devices"}
+                {signingOutAll ? <Spin /> : "Sign out of all devices"}
               </Button>
             </CardContent>
           </Card>
@@ -502,7 +504,7 @@ export default function ProfilePage() {
               disabled={confirmText !== "DELETE" || deleting}
               onClick={handleDelete}
             >
-              {deleting ? <LoaderOne /> : "Delete forever"}
+              {deleting ? <Spin /> : "Delete forever"}
             </Button>
           </DialogFooter>
         </DialogContent>

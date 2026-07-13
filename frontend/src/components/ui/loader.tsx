@@ -1,6 +1,23 @@
+import { CircleNotch } from "@phosphor-icons/react/dist/ssr"
 import type { CSSProperties } from "react"
 
 import { cn } from "@/lib/utils"
+
+/**
+ * Minimal spinning indicator (Phosphor CircleNotch) - the app-wide loading
+ * mark for buttons and actions (OAuth, login, signup, sign out, save...).
+ * Follows currentColor and defaults to size-4. The playground chat keeps its
+ * own three-dot LoaderOne below.
+ */
+export function Spin({ className }: { className?: string }) {
+  return (
+    <CircleNotch
+      weight="bold"
+      aria-label="Loading"
+      className={cn("size-4 shrink-0 animate-spin", className)}
+    />
+  )
+}
 
 /**
  * Three dots that bounce in sequence - a drop-in loading indicator used in

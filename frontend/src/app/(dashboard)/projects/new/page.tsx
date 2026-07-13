@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -473,7 +473,7 @@ export default function NewProjectPage() {
                 }
               >
                 {submitting
-                  ? <LoaderOne />
+                  ? <Spin />
                   : files.length > 0
                     ? `Create & index ${files.length} file${files.length === 1 ? "" : "s"}`
                     : "Create project"}

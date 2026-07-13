@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { gravatarUrl } from "@/lib/avatar"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -110,15 +110,9 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
             handleSignOut()
           }}
         >
-          {signingOut ? (
-            <>
-              <LoaderOne /> Signing out…
-            </>
-          ) : (
-            <>
-              <LogOut className="size-4" /> Sign out
-            </>
-          )}
+          <LogOut className="size-4" />
+          Sign out
+          {signingOut && <Spin className="ml-auto" />}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

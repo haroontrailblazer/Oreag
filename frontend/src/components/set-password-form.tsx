@@ -6,7 +6,7 @@ import { toast } from "@/lib/toast"
 import { ConfirmPasswordField, PasswordField } from "@/components/password-field"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { LoaderOne } from "@/components/ui/loader"
+import { Spin } from "@/components/ui/loader"
 import { passwordFailures } from "@/lib/password"
 import { createClient } from "@/lib/supabase/client"
 
@@ -70,7 +70,7 @@ export function SetPasswordForm({
         />
       </div>
       <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? <LoaderOne /> : submitLabel}
+        {loading ? <Spin /> : submitLabel}
       </Button>
     </form>
   )
