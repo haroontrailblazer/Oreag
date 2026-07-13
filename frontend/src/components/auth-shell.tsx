@@ -18,16 +18,22 @@ export function AuthShell({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
-      <Card className="w-full max-w-md rounded-3xl py-8">
-        <CardContent className="space-y-6">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <BrandMark className="size-12 rounded-2xl" imgClassName="scale-150" />
+    // min-h-dvh (not min-h-screen/100vh): on mobile 100vh includes the
+    // address-bar area, so the page ends up taller than the visible viewport
+    // and scrolls even when the content fits. dvh tracks the real visible
+    // height. overflow-x-hidden guards against any stray horizontal scroll.
+    <div className="flex min-h-dvh items-center justify-center overflow-x-hidden bg-muted/40 p-4">
+      <Card className="w-full max-w-md rounded-3xl py-5 sm:py-8">
+        <CardContent className="space-y-4 sm:space-y-6">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <BrandMark className="size-11 rounded-2xl sm:size-12" imgClassName="scale-150" />
             <span className="rounded-full border bg-muted/60 px-3 py-1 text-[11px] font-medium text-muted-foreground">
               {badge}
             </span>
             <div className="space-y-1">
-              <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+              <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+                {title}
+              </h1>
               <p className="text-sm text-muted-foreground">{subtitle}</p>
             </div>
           </div>

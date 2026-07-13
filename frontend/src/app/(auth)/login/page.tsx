@@ -15,7 +15,7 @@ import { LoaderOne } from "@/components/ui/loader"
 import { PasswordInput } from "@/components/ui/password-input"
 import { createClient } from "@/lib/supabase/client"
 
-const FIELD = "h-12 rounded-xl bg-muted/50"
+const FIELD = "h-11 sm:h-12 rounded-xl bg-muted/50"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -95,7 +95,7 @@ export default function LoginPage() {
         </div>
         <Button
           type="submit"
-          className="h-12 w-full rounded-xl gap-1.5 text-[15px]"
+          className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
           disabled={loading}
         >
           {loading ? (

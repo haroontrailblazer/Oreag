@@ -54,7 +54,7 @@ function BaseSecret({
         aria-invalid={invalid}
         onFocus={onFocus}
         onBlur={onBlur}
-        className={cn("h-12 rounded-xl bg-muted/50", rightPad, className)}
+        className={cn("h-11 rounded-xl bg-muted/50 sm:h-12", rightPad, className)}
       />
       <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1.5 pr-3">
         {right}

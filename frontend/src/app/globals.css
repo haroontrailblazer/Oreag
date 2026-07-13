@@ -125,6 +125,20 @@
   input::-ms-clear {
     display: none;
   }
+  /* Kill the browser autofill tint (Chrome paints filled fields light blue).
+     There is no property to set the autofill background directly, so we paint
+     over it with an inset box-shadow in our own input color and keep the text
+     legible. The 9999s transition defers the browser repaint indefinitely. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--foreground);
+    caret-color: var(--foreground);
+    -webkit-box-shadow: 0 0 0 1000px var(--muted) inset;
+    box-shadow: 0 0 0 1000px var(--muted) inset;
+    transition: background-color 9999s ease-in-out 0s;
+  }
 }
 
 /* Drawer (Sheet) enter/leave - referenced via arbitrary `animate-[...]` classes
