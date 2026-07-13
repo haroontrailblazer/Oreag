@@ -52,8 +52,9 @@ function GitHubIcon() {
  * deliberately no success-path state reset. The existing /auth/callback route
  * exchanges the code for a session when the user lands back.
  */
-export function OAuthButtons() {
+export function OAuthButtons({ only }: { only?: Provider[] } = {}) {
   const [redirecting, setRedirecting] = useState<Provider | null>(null)
+  const providers: Provider[] = only ?? ["google", "github"]
 
   async function handleOAuth(provider: Provider) {
     setRedirecting(provider)
@@ -72,26 +73,30 @@ export function OAuthButtons() {
 
   return (
     <div className="flex items-center gap-3">
-      <button
-        type="button"
-        className={btn}
-        disabled={redirecting !== null}
-        onClick={() => handleOAuth("google")}
-        aria-label="Continue with Google"
-      >
-        {redirecting === "google" ? <LoaderOne /> : <GoogleIcon />}
-        Google
-      </button>
-      <button
-        type="button"
-        className={btn}
-        disabled={redirecting !== null}
-        onClick={() => handleOAuth("github")}
-        aria-label="Continue with GitHub"
-      >
-        {redirecting === "github" ? <LoaderOne /> : <GitHubIcon />}
-        GitHub
-      </button>
+      {providers.includes("google") && (
+        <button
+          type="button"
+          className={btn}
+          disabled={redirecting !== null}
+          onClick={() => handleOAuth("google")}
+          aria-label="Continue with Google"
+        >
+          {redirecting === "google" ? <LoaderOne /> : <GoogleIcon />}
+          Google
+        </button>
+      )}
+      {providers.includes("github") && (
+        <button
+          type="button"
+          className={btn}
+          disabled={redirecting !== null}
+          onClick={() => handleOAuth("github")}
+          aria-label="Continue with GitHub"
+        >
+          {redirecting === "github" ? <LoaderOne /> : <GitHubIcon />}
+          GitHub
+        </button>
+      )}
     </div>
   )
 }
