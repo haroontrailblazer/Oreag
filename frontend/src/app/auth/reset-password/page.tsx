@@ -26,7 +26,7 @@ export default function ResetPasswordPage() {
 
   return (
     <AuthShell
-      title="Reset password"
+      title="Set a new password"
       subtitle="Choose a new password for your account"
     >
       {!ready ? (
@@ -41,22 +41,14 @@ export default function ResetPasswordPage() {
           </Button>
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="space-y-1 text-center">
-            <h2 className="text-base font-semibold">Set a new password</h2>
-            <p className="text-sm text-muted-foreground">
-              Choose a new password for your account.
-            </p>
-          </div>
-          <SetPasswordForm
-            submitLabel="Update password"
-            onSuccess={() => {
-              toast.success("Password updated - you're signed in")
-              router.push("/dashboard")
-              router.refresh()
-            }}
-          />
-        </div>
+        <SetPasswordForm
+          submitLabel="Update password"
+          onSuccess={() => {
+            toast.success("Password updated - you're signed in")
+            router.push("/dashboard")
+            router.refresh()
+          }}
+        />
       )}
     </AuthShell>
   )

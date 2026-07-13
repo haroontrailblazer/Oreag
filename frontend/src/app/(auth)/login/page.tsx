@@ -44,6 +44,12 @@ export default function LoginPage() {
   const [notFound, setNotFound] = useState(false)
   const [checking, setChecking] = useState(false)
   const [loading, setLoading] = useState(false)
+  // "Forgot password?" / "Set one via email" send state - disables the button
+  // after one tap so a double-tap can't fire two emails (which trips Supabase's
+  // email rate limit).
+  const [forgot, setForgot] = useState<"idle" | "sending" | "sent">("idle")
+  const forgotLabel = (base: string) =>
+    forgot === "sending" ? "Sending…" : forgot === "sent" ? "Email sent" : base
 
   async function handleContinue(e: React.FormEvent) {
     e.preventDefault()
@@ -104,16 +110,31 @@ export default function LoginPage() {
   }
 
   async function handleForgot() {
+    if (forgot !== "idle") return // guard against double-taps
     const value = email.trim().toLowerCase()
     if (!value) {
       toast.error("Enter your email first")
       return
     }
+    setForgot("sending")
     const { error } = await createClient().auth.resetPasswordForEmail(value, {
       redirectTo: `${location.origin}/auth/callback?next=/auth/reset-password`,
     })
-    if (error) toast.error(error.message)
-    else toast.success("Password reset email sent - check your inbox")
+    if (error) {
+      const rateLimited =
+        // Supabase caps auth emails; surface a human message, not the raw one.
+        (error as { status?: number }).status === 429 ||
+        /rate limit|too many|security purposes/i.test(error.message)
+      toast.error(
+        rateLimited
+          ? "Too many email requests - please try again in about an hour."
+          : error.message
+      )
+      setForgot("idle") // let them retry later
+      return
+    }
+    toast.success("Password reset email sent - check your inbox")
+    setForgot("sent") // stays disabled so a second tap can't re-send
   }
 
   function backToEmail() {
@@ -121,6 +142,7 @@ export default function LoginPage() {
     setPassword("")
     setMethods(null)
     setNotFound(false)
+    setForgot("idle")
   }
 
   // The email, shown as a compact chip on step 2/3 with a "change" affordance.
@@ -219,9 +241,10 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={handleForgot}
-                  className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  disabled={forgot !== "idle"}
+                  className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline disabled:hover:text-muted-foreground"
                 >
-                  Forgot password?
+                  {forgotLabel("Forgot password?")}
                 </button>
               </div>
             </div>
@@ -269,9 +292,10 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={handleForgot}
-              className="font-medium text-foreground underline underline-offset-2"
+              disabled={forgot !== "idle"}
+              className="font-medium text-foreground underline underline-offset-2 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
             >
-              Set one via email
+              {forgotLabel("Set one via email")}
             </button>
           </p>
         </div>
