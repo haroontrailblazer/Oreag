@@ -19,7 +19,8 @@ export const metadata: Metadata = {
   title: "Oreag - RAG & Memory as a Service",
   description:
     "Turn your documents into a queryable RAG API with a built-in memory graph: upload, tune chunking and embeddings, and get a per-project endpoint.",
-  // Favicons are picked up from the app/ file conventions: icon.svg + favicon.ico
+  // Favicons are picked up from the app/ file conventions: icon.png + favicon.ico
+  // (both are the Oreag 3D app-icon badge, matching the landing brand mark).
   // The OG/Twitter image is the static public/og.png (regenerate with
   // `node scripts/generate-og.mjs`). A static asset resolves via metadataBase to
   // an absolute URL, is CDN-cached, and its .png path is exempt from the auth
