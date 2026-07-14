@@ -50,7 +50,7 @@ export default async function Home() {
 
         <div className="flex flex-1 flex-col justify-center gap-6">
           <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl">
-            Turn your <span className="text-amber-500">documents</span> into a
+            Turn your <span className="text-amber-500">Documents</span> into a
             queryable <span className="text-sky-500">RAG API</span>
           </h1>
           <p className="max-w-md text-muted-foreground">
