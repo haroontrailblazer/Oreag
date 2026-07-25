@@ -1,0 +1,706 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  Oreag — RAG & Memory as a Service
+//  LikeC4 model, ported from README.md + FLOW.md
+//
+//  Boundary rule applied throughout (c4model.com/abstractions/container):
+//  a managed service whose schemas, buckets or config you own is a CONTAINER
+//  of your system, not an external software system. So Postgres, the storage
+//  bucket and Redis sit inside Oreag. Where they physically run is a
+//  deployment concern, handled in the deployment model at the bottom.
+//
+//  Try it:   npx likec4 start
+//  Build:    npx likec4 build -o ./dist
+// ═══════════════════════════════════════════════════════════════════════════
+
+specification {
+
+  color brand-blue   #0284c7
+  color brand-green  rgb(5, 150, 105)   // = #059669, written as rgb() because
+                                        // the parser rejects all-digit hex
+  color brand-violet #7c3aed
+
+  // ── C4 abstractions, named after the model they implement ────────────────
+
+  element person {
+    notation 'Person'
+    style {
+      shape person
+      color brand-blue
+    }
+  }
+
+  element softwareSystem {
+    notation 'Software system, in scope'
+    style {
+      color brand-green
+      size xl
+    }
+  }
+
+  element externalSystem {
+    notation 'Software system, external'
+    style {
+      color muted
+    }
+  }
+
+  element container {
+    notation 'Container: application'
+    style {
+      color brand-green
+      size lg
+    }
+  }
+
+  element containerDb {
+    notation 'Container: data store'
+    style {
+      shape cylinder
+      color brand-green
+      size lg
+    }
+  }
+
+  element containerStore {
+    notation 'Container: blob store'
+    style {
+      shape storage
+      color brand-green
+      size lg
+    }
+  }
+
+  element component {
+    notation 'Component'
+    style {
+      shape component
+      color brand-green
+      size sm
+    }
+  }
+
+  // ── relationship kinds, which generate the legend ────────────────────────
+
+  relationship uses {
+    notation 'Primary request path'
+    line solid
+    head normal
+  }
+
+  relationship internal {
+    notation 'Internal call'
+    line dashed
+    color gray
+  }
+
+  relationship persist {
+    notation 'Reads / writes'
+    line solid
+    head vee
+  }
+
+  relationship auth {
+    notation 'Authentication'
+    line dotted
+    color amber
+  }
+
+  tag byok
+  tag cache
+  tag mcp
+  tag writepath
+  tag readpath
+
+  deploymentNode platform {
+    style {
+      color muted
+      opacity 15%
+    }
+  }
+
+  deploymentNode workstation {
+    style {
+      color brand-blue
+      opacity 15%
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+model {
+
+  // ── people ───────────────────────────────────────────────────────────────
+
+  developer = person 'Developer' 'Uploads documents, tunes chunking and models, then queries the knowledge base from their own code'
+
+  // ── the software system in scope ─────────────────────────────────────────
+
+  oreag = softwareSystem 'Oreag' 'Turns documents into a queryable RAG API with an agent memory graph. Multi-tenant, bring your own key.' {
+    link ./FLOW.md 'Flow diagrams'
+
+    dashboard = container 'Dashboard' 'Projects, files, settings, playground, 3D knowledge graph' {
+      technology 'Next.js 16 · React 19 · TypeScript · Tailwind v4 · shadcn/ui · SWR'
+      icon tech:nextjs
+
+      ui = component 'Dashboard UI' {
+        style { shape browser }
+      }
+      authRoutes = component 'Auth Route Handlers' '/auth/confirm · /auth/callback'
+    }
+
+    backend = container 'Backend API' 'Ingestion, retrieval, generation, memory and key resolution' {
+      technology 'FastAPI · SQLAlchemy 2 · Pydantic · Uvicorn · Python 3.13'
+      icon tech:python
+
+      routers = component 'Routers' 'backend/app/routers' {
+        dashboardApi = component 'Dashboard API' '/api/* — JWT protected'
+        publicApi = component 'Public API' '/v1/* — query · retrieve · memory'
+      }
+
+      services = component 'Domain Services' 'backend/app/services' {
+        ingestion = component 'Ingestion' 'Convert, chunk, embed and write vectors as a background task' {
+          #writepath
+          technology 'PyMuPDF · MarkItDown · LangChain splitters'
+        }
+        retrieval = component 'Retrieval' 'Semantic pgvector search and Postgres full-text, fused with RRF' {
+          #readpath
+          technology 'RRF k=60, degrades to semantic-only'
+        }
+        generation = component 'Generation' 'Depth-aware grounded answers with cited sources' {
+          #readpath
+        }
+        agentic = component 'Agentic Query Loop' 'Depth detection, sub-query decomposition, retrieve and merge, sufficiency check, clarification' {
+          #readpath
+          technology 'max 2 rounds'
+        }
+        answerCache = component 'Answer Cache' 'L1 exact match, L2 semantic' {
+          #cache #readpath
+          technology 'L1 TTL 5 min · L2 TTL 1 h · cosine >= 0.75'
+        }
+        memory = component 'Memory' 'save · search · recent, embed on save' {
+          technology 'pinned first, cosine search'
+        }
+        memoryGraph = component 'Memory Graph' 'Sections and entities derived from indexed content'
+      }
+
+      providers = component 'Provider Layer' 'backend/app/providers' {
+        resolver = component 'BYOK Key Resolver' 'local, then per-project override, then account key, otherwise 503' {
+          #byok
+          technology 'Fernet decrypt'
+        }
+        registry = component 'Provider Registry' 'Dispatches embedding and completion calls'
+      }
+    }
+
+    mcpServer = container 'MCP Server' 'save_memory · search_memory · list_recent_memory · delete_memory · search_docs · ask_docs' {
+      #mcp
+      technology 'Python · FastMCP'
+    }
+
+    identity = container 'Identity' 'Sign-up, sign-in, email confirmation, JWT issuance, Row-Level Security policies' {
+      technology 'Supabase Auth · JWT / JWKS'
+    }
+
+    db = containerDb 'Database' 'Projects, files, chunks, memories, provider_keys, api_keys, query_logs, semantic_query_cache' {
+      technology 'Supabase Postgres + pgvector'
+      icon tech:postgresql
+    }
+
+    files = containerStore 'File Storage' 'Raw uploads and converted markdown' {
+      technology 'Supabase Storage, private bucket'
+    }
+
+    cache = containerDb 'Cache' 'L1 exact answers and conversation turns' {
+      #cache
+      technology 'Redis, optional via REDIS_URL, falls back to in-memory'
+      icon tech:redis
+    }
+  }
+
+  // ── external software systems ────────────────────────────────────────────
+
+  clientApp = externalSystem 'Client Application' 'Any application the developer builds against the Oreag API' {
+    technology 'Bearer oreag_sk_…'
+  }
+
+  codingAgent = externalSystem 'Coding Agent' 'Claude Code, Codex or Claude, driven by the developer' {
+    #mcp
+    technology 'MCP client'
+  }
+
+  modelProviders = externalSystem 'AI Model Providers' 'Embedding and completion models. 16 keyed APIs including OpenAI, Gemini, Anthropic, Azure OpenAI, Mistral, Cohere, Groq and xAI, plus keyless local runtimes: Ollama, LM Studio and sentence-transformers.' {
+    #byok
+    style {
+      color brand-violet
+      multiple true
+    }
+  }
+
+  emailSystem = externalSystem 'E-mail System' 'Delivers the branded account confirmation message' {
+    icon bootstrap:envelope
+  }
+
+  // ── people and external systems, to the system in scope ──────────────────
+
+  developer -[uses]-> ui 'uploads documents, tunes models, queries the playground' {
+    technology 'HTTPS'
+  }
+  developer -[auth]-> identity 'signs in and signs up'
+  clientApp -[uses]-> publicApi 'queries its knowledge base' {
+    technology 'Bearer oreag_sk_…'
+  }
+  codingAgent -[uses]-> mcpServer 'saves and recalls memory, pulls document context' {
+    technology 'MCP'
+  }
+  emailSystem -[uses]-> developer 'delivers the confirmation link'
+
+  // ── container to container ───────────────────────────────────────────────
+
+  ui -[uses]-> dashboardApi 'calls the dashboard API' {
+    technology 'Bearer JWT'
+  }
+  authRoutes -[auth]-> identity 'verifyOtp(token_hash, type)'
+  mcpServer -[uses]-> publicApi 'proxies tool calls' {
+    technology 'Bearer oreag_sk_…'
+  }
+  dashboardApi -[auth]-> identity 'validates the JWT against JWKS'
+  publicApi -[auth]-> db 'validates the API key, SHA-256 hashed'
+  identity -[uses]-> emailSystem 'sends the confirmation message'
+  registry -[uses]-> modelProviders 'embeds and generates with the resolved key' {
+    technology 'HTTPS'
+  }
+
+  // ── inside the backend ───────────────────────────────────────────────────
+
+  dashboardApi -[internal]-> ingestion 'schedules ingest_file()'
+  dashboardApi -[internal]-> agentic 'playground query'
+  dashboardApi -[internal]-> memory
+  dashboardApi -[internal]-> memoryGraph
+
+  publicApi -[internal]-> agentic 'run_query()'
+  publicApi -[internal]-> retrieval 'POST /v1/retrieve'
+  publicApi -[internal]-> memory 'POST /v1/memory · /memory/search · GET /memory/recent'
+  publicApi -[internal]-> memoryGraph
+
+  agentic -[internal]-> answerCache 'L1 exact, then L2 semantic'
+  agentic -[internal]-> retrieval 'retrieves every sub-query'
+  agentic -[internal]-> generation 'grounds the answer'
+  agentic -[internal]-> memory 'blends in relevant memories'
+
+  ingestion -[internal]-> resolver 'needs an embedding key'
+  retrieval -[internal]-> resolver 'needs an embedding key'
+  generation -[internal]-> resolver 'needs an LLM key'
+  memory -[internal]-> resolver 'needs an embedding key'
+  resolver -[internal]-> registry 'hands over the resolved key'
+
+  // ── reads and writes ─────────────────────────────────────────────────────
+
+  ingestion -[persist]-> files 'raw file and markdown'
+  ingestion -[persist]-> db 'chunks and embeddings'
+  retrieval -[persist]-> db 'hybrid search: cosine plus full-text, RRF fusion'
+  generation -[persist]-> db
+  memory -[persist]-> db 'embed on save, cosine search'
+  memoryGraph -[persist]-> db 'sections and entities'
+  resolver -[persist]-> db 'decrypts provider_keys and per-project overrides'
+  answerCache -[persist]-> cache 'L1 exact answers and conversation turns'
+  answerCache -[persist]-> db 'L2 semantic cache, question embedding and answer'
+  publicApi -[persist]-> db 'query_logs'
+  identity -[persist]-> db 'users and Row-Level Security policies'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DEPLOYMENT — where the containers actually run
+// ═══════════════════════════════════════════════════════════════════════════
+
+deployment {
+
+  vercel = platform 'Vercel' {
+    technology 'Edge network'
+    dashboardNode = instanceOf oreag.dashboard
+  }
+
+  render = platform 'Render' {
+    technology 'Web service, render.yaml blueprint'
+    backendNode = instanceOf oreag.backend
+  }
+
+  supabase = platform 'Supabase' {
+    technology 'Managed Postgres, auth and object storage'
+    identityNode = instanceOf oreag.identity
+    dbNode = instanceOf oreag.db
+    filesNode = instanceOf oreag.files
+  }
+
+  redisCloud = platform 'Redis' {
+    technology 'Optional, falls back to in-process memory'
+    cacheNode = instanceOf oreag.cache
+  }
+
+  providerApis = platform 'Provider APIs' {
+    providerNode = instanceOf modelProviders
+  }
+
+  devMachine = workstation 'Developer Workstation' {
+    mcpNode = instanceOf oreag.mcpServer
+    agentNode = instanceOf codingAgent
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  VIEWS — one per C4 level
+// ═══════════════════════════════════════════════════════════════════════════
+
+views {
+
+  // ── Level 1 ──────────────────────────────────────────────────────────────
+  // With the boundary drawn correctly, `include *` IS the system context
+  // diagram: top-level elements are exactly the person, the system in scope,
+  // and the external systems it talks to. Nothing to filter out.
+
+  view index {
+    title 'Level 1 — System Context'
+    description '''
+      Oreag as a single box: who uses it, and which systems it depends on.
+      No technologies, no internals. Safe to show a non-technical audience.
+    '''
+
+    include *
+
+    // the developer both uses the dashboard and signs in, which merges into
+    // one edge, so name it rather than letting it render as "[...]"
+    include developer -> oreag with {
+      title 'uploads documents, tunes models, queries the knowledge base'
+    }
+
+    style * {
+      color muted
+    }
+    style oreag {
+      color brand-green
+    }
+    style developer {
+      color brand-blue
+    }
+
+    autoLayout TopBottom 140 120
+  }
+
+  // ── Level 2 ──────────────────────────────────────────────────────────────
+
+  view containers of oreag {
+    title 'Level 2 — Containers'
+    description '''
+      The seven containers inside the Oreag boundary, and the people and
+      external systems around it. Data stores are containers, not external
+      systems, because Oreag owns their schemas, buckets and keys.
+    '''
+
+    // in a scoped view `*` is the element plus its children, so this is the
+    // seven containers and nothing deeper. No exclude needed, and an exclude
+    // here would strip the relationships derived from the components.
+    include *
+
+    // the backend touches the database many ways, which merges to "[...]"
+    include oreag.backend -> oreag.db with {
+      title 'reads and writes chunks, memory, keys, logs and the L2 cache'
+    }
+
+    autoLayout TopBottom 120 100
+  }
+
+  // ── Level 3 ──────────────────────────────────────────────────────────────
+
+  view components of oreag.backend {
+    title 'Level 3 — Backend Components'
+    description 'Routers, domain services and the provider layer, mirroring backend/app/.'
+
+    include *
+    include routers.*
+    include services.*
+    include providers.*
+
+    // the public API both validates keys against and writes logs to the db
+    include routers.publicApi -> oreag.db with {
+      title 'validates the API key, writes query_logs'
+    }
+
+    autoLayout LeftRight 120 90
+  }
+
+  view readpath {
+    title 'Level 3 — Read path only'
+    description 'Filtered component view: just what a query touches.'
+
+    include oreag.backend.services.* where tag is #readpath
+    include
+      clientApp,
+      oreag.backend.routers.publicApi,
+      oreag.backend.providers.*,
+      oreag.db,
+      oreag.cache,
+      modelProviders
+
+    include oreag.backend.routers.publicApi -> oreag.db with {
+      title 'validates the API key, writes query_logs'
+    }
+
+    autoLayout LeftRight 110 80
+  }
+}
+
+// ── Dynamic views, one per flow ────────────────────────────────────────────
+
+views {
+
+  dynamic view ingestionFlow {
+    title 'Flows / 1 · Document ingestion — write path'
+    description '''
+      An upload is stored, a file row is created, then a background task
+      converts, chunks, embeds and writes vectors. Batch size is per provider:
+      OpenAI and Gemini 100, Ollama 32, sentence-transformers 64.
+    '''
+    variant sequence
+
+    developer -> ui 'uploads PDF · DOCX · PPTX · HTML · CSV'
+    ui -> dashboardApi 'POST /api/projects/{id}/files'
+    dashboardApi -> files 'stores the raw file'
+    dashboardApi -> db 'creates the file row, status: pending'
+    dashboardApi -> ingestion 'schedules ingest_file() as a background task'
+    dashboardApi -> ui '202, upload accepted'
+
+    ingestion -> files 'reads the raw file'
+    ingestion -> ingestion 'converts to Markdown, PyMuPDF and MarkItDown'
+    ingestion -> ingestion 'chunks with RecursiveCharacterTextSplitter'
+
+    ingestion -> resolver 'resolves the embedding key'
+    resolver -> db 'decrypts the provider key, Fernet'
+    resolver -> registry 'hands over the resolved key'
+
+    try {
+      registry -> modelProviders 'embeds chunks in provider-sized batches'
+      registry <- modelProviders 'vectors'
+      ingestion -> db 'writes chunks and embeddings'
+      ingestion -> db 'status: indexed, project status recomputed'
+    } catch 'any exception while embedding' {
+      ingestion -> db 'status: failed, error surfaced in the Files tab'
+    }
+  }
+
+  dynamic view queryFlow {
+    title 'Flows / 2 · Query · RAG — read path'
+    description '''
+      Both /api/projects/{id}/query and /v1/projects/{id}/query run the same
+      run_query(). Cache layers are scoped by project, models, top-K and content
+      signature, so new content or a model change invalidates them automatically.
+    '''
+    variant sequence
+
+    clientApp -> publicApi 'POST /v1/projects/{id}/query, optional conversation_id'
+    publicApi -> db 'validates the API key and checks for indexed content'
+
+    opt 'invalid key or no indexed chunks' {
+      publicApi -> clientApp '401 / 409'
+    }
+
+    opt 'conversation_id present' {
+      publicApi -> cache 'loads prior turns'
+      publicApi <- cache 'history'
+      publicApi -> modelProviders 'condenses the follow-up into a standalone question'
+    }
+
+    publicApi -> answerCache 'L1 exact lookup'
+
+    alt {
+      when 'L1 hit' {
+        answerCache -> cache 'reads the cached answer'
+        publicApi <- answerCache 'cached answer, no retrieval, no LLM, single-flight de-dup'
+      }
+      else 'L1 miss' {
+        answerCache -> db 'L2: embeds the question, cosine against cached questions'
+
+        alt {
+          when 'L2 hit, similarity >= 0.75' {
+            publicApi <- answerCache 'cached answer, one embedding call, no retrieval, no LLM'
+          }
+          else 'double miss' {
+            publicApi -> agentic 'run_query(question, top_k)'
+            agentic -> agentic 'detect_depth(question) → short | long'
+
+            opt 'long question' {
+              agentic -> modelProviders 'plan_subqueries(), literal question kept'
+            }
+
+            loop 'retrieve and merge, max 2 rounds' {
+              agentic -> retrieval 'retrieves each sub-query at top_k'
+              retrieval -> db 'pgvector cosine plus full-text tsvector, RRF fusion k=60'
+              retrieval <- db 'top-k chunks'
+              agentic <- retrieval 'sources'
+              agentic -> memory 'pulls relevant memories'
+              agentic -> agentic 'merges, de-dups on best similarity, is_sufficient()?'
+            }
+
+            alt {
+              when 'sufficient' {
+                agentic -> generation 'asks for a depth-aware grounded answer'
+                generation -> modelProviders 'completion'
+                agentic <- generation 'answer: concise if short, structured if long'
+              }
+              else 'still insufficient' {
+                agentic -> agentic 'human in the loop, builds clarifying questions'
+              }
+            }
+
+            publicApi <- agentic 'answer, sources, depth, sub_queries, needs_clarification'
+            publicApi -> answerCache 'stores the answer'
+            answerCache -> cache 'L1, TTL 5 min'
+            answerCache -> db 'L2: question embedding and answer, TTL 1 h'
+          }
+        }
+      }
+    }
+
+    opt 'conversation_id present' {
+      publicApi -> cache 'appends the turn'
+    }
+
+    publicApi -> db 'writes query_logs'
+    publicApi -> clientApp '200 — answer · sources · depth · cache_layer · cache_similarity · conversation_id'
+  }
+
+  dynamic view byokFlow {
+    title 'Flows / 3 · BYOK key resolution'
+    description '''
+      Checked in order: local provider, then per-project override,
+      then account-level key, otherwise 503.
+    '''
+    variant sequence
+
+    generation -> resolver 'needs a provider key for an embedding or LLM call'
+
+    alt {
+      when 'provider is local — Ollama · LM Studio · sentence-transformers' {
+        resolver -> registry 'no key required'
+        registry -> modelProviders 'calls the local runtime'
+      }
+      else 'provider needs a key' {
+        alt {
+          when 'per-project override is set' {
+            resolver -> db 'decrypts the project key, Fernet, projects table'
+            resolver -> registry 'resolved key'
+            registry -> modelProviders 'calls the keyed provider'
+          }
+          else 'no project override' {
+            alt {
+              when 'account-level key exists for this provider' {
+                resolver -> db 'decrypts the account key, Fernet, provider_keys table'
+                resolver -> registry 'resolved key'
+                registry -> modelProviders 'calls the keyed provider'
+              }
+              else 'no key anywhere' {
+                generation <- resolver 'HTTP 503 — add a key in Settings → API keys'
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  dynamic view authFlow {
+    title 'Flows / 4 · Authentication and email confirmation'
+    description 'Sign-up branches on whether confirmation is required, confirmation branches on token validity.'
+    variant sequence
+
+    developer -> ui 'submits email and password'
+    ui -> identity 'auth.signUp()'
+
+    alt {
+      when 'email confirmation required' {
+        identity -> emailSystem 'sends the branded confirmation message'
+        ui <- identity 'session = null'
+        developer <- ui 'Check your inbox'
+        developer <- emailSystem 'delivers the link → /auth/confirm?token_hash'
+        developer -> authRoutes 'GET /auth/confirm'
+        authRoutes -> identity 'verifyOtp(token_hash, type)'
+
+        alt {
+          when 'token valid' {
+            authRoutes <- identity 'session, Set-Cookie'
+            developer <- authRoutes '302 → /dashboard'
+          }
+          else 'expired or invalid' {
+            authRoutes <- identity 'error'
+            developer <- authRoutes '302 → /login?error'
+          }
+        }
+      }
+      else 'confirmations disabled' {
+        ui <- identity 'active session'
+        developer <- ui 'redirect → /dashboard'
+      }
+    }
+  }
+
+  dynamic view agentMemoryFlow {
+    title 'Flows / 5 · Agent memory and docs recall over MCP'
+    description '''
+      A coding-agent session connects to one project with its oreag_sk_ key,
+      bootstraps from recent memory, then saves and recalls during work.
+    '''
+    variant sequence
+
+    codingAgent -> mcpServer 'list_recent_memory()'
+    mcpServer -> publicApi 'GET /v1/memory/recent'
+    publicApi -> memory 'recent_memories, pinned first'
+    memory -> db 'SELECT ORDER BY pinned, created_at'
+    memory <- db 'entries'
+    mcpServer <- publicApi 'entries'
+    codingAgent <- mcpServer 'context to orient the session'
+
+    codingAgent -> mcpServer 'save_memory("decision: …")'
+    mcpServer -> publicApi 'POST /v1/memory'
+    publicApi -> memory 'embed on save with the resolved key'
+    memory -> db 'INSERT memory and embedding'
+
+    codingAgent -> mcpServer 'search_memory("how does auth work?")'
+    mcpServer -> publicApi 'POST /v1/memory/search'
+    publicApi -> memory 'embeds the query, cosine search'
+    memory -> db 'ORDER BY embedding <=> qvec'
+    memory <- db 'relevant entries'
+    codingAgent <- mcpServer 'recalled memories'
+
+    codingAgent -> mcpServer 'search_docs("payment flow")'
+    mcpServer -> publicApi 'POST /v1/retrieve'
+    publicApi -> retrieval 'hybrid search'
+    codingAgent <- mcpServer 'relevant document chunks'
+  }
+}
+
+// ── Deployment ─────────────────────────────────────────────────────────────
+
+views {
+
+  deployment view production {
+    title 'Deployment / Production'
+    description '''
+      Container is what a thing is. Deployment node is where it runs.
+      That separation is why Postgres and Redis are containers of Oreag above,
+      and appear here on the platforms that host them.
+    '''
+    includeAncestors: true
+
+    include *
+    include
+      vercel.**,
+      render.**,
+      supabase.**,
+      redisCloud.**,
+      providerApis.**,
+      devMachine.**
+
+    autoLayout LeftRight 120 90
+  }
+}
