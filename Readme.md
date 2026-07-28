@@ -1,7 +1,7 @@
 <div align="center">
 
 # Oreag - RAG & Memory as a Service
-https://playground.likec4.dev/share/foITvnUjbk/
+https://playground.likec4.dev/w/sn1kDz/index/
 
 **Turn your documents into a production-ready, queryable RAG API - with a built-in memory graph - from a web dashboard.**
 
