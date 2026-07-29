@@ -1,12 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //  Oreag — RAG & Memory as a Service
-//  LikeC4 model, ported from README.md + FLOW.md
+//  LikeC4 model. Verified against the source tree, not the prose docs.
 //
 //  Boundary rule applied throughout (c4model.com/abstractions/container):
 //  a managed service whose schemas, buckets or config you own is a CONTAINER
 //  of your system, not an external software system. So Postgres, the storage
 //  bucket and Redis sit inside Oreag. Where they physically run is a
 //  deployment concern, handled in the deployment model at the bottom.
+//
+//  Components mirror backend/app/ one-for-one, so a reader can go from a box
+//  to the file that implements it.
 //
 //  Try it:   npx likec4 start
 //  Build:    npx likec4 build -o ./dist
@@ -79,6 +82,15 @@ specification {
     }
   }
 
+  element worker {
+    notation 'Component: background worker'
+    style {
+      shape queue
+      color brand-green
+      size sm
+    }
+  }
+
   // ── relationship kinds, which generate the legend ────────────────────────
 
   relationship uses {
@@ -100,7 +112,7 @@ specification {
   }
 
   relationship auth {
-    notation 'Authentication'
+    notation 'Authentication / admission control'
     line dotted
     color amber
   }
@@ -110,6 +122,8 @@ specification {
   tag mcp
   tag writepath
   tag readpath
+  tag guard        // admission control: auth, rate limits, quotas, suspension
+  tag background   // runs on a worker thread, not in the request path
 
   deploymentNode platform {
     style {
@@ -139,81 +153,205 @@ model {
   // ── the software system in scope ─────────────────────────────────────────
 
   oreag = softwareSystem 'Oreag' 'Turns documents into a queryable RAG API with an agent memory graph. Multi-tenant, bring your own key.' {
-    link ./FLOW.md 'Flow diagrams'
+    link ./flow.md 'Flow diagrams'
+    link ./Readme.md 'README'
 
-    dashboard = container 'Dashboard' 'Projects, files, settings, playground, 3D knowledge graph' {
+    dashboard = container 'Dashboard' 'Projects, files, settings, streaming playground, 3D knowledge graph' {
       technology 'Next.js 16 · React 19 · TypeScript · Tailwind v4 · shadcn/ui · SWR'
       icon tech:nextjs
 
-      ui = component 'Dashboard UI' {
+      ui = component 'Dashboard UI' 'Six project tabs: Files, Memory, Playground, API, Visualize, Settings' {
         style { shape browser }
       }
-      authRoutes = component 'Auth Route Handlers' '/auth/confirm · /auth/callback'
+      authRoutes = component 'Auth Route Handlers' '/auth/confirm · /auth/callback · /api/auth/methods'
     }
 
-    backend = container 'Backend API' 'Ingestion, retrieval, generation, memory and key resolution' {
+    backend = container 'Backend API' 'Ingestion, retrieval, generation, memory, metering and key resolution' {
       technology 'FastAPI · SQLAlchemy 2 · Pydantic · Uvicorn · Python 3.13'
       icon tech:python
 
       routers = component 'Routers' 'backend/app/routers' {
-        dashboardApi = component 'Dashboard API' '/api/* — JWT protected'
-        publicApi = component 'Public API' '/v1/* — query · retrieve · memory'
+        dashboardApi = component 'Dashboard API' '/api/* — Supabase JWT verified against JWKS, then an ownership check' {
+          technology 'ES256 / RS256 via JWKS'
+        }
+        publicApi = component 'Public API' '/v1/* — query · stream · retrieve · explore · memory · graph · ingest' {
+          technology 'Bearer oreag_sk_ · SHA-256 lookup'
+          metadata {
+            keys 'oreag_sk_ + 32 url-safe random bytes; only the SHA-256 hash and a 16-char display prefix are stored'
+            quotas 'upload counted inside pg_advisory_xact_lock so concurrent keys cannot overshoot the cap'
+            scopes 'can_upload is the only scope; every other route is open to any valid key for that project'
+          }
+        }
       }
 
       services = component 'Domain Services' 'backend/app/services' {
-        ingestion = component 'Ingestion' 'Convert, chunk, embed and write vectors as a background task' {
+
+        ingestQueue = worker 'Ingestion Queue' 'The files table IS the queue. Claims the oldest pending row with SELECT … FOR UPDATE SKIP LOCKED under a time lease, so a dead worker releases its job automatically.' {
+          #writepath #background
+          technology 'FOR UPDATE SKIP LOCKED · lease 1800 s · poll 3 s · 2 threads · max 3 attempts'
+          metadata {
+            claim 'SELECT ... WHERE status = pending OR lease_expires_at < now() ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED'
+            retry 'attempts incremented on claim; at 3 the file is failed permanently'
+          }
+        }
+        ingestion = component 'Ingestion' 'Convert, chunk, embed, write vectors. Idempotent: deletes prior chunks first, then commits per batch so a crash loses at most one batch.' {
           #writepath
-          technology 'PyMuPDF · MarkItDown · LangChain splitters'
+          technology 'RecursiveCharacterTextSplitter · 1000 chars / 200 overlap'
+          metadata {
+            chunking 'Recursive character splitting with overlap'
+            separators 'paragraph, then line, then word, then character - cuts at the largest natural boundary that fits'
+            defaults 'chunk_size 1000, chunk_overlap 200; per-file overrides fall back to project settings'
+            batching 'embed_batch_size(embedder): OpenAI/Gemini 100, Ollama/LM Studio 32, others 64'
+          }
         }
-        retrieval = component 'Retrieval' 'Semantic pgvector search and Postgres full-text, fused with RRF' {
+        conversion = component 'Conversion' 'Any upload to Markdown, so chunking sees one uniform format. AI image captioning and a BYOK speech-to-text chain.' {
+          #writepath
+          technology 'MarkItDown · PyMuPDF · ffmpeg'
+          metadata {
+            formats '~30 types: PDF, DOCX, PPTX, XLSX, CSV, HTML, JSON, EPUB, images, audio, ZIP'
+            images 'vision captioning via the project LLM (OpenAI native, Gemini through its OpenAI-compatible endpoint)'
+            audio 'BYOK STT chain, project provider first, free Google Web Speech last with a non-fatal conversion_note'
+          }
+        }
+
+        retrieval = component 'Retrieval' 'Hybrid: dense vector search for meaning plus sparse full-text for exact terms, fused by rank not score.' {
           #readpath
-          technology 'RRF k=60, degrades to semantic-only'
+          technology 'pgvector cosine + Postgres FTS · RRF k=60'
+          metadata {
+            semantic 'cosine distance operator <=>, ORDER BY embedding <=> qvec LIMIT top_k'
+            lexical 'content_tsv @@ websearch_to_tsquery(simple), ranked by ts_rank_cd, GIN index'
+            fusion 'Reciprocal Rank Fusion: score = sum of 1/(60 + rank) across both lists; raw cosine kept for thresholds and the UI match %'
+            degradation 'lexical failure (missing content_tsv) rolls back and falls through to semantic-only'
+          }
         }
-        generation = component 'Generation' 'Depth-aware grounded answers with cited sources' {
+        generation = component 'Generation' 'Depth-aware grounded answers with inline citations. Sync and token streaming.' {
           #readpath
+          technology 'depth-aware system prompts · [n] citations'
+          metadata {
+            prompts 'SHORT_SYSTEM_PROMPT for focused questions, LONG_SYSTEM_PROMPT for exam-style ones'
+            grounding 'answers strictly from supplied context; refuses rather than inventing'
+          }
         }
-        agentic = component 'Agentic Query Loop' 'Depth detection, sub-query decomposition, retrieve and merge, sufficiency check, clarification' {
+        agentic = component 'Agentic Query Loop' 'Classifies depth, decomposes broad questions, retrieves and merges over rounds, and escalates to the human instead of guessing.' {
           #readpath
-          technology 'max 2 rounds'
+          technology 'max 2 rounds · max 5 sub-queries · min_similarity 0.2'
+          metadata {
+            depth 'detect_depth heuristic: a marks weighting or a directive verb (explain, compare, evaluate...) means long'
+            planning 'plan_subqueries asks the LLM for focused sub-questions, the literal question always kept'
+            merging 'merge_sources de-dups on filename+page+index+content, keeping the best similarity'
+            sufficiency 'is_sufficient: at least 1 source at or above 0.2 cosine; otherwise widen top_k and retry, then clarify'
+          }
         }
-        answerCache = component 'Answer Cache' 'L1 exact match, L2 semantic' {
+        answerCache = component 'Answer Cache' 'Two layers. L1 hits an identical question, L2 hits one that merely means the same. Single-flight so simultaneous identical asks compute once.' {
           #cache #readpath
-          technology 'L1 TTL 5 min · L2 TTL 1 h · cosine >= 0.75'
+          technology 'L1 exact TTL 1 h · L2 semantic TTL 24 h · cosine >= 0.75'
+          metadata {
+            l1 'normalize_question (lowercase, collapse whitespace, strip trailing punctuation) then an exact key lookup in Redis'
+            l2 'embeds the question and runs pgvector cosine over cached questions; a hit is promoted into L1'
+            key 'project + llm provider/model + embedding provider/model + top_k + content_version + normalized question'
+            invalidation 'content_version bumps on any chunk or memory write, so the whole key space rolls over'
+          }
         }
-        memory = component 'Memory' 'save · search · recent, embed on save' {
-          technology 'pinned first, cosine search'
+        conversations = component 'Conversation Memory' 'Server-side chat threads, so a follow-up can be rewritten standalone' {
+          #cache #readpath
+          technology 'TTL 24 h · 20 turns · 6 fed to condense'
         }
-        memoryGraph = component 'Memory Graph' 'Sections and entities derived from indexed content'
+        explore = component 'Brain Explorer' 'Graph-aware retrieval: seeds on the nearest chunks AND memories, then walks related edges outward. A connected subgraph rather than a flat top-k.' {
+          #readpath
+          technology 'seeds 6+6 · fanout 4 · max 50 nodes · hops clamped to 1 for API keys'
+          metadata {
+            traversal 'breadth-first expansion over similarity edges, undirected de-dup, bounded by a node budget'
+          }
+        }
+
+        memory = component 'Memory' 'save · search · recent · delete. Embedded on save into the SAME vector space as document chunks, which is what lets memories compete with chunks at query time.' {
+          technology 'cosine search · pinned first · cap 2000 per project'
+          metadata {
+            blending 'top 4 memories above 0.35 cosine are appended as pseudo-sources with filename=memory'
+            reembedding 'a model switch nulls memory vectors then re-embeds them in the background, queued before file re-ingestion'
+          }
+        }
+        memoryGraph = component 'Memory Graph' 'Project, file, section, chunk and memory nodes, joined by structural edges and computed similarity edges.' {
+          #cache
+          technology 'related threshold 0.6 · cached per content_version · TTL 10 min'
+          metadata {
+            edges 'structural: contains, derived_from, next. semantic: related, cosine >= 0.6, top 5 per node'
+            caps 'max 600 chunk edges, 400 memory edges, 1500 chunks, 1000 memories'
+          }
+        }
+
+        rateLimit = component 'Rate Limiter' 'Fixed 60-second window counted per API key and per project. Fails open if the counter store is unreachable.' {
+          #guard
+          technology 'Redis INCR + EXPIRE · std 120/300 · heavy 10/20 per min'
+          metadata {
+            algorithm 'fixed window: INCR then EXPIRE 60 on first hit; 429 carries Retry-After = seconds left in the window'
+            buckets 'std for query/stream/retrieve/memory; heavy for explore and memory-graph'
+          }
+        }
+        usage = component 'Usage Metering' 'One usage_events row per public request. Best-effort, never fails the request. The prerequisite for billing.' {
+          #guard
+        }
+        contentVersion = component 'Content Version' 'Monotonic counter bumped on every chunk or memory write. It IS the cache signature, so invalidation is a single integer compare rather than two COUNT(*) probes.'
+        maintenance = worker 'Maintenance Sweep' 'Prunes query_logs, usage_events and expired semantic-cache rows' {
+          #background
+          technology 'daemon thread · every 6 h · retention 90 d'
+        }
       }
 
       providers = component 'Provider Layer' 'backend/app/providers' {
-        resolver = component 'BYOK Key Resolver' 'local, then per-project override, then account key, otherwise 503' {
+        resolver = component 'BYOK Key Resolver' 'Local provider, then per-project override, then account key, otherwise 503. Resolves against the project OWNER, so a public /v1 call uses the owner keys.' {
           #byok
-          technology 'Fernet decrypt'
+          technology 'Fernet symmetric decrypt'
+          metadata {
+            precedence 'keyless local -> project override -> account provider_keys -> ProviderUnavailableError (503)'
+            storage 'keys encrypted at rest with Fernet; only last4 kept for display'
+          }
         }
-        registry = component 'Provider Registry' 'Dispatches embedding and completion calls'
+        registry = component 'Provider Registry' 'The validated catalog and the dispatch point for embedding, completion and streaming. Owns Matryoshka dimension logic.' {
+          #byok
+          technology '16 keyed providers · 3 keyless local · MRL dimensions'
+          metadata {
+            mrl 'Matryoshka Representation Learning: important signal is packed into the vector prefix, so a prefix is itself a valid embedding'
+            mrl-models 'text-embedding-3-small [512,1536], 3-large [256,1024,3072], gemini-embedding-001 [768,1536,3072], cohere embed-v4.0 [256..1536], jina-v3 [256,512,1024]'
+            mrl-shrink 'same model, smaller size: UPDATE ... SET embedding = l2_normalize(subvector(embedding,1,dims)) - in place, zero API calls'
+            mrl-grow 'growing or switching model is a full re-embed; the discarded tail cannot be reconstructed'
+            normalization 'Gemini sub-native sizes come back un-normalized, so L2 normalization is applied locally'
+            change-plan 'embedding_change_plan returns keep | truncate | reembed'
+          }
+        }
+        transcription = component 'Transcription Chain' 'Ordered BYOK speech-to-text: tries every usable key the owner holds, project provider first.' {
+          #byok
+          technology 'Whisper · Gemini native · whisper-large-v3 · Voxtral · Saarika'
+          metadata {
+            order 'OpenAI, Gemini, Groq, Mistral, Sarvam - reordered so the project provider is tried first'
+          }
+        }
       }
     }
 
-    mcpServer = container 'MCP Server' 'save_memory · search_memory · list_recent_memory · delete_memory · search_docs · ask_docs' {
+    mcpServer = container 'MCP Server' 'A thin proxy over the public API. Nine tools: save_memory, search_memory, list_recent_memory, delete_memory, search_docs, ask_docs, add_document, get_memory_graph, explore_brain.' {
       #mcp
-      technology 'Python · FastMCP'
+      technology 'Python · FastMCP · stdio and streamable HTTP'
+      metadata {
+        transports 'stdio for a local agent; streamable HTTP for the multi-tenant remote at /projects/{id}/mcp'
+        auth 'Bearer oreag_sk_ per request, held in a contextvar; stateless_http makes multi-tenant safe'
+      }
     }
 
-    identity = container 'Identity' 'Sign-up, sign-in, email confirmation, JWT issuance, Row-Level Security policies' {
+    identity = container 'Identity' 'Sign-up, sign-in, OAuth, email confirmation, JWT issuance, Row-Level Security policies' {
       technology 'Supabase Auth · JWT / JWKS'
     }
 
-    db = containerDb 'Database' 'Projects, files, chunks, memories, provider_keys, api_keys, query_logs, semantic_query_cache' {
+    db = containerDb 'Database' 'projects · files · chunks · memories · provider_keys · api_keys · query_logs · semantic_query_cache · usage_events · suspended_accounts' {
       technology 'Supabase Postgres + pgvector'
       icon tech:postgresql
     }
 
-    files = containerStore 'File Storage' 'Raw uploads and converted markdown' {
-      technology 'Supabase Storage, private bucket'
+    files = containerStore 'File Storage' 'Raw uploads and converted markdown, private bucket' {
+      technology 'Supabase Storage'
     }
 
-    cache = containerDb 'Cache' 'L1 exact answers and conversation turns' {
+    cache = containerDb 'Cache' 'L1 answers, conversation turns and rate-limit counters' {
       #cache
       technology 'Redis, optional via REDIS_URL, falls back to in-memory'
       icon tech:redis
@@ -231,7 +369,7 @@ model {
     technology 'MCP client'
   }
 
-  modelProviders = externalSystem 'AI Model Providers' 'Embedding and completion models. 16 keyed APIs including OpenAI, Gemini, Anthropic, Azure OpenAI, Mistral, Cohere, Groq and xAI, plus keyless local runtimes: Ollama, LM Studio and sentence-transformers.' {
+  modelProviders = externalSystem 'AI Model Providers' 'Embedding, completion and speech-to-text models. 16 keyed APIs including OpenAI, Gemini, Anthropic, Azure OpenAI, Mistral, Cohere, Groq and xAI, plus keyless local runtimes: Ollama, LM Studio and sentence-transformers.' {
     #byok
     style {
       color brand-violet
@@ -259,55 +397,85 @@ model {
 
   // ── container to container ───────────────────────────────────────────────
 
-  ui -[uses]-> dashboardApi 'calls the dashboard API' {
+  ui -[uses]-> dashboardApi 'calls the dashboard API, streams the playground over SSE' {
     technology 'Bearer JWT'
   }
-  authRoutes -[auth]-> identity 'verifyOtp(token_hash, type)'
-  mcpServer -[uses]-> publicApi 'proxies tool calls' {
+  authRoutes -[auth]-> identity 'verifyOtp · exchangeCodeForSession'
+  mcpServer -[uses]-> publicApi 'proxies all nine tools' {
     technology 'Bearer oreag_sk_…'
   }
   dashboardApi -[auth]-> identity 'validates the JWT against JWKS'
   publicApi -[auth]-> db 'validates the API key, SHA-256 hashed'
   identity -[uses]-> emailSystem 'sends the confirmation message'
-  registry -[uses]-> modelProviders 'embeds and generates with the resolved key' {
+  registry -[uses]-> modelProviders 'embeds, generates and streams with the resolved key' {
     technology 'HTTPS'
   }
+  transcription -[uses]-> modelProviders 'transcribes audio with the first usable key'
 
-  // ── inside the backend ───────────────────────────────────────────────────
+  // ── inside the backend: admission control ────────────────────────────────
 
-  dashboardApi -[internal]-> ingestion 'schedules ingest_file()'
-  dashboardApi -[internal]-> agentic 'playground query'
+  publicApi -[auth]-> rateLimit 'per key and per project, heavy bucket for explore and graph'
+  publicApi -[auth]-> db 'rejects suspended projects and accounts'
+  publicApi -[internal]-> usage 'records the request'
+
+  // ── inside the backend: write path ───────────────────────────────────────
+
+  dashboardApi -[persist]-> db 'creates file rows, status pending'
+  publicApi -[persist]-> db 'creates file rows under an advisory-lock quota check'
+  ingestQueue -[persist]-> db 'claims the oldest pending file, FOR UPDATE SKIP LOCKED'
+  ingestQueue -[internal]-> ingestion 'runs the claimed job'
+  ingestion -[internal]-> conversion 'converts the upload to Markdown'
+  conversion -[internal]-> transcription 'audio only'
+  ingestion -[internal]-> contentVersion 'bumps, invalidating every cache'
+
+  // ── inside the backend: read path ────────────────────────────────────────
+
+  dashboardApi -[internal]-> agentic 'playground query and SSE stream'
   dashboardApi -[internal]-> memory
   dashboardApi -[internal]-> memoryGraph
 
-  publicApi -[internal]-> agentic 'run_query()'
+  publicApi -[internal]-> agentic 'run_query() and run_query_stream()'
   publicApi -[internal]-> retrieval 'POST /v1/retrieve'
-  publicApi -[internal]-> memory 'POST /v1/memory · /memory/search · GET /memory/recent'
-  publicApi -[internal]-> memoryGraph
+  publicApi -[internal]-> explore 'POST /v1/explore'
+  publicApi -[internal]-> memory 'POST /v1/memory · /memory/search · GET /memory/recent · DELETE /memory/{id}'
+  publicApi -[internal]-> memoryGraph 'GET /v1/projects/{id}/memory-graph'
 
   agentic -[internal]-> answerCache 'L1 exact, then L2 semantic'
+  agentic -[internal]-> conversations 'loads history, condenses the follow-up'
   agentic -[internal]-> retrieval 'retrieves every sub-query'
   agentic -[internal]-> generation 'grounds the answer'
   agentic -[internal]-> memory 'blends in relevant memories'
+  explore -[internal]-> memory 'seeds on nearest memories'
+
+  // ── inside the backend: key resolution ───────────────────────────────────
 
   ingestion -[internal]-> resolver 'needs an embedding key'
+  conversion -[internal]-> resolver 'needs a vision or speech key'
   retrieval -[internal]-> resolver 'needs an embedding key'
   generation -[internal]-> resolver 'needs an LLM key'
   memory -[internal]-> resolver 'needs an embedding key'
+  answerCache -[internal]-> resolver 'needs an embedding key for L2'
   resolver -[internal]-> registry 'hands over the resolved key'
 
   // ── reads and writes ─────────────────────────────────────────────────────
 
   ingestion -[persist]-> files 'raw file and markdown'
-  ingestion -[persist]-> db 'chunks and embeddings'
+  ingestion -[persist]-> db 'chunks and embeddings, committed per batch'
+  conversion -[persist]-> files 'reads the raw upload'
   retrieval -[persist]-> db 'hybrid search: cosine plus full-text, RRF fusion'
-  generation -[persist]-> db
   memory -[persist]-> db 'embed on save, cosine search'
-  memoryGraph -[persist]-> db 'sections and entities'
+  memoryGraph -[persist]-> db 'nodes and related edges'
+  explore -[persist]-> db 'seed vectors and related edges'
   resolver -[persist]-> db 'decrypts provider_keys and per-project overrides'
-  answerCache -[persist]-> cache 'L1 exact answers and conversation turns'
+  answerCache -[persist]-> cache 'L1 exact answers'
   answerCache -[persist]-> db 'L2 semantic cache, question embedding and answer'
-  publicApi -[persist]-> db 'query_logs'
+  conversations -[persist]-> cache 'conversation turns'
+  rateLimit -[persist]-> cache 'fixed-window counters'
+  usage -[persist]-> db 'usage_events'
+  contentVersion -[persist]-> db 'projects.content_version'
+  maintenance -[persist]-> db 'prunes logs, usage and expired cache rows'
+  publicApi -[persist]-> db 'query_logs with the cache layer that served it'
+  dashboardApi -[persist]-> db 'query_logs · projects · keys'
   identity -[persist]-> db 'users and Row-Level Security policies'
 }
 
@@ -323,8 +491,11 @@ deployment {
   }
 
   render = platform 'Render' {
-    technology 'Web service, render.yaml blueprint'
+    technology 'Docker web services, render.yaml blueprints'
     backendNode = instanceOf oreag.backend
+    mcpRemoteNode = instanceOf oreag.mcpServer {
+      title 'MCP Server (remote, multi-tenant)'
+    }
   }
 
   supabase = platform 'Supabase' {
@@ -335,7 +506,7 @@ deployment {
   }
 
   redisCloud = platform 'Redis' {
-    technology 'Optional, falls back to in-process memory'
+    technology 'Upstash. Optional, falls back to in-process memory.'
     cacheNode = instanceOf oreag.cache
   }
 
@@ -344,7 +515,9 @@ deployment {
   }
 
   devMachine = workstation 'Developer Workstation' {
-    mcpNode = instanceOf oreag.mcpServer
+    mcpLocalNode = instanceOf oreag.mcpServer {
+      title 'MCP Server (local, stdio)'
+    }
     agentNode = instanceOf codingAgent
   }
 }
@@ -405,7 +578,10 @@ views {
 
     // the backend touches the database many ways, which merges to "[...]"
     include oreag.backend -> oreag.db with {
-      title 'reads and writes chunks, memory, keys, logs and the L2 cache'
+      title 'chunks, memory, keys, logs, metering and the L2 cache'
+    }
+    include oreag.backend -> oreag.cache with {
+      title 'L1 answers, conversation turns, rate-limit counters'
     }
 
     autoLayout TopBottom 120 100
@@ -422,9 +598,9 @@ views {
     include services.*
     include providers.*
 
-    // the public API both validates keys against and writes logs to the db
+    // the public API validates keys, enforces suspension and writes logs
     include routers.publicApi -> oreag.db with {
-      title 'validates the API key, writes query_logs'
+      title 'validates the key, rejects suspended, writes query_logs'
     }
 
     autoLayout LeftRight 120 90
@@ -444,8 +620,45 @@ views {
       modelProviders
 
     include oreag.backend.routers.publicApi -> oreag.db with {
-      title 'validates the API key, writes query_logs'
+      title 'validates the key, writes query_logs'
     }
+
+    autoLayout LeftRight 110 80
+  }
+
+  view writepath {
+    title 'Level 3 — Write path only'
+    description '''
+      Ingestion is a durable queue, not an in-process background task: the
+      files table is the queue, worker threads claim rows under a lease.
+    '''
+
+    include oreag.backend.services.* where tag is #writepath
+    include
+      developer,
+      oreag.dashboard.ui,
+      oreag.backend.routers.*,
+      oreag.backend.providers.*,
+      oreag.db,
+      oreag.files,
+      modelProviders
+
+    autoLayout LeftRight 110 80
+  }
+
+  view guards {
+    title 'Level 3 — Admission control and metering'
+    description '''
+      What every public request passes through before and after the work:
+      API key check, suspension check, rate limit, then a usage row.
+    '''
+
+    include oreag.backend.services.* where tag is #guard
+    include
+      clientApp,
+      oreag.backend.routers.publicApi,
+      oreag.db,
+      oreag.cache
 
     autoLayout LeftRight 110 80
   }
@@ -458,34 +671,47 @@ views {
   dynamic view ingestionFlow {
     title 'Flows / 1 · Document ingestion — write path'
     description '''
-      An upload is stored, a file row is created, then a background task
-      converts, chunks, embeds and writes vectors. Batch size is per provider:
-      OpenAI and Gemini 100, Ollama 32, sentence-transformers 64.
+      An upload is validated and stored, a file row is created as pending, and
+      that row IS the queue entry. A worker thread claims it under a lease and
+      runs convert, chunk, embed. Chunks commit per batch, so a crash loses at
+      most one batch, and the lease lets another worker pick the job back up.
     '''
     variant sequence
 
-    developer -> ui 'uploads PDF · DOCX · PPTX · HTML · CSV'
+    developer -> ui 'uploads PDF · DOCX · PPTX · images · audio'
     ui -> dashboardApi 'POST /api/projects/{id}/files'
+    dashboardApi -> dashboardApi 'validates every file before storing any'
     dashboardApi -> files 'stores the raw file'
     dashboardApi -> db 'creates the file row, status: pending'
-    dashboardApi -> ingestion 'schedules ingest_file() as a background task'
-    dashboardApi -> ui '202, upload accepted'
+    dashboardApi -> ui '201, upload accepted'
+
+    ingestQueue -> db 'claims oldest pending, FOR UPDATE SKIP LOCKED, sets a lease'
+    ingestQueue -> ingestion 'runs the job on a worker thread'
 
     ingestion -> files 'reads the raw file'
-    ingestion -> ingestion 'converts to Markdown, PyMuPDF and MarkItDown'
-    ingestion -> ingestion 'chunks with RecursiveCharacterTextSplitter'
+    ingestion -> conversion 'converts to Markdown'
 
+    opt 'image or audio upload' {
+      conversion -> resolver 'resolves a vision or speech key'
+      conversion -> transcription 'audio: tries each usable key in order'
+      transcription -> modelProviders 'transcribes'
+    }
+
+    ingestion -> ingestion 'chunks with RecursiveCharacterTextSplitter, 1000 / 200'
     ingestion -> resolver 'resolves the embedding key'
     resolver -> db 'decrypts the provider key, Fernet'
     resolver -> registry 'hands over the resolved key'
 
     try {
-      registry -> modelProviders 'embeds chunks in provider-sized batches'
-      registry <- modelProviders 'vectors'
-      ingestion -> db 'writes chunks and embeddings'
+      loop 'per batch, size set by the provider' {
+        registry -> modelProviders 'embeds a batch'
+        registry <- modelProviders 'vectors'
+        ingestion -> db 'inserts chunks and commits'
+      }
+      ingestion -> contentVersion 'bumps the content version'
       ingestion -> db 'status: indexed, project status recomputed'
-    } catch 'any exception while embedding' {
-      ingestion -> db 'status: failed, error surfaced in the Files tab'
+    } catch 'any exception while converting or embedding' {
+      ingestion -> db 'status: failed, chunks deleted, error surfaced in the Files tab'
     }
   }
 
@@ -493,40 +719,46 @@ views {
     title 'Flows / 2 · Query · RAG — read path'
     description '''
       Both /api/projects/{id}/query and /v1/projects/{id}/query run the same
-      run_query(). Cache layers are scoped by project, models, top-K and content
-      signature, so new content or a model change invalidates them automatically.
+      run_query(). Cache layers are scoped by project, models, top-K and the
+      content version, so new content or a model change invalidates them
+      automatically. Retrieval only runs on a double cache miss.
     '''
     variant sequence
 
     clientApp -> publicApi 'POST /v1/projects/{id}/query, optional conversation_id'
-    publicApi -> db 'validates the API key and checks for indexed content'
+    publicApi -> db 'validates the API key, rejects suspended project or account'
+    publicApi -> rateLimit 'std bucket: 120/min per key, 300/min per project'
 
-    opt 'invalid key or no indexed chunks' {
-      publicApi -> clientApp '401 / 409'
+    opt 'over budget' {
+      publicApi -> clientApp '429 with Retry-After'
+    }
+
+    opt 'invalid key or no indexed content' {
+      publicApi -> clientApp '401 / 403 / 409'
     }
 
     opt 'conversation_id present' {
-      publicApi -> cache 'loads prior turns'
-      publicApi <- cache 'history'
+      publicApi -> conversations 'loads prior turns'
+      publicApi <- conversations 'history'
       publicApi -> modelProviders 'condenses the follow-up into a standalone question'
     }
 
-    publicApi -> answerCache 'L1 exact lookup'
+    publicApi -> answerCache 'L1 exact lookup, key includes content_version'
 
     alt {
       when 'L1 hit' {
         answerCache -> cache 'reads the cached answer'
-        publicApi <- answerCache 'cached answer, no retrieval, no LLM, single-flight de-dup'
+        publicApi <- answerCache 'cached answer, no retrieval, no LLM'
       }
       else 'L1 miss' {
         answerCache -> db 'L2: embeds the question, cosine against cached questions'
 
         alt {
           when 'L2 hit, similarity >= 0.75' {
-            publicApi <- answerCache 'cached answer, one embedding call, no retrieval, no LLM'
+            publicApi <- answerCache 'cached answer, one embedding call, promoted into L1'
           }
           else 'double miss' {
-            publicApi -> agentic 'run_query(question, top_k)'
+            publicApi -> agentic 'run_query(question, top_k), single-flight per key'
             agentic -> agentic 'detect_depth(question) → short | long'
 
             opt 'long question' {
@@ -538,7 +770,7 @@ views {
               retrieval -> db 'pgvector cosine plus full-text tsvector, RRF fusion k=60'
               retrieval <- db 'top-k chunks'
               agentic <- retrieval 'sources'
-              agentic -> memory 'pulls relevant memories'
+              agentic -> memory 'blends memories above 0.35 similarity'
               agentic -> agentic 'merges, de-dups on best similarity, is_sufficient()?'
             }
 
@@ -555,26 +787,76 @@ views {
 
             publicApi <- agentic 'answer, sources, depth, sub_queries, needs_clarification'
             publicApi -> answerCache 'stores the answer'
-            answerCache -> cache 'L1, TTL 5 min'
-            answerCache -> db 'L2: question embedding and answer, TTL 1 h'
+            answerCache -> cache 'L1, TTL 1 h'
+            answerCache -> db 'L2: question embedding and answer, TTL 24 h'
           }
         }
       }
     }
 
     opt 'conversation_id present' {
-      publicApi -> cache 'appends the turn'
+      publicApi -> conversations 'appends the turn'
     }
 
-    publicApi -> db 'writes query_logs'
+    publicApi -> db 'writes query_logs with cache_layer'
+    publicApi -> usage 'records a usage_events row'
     publicApi -> clientApp '200 — answer · sources · depth · cache_layer · cache_similarity · conversation_id'
   }
 
+  dynamic view streamingFlow {
+    title 'Flows / 3 · Streaming answers over SSE'
+    description '''
+      Same brain, same caches, same agentic loop as /query. Only the final
+      generation is streamed. Retrieval is silent, so the server emits ping
+      comments to keep the connection alive, and a cache hit is sliced so the
+      client experience is identical. Errors arrive as frames, never as an
+      HTTP status, because the headers were already sent.
+    '''
+    variant sequence
+
+    clientApp -> publicApi 'POST /v1/projects/{id}/query/stream'
+    publicApi -> db 'validates the key, rejects suspended'
+    publicApi -> rateLimit 'std bucket'
+    publicApi -> usage 'records the request up front'
+    publicApi -> clientApp '200, text/event-stream opens'
+
+    publicApi -> answerCache 'L1 then L2 lookup'
+
+    alt {
+      when 'cache hit' {
+        loop 'slices of 18 characters' {
+          publicApi -> clientApp 'data: {"type":"token"}'
+        }
+      }
+      else 'miss' {
+        parallel {
+          agentic -> retrieval 'gather_context on a worker thread'
+          publicApi -> clientApp ': keep-alive ping every 10 s'
+        }
+
+        try {
+          loop 'per provider delta' {
+            generation -> modelProviders 'streams the completion'
+            generation <- modelProviders 'delta'
+            publicApi -> clientApp 'data: {"type":"token"}'
+          }
+          publicApi -> answerCache 'stores the accumulated answer in L1 and L2'
+        } catch 'provider or database failure' {
+          publicApi -> clientApp 'data: {"type":"error"} — 200 already sent'
+        }
+      }
+    }
+
+    publicApi -> db 'writes query_logs'
+    publicApi -> clientApp 'data: {"type":"done","response":{…}} — sources, latency, cache_layer'
+  }
+
   dynamic view byokFlow {
-    title 'Flows / 3 · BYOK key resolution'
+    title 'Flows / 4 · BYOK key resolution'
     description '''
       Checked in order: local provider, then per-project override,
-      then account-level key, otherwise 503.
+      then account-level key, otherwise 503. Resolution is keyed on the
+      project owner, so a public /v1 call resolves the owner's keys.
     '''
     variant sequence
 
@@ -610,7 +892,7 @@ views {
   }
 
   dynamic view authFlow {
-    title 'Flows / 4 · Authentication and email confirmation'
+    title 'Flows / 5 · Authentication and email confirmation'
     description 'Sign-up branches on whether confirmation is required, confirmation branches on token validity.'
     variant sequence
 
@@ -645,10 +927,11 @@ views {
   }
 
   dynamic view agentMemoryFlow {
-    title 'Flows / 5 · Agent memory and docs recall over MCP'
+    title 'Flows / 6 · Agent memory and docs recall over MCP'
     description '''
       A coding-agent session connects to one project with its oreag_sk_ key,
       bootstraps from recent memory, then saves and recalls during work.
+      The MCP server is a thin proxy: every tool is a /v1 call.
     '''
     variant sequence
 
@@ -664,6 +947,7 @@ views {
     mcpServer -> publicApi 'POST /v1/memory'
     publicApi -> memory 'embed on save with the resolved key'
     memory -> db 'INSERT memory and embedding'
+    memory -> contentVersion 'bumps, invalidating the answer caches'
 
     codingAgent -> mcpServer 'search_memory("how does auth work?")'
     mcpServer -> publicApi 'POST /v1/memory/search'
@@ -677,6 +961,36 @@ views {
     publicApi -> retrieval 'hybrid search'
     codingAgent <- mcpServer 'relevant document chunks'
   }
+
+  dynamic view exploreFlow {
+    title 'Flows / 7 · Explore the brain — graph-aware retrieval'
+    description '''
+      Where /query returns a flat top-k, /explore returns a connected
+      subgraph: it seeds on the nearest chunks AND memories, then walks
+      related edges outward. API-key callers are clamped to one hop and
+      charged against the heavy rate-limit bucket.
+    '''
+    variant sequence
+
+    codingAgent -> mcpServer 'explore_brain("checkout", hops=2)'
+    mcpServer -> publicApi 'POST /v1/projects/{id}/explore'
+    publicApi -> rateLimit 'heavy bucket: 10/min per key, 20/min per project'
+    publicApi -> publicApi 'clamps hops to 1 for API-key callers'
+    publicApi -> explore 'explore_brain(query, hops)'
+
+    explore -> resolver 'resolves the embedding key'
+    explore -> db 'seeds: 6 nearest chunks and 6 nearest memories'
+    explore <- db 'seed nodes'
+
+    loop 'per hop, until 50 nodes' {
+      explore -> db 'expands 4 related neighbours per node'
+      explore <- db 'neighbour nodes and edges'
+    }
+
+    publicApi <- explore 'connected subgraph, nodes and edges'
+    publicApi -> usage 'records a usage_events row'
+    codingAgent <- mcpServer 'subgraph to reason over'
+  }
 }
 
 // ── Deployment ─────────────────────────────────────────────────────────────
@@ -688,7 +1002,8 @@ views {
     description '''
       Container is what a thing is. Deployment node is where it runs.
       That separation is why Postgres and Redis are containers of Oreag above,
-      and appear here on the platforms that host them.
+      and appear here on the platforms that host them. The MCP server ships
+      twice: locally over stdio, and as a multi-tenant HTTP service on Render.
     '''
     includeAncestors: true
 

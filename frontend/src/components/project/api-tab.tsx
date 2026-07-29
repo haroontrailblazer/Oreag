@@ -252,13 +252,30 @@ export function ApiTab({ project }: { project: Project }) {
     },
     {
       method: "POST" as const,
+      path: `${basePath}/query/stream`,
+      description:
+        "Same answer, streamed token by token over Server-Sent Events",
+    },
+    {
+      method: "POST" as const,
       path: `${basePath}/retrieve`,
       description: "Retrieval only - top-matching chunks, no LLM call",
     },
     {
       method: "POST" as const,
+      path: `${basePath}/explore`,
+      description:
+        "Graph-aware retrieval - a connected subgraph of chunks and memories",
+    },
+    {
+      method: "POST" as const,
       path: `${basePath}/files`,
       description: "Ingest documents (requires a key with upload permission)",
+    },
+    {
+      method: "POST" as const,
+      path: `${basePath}/memory`,
+      description: "Save an agent memory (also /memory/search, /memory/recent)",
     },
     {
       method: "GET" as const,
@@ -322,7 +339,9 @@ print(data["answer"])`
   "sub_queries": [],
   "needs_clarification": false,
   "clarification_questions": [],
-  "conversation_id": "chat-001"
+  "conversation_id": "chat-001",
+  "cache_layer": "l2",
+  "cache_similarity": 0.82
 }`
 
   const uploadExample = `curl -X POST ${apiBase}${basePath}/files \\

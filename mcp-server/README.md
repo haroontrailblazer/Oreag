@@ -13,6 +13,9 @@ Gives coding agents (Claude Code, Codex, Claude) **per-project memory** and
 | `delete_memory(id)` | remove a memory |
 | `search_docs(query, top_k?)` | relevant passages from uploaded documents |
 | `ask_docs(question)` | grounded RAG answer from the documents |
+| `add_document(filename, content)` | upload a text document for chunking + embedding (needs an upload-scoped key) |
+| `get_memory_graph()` | the project's chunk + memory graph with `related` edges |
+| `explore_brain(query, hops?)` | multi-hop subgraph walk over chunks and memories (hops clamped to 1 for API keys) |
 
 ## Configuration
 

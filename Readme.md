@@ -34,7 +34,11 @@ sentence-transformers), stored encrypted at rest.
 - **Per-project RAG endpoint** - `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
 - **Agentic retrieval loop** - auto depth detection (short vs long), query decomposition for big/exam questions, multi-round retrieve-and-merge with a sufficiency check, and human-in-the-loop clarification instead of a dead "no reference".
 - **Hybrid retrieval** - semantic pgvector search and lexical Postgres full-text search run together and are fused with Reciprocal Rank Fusion (RRF), so exact terms (error codes, IDs, names) embeddings fumble are still caught. Degrades to semantic-only automatically if the lexical column is missing.
-- **Two-layer answer cache** - used by every query surface (playground, `/v1` API, MCP). L1 is an exact-match CAG cache in Redis (in-memory fallback, single-flight de-duplication, 5 min TTL); L2 is a semantic cache in Postgres/pgvector - a new question whose cosine similarity to an answered one is >= 0.75 is served from cache at the cost of one embedding call (1 h TTL). Both layers are scoped by project, models, top-K, and content signature, so new content or model changes invalidate automatically. Responses report `cache_layer` and `cache_similarity`.
+- **Two-layer answer cache** - used by every query surface (playground, `/v1` API, MCP). L1 is an exact-match CAG cache in Redis (in-memory fallback, single-flight de-duplication, 1 h TTL); L2 is a semantic cache in Postgres/pgvector - a new question whose cosine similarity to an answered one is >= 0.75 is served from cache at the cost of one embedding call (24 h TTL). Both layers are scoped by project, models, top-K, and `content_version`, so new content or model changes invalidate automatically. Responses report `cache_layer` and `cache_similarity`.
+- **Streaming answers (SSE)** - `POST /v1/projects/{id}/query/stream` and the dashboard playground stream the answer token by token over Server-Sent Events. Same brain, same caches, same agentic loop; only the final generation is streamed. Frames are `{"type":"token"}`, a terminal `{"type":"done","response":{…}}` carrying sources and cache info, and `{"type":"error"}` (errors arrive as frames, since the 200 headers are already sent). Cache hits are sliced so the experience is identical, and keep-alive pings cover the silent retrieval phase. Native streaming for OpenAI and OpenAI-compatible vendors, Anthropic, Gemini, Sarvam and Ollama.
+- **Durable ingestion queue** - the `files` table *is* the queue: workers claim the oldest pending row with `FOR UPDATE SKIP LOCKED` under a time lease, so a restart or a dead worker never loses a job and never double-processes one. Up to 3 attempts, then the file is failed with its chunks removed. Chunks commit per batch, so a crash loses at most one batch.
+- **Rate limits and quotas** - fixed 60-second windows per API key *and* per project: 120/300 per minute on standard endpoints, 10/20 on heavy ones (`/explore`, `/memory-graph`). 429 responses carry `Retry-After`. Uploads are capped at 20 files per request, 60 files/minute and 1,000 files per project, counted inside a per-project advisory lock so concurrent keys cannot overshoot. Memories cap at 2,000 per project. The limiter fails open if its counter store is unreachable.
+- **Usage metering** - every public request writes a `usage_events` row (owner, project, key, endpoint, latency), and a maintenance thread prunes logs, usage and expired cache rows on a 90-day retention. This is the foundation for per-plan billing.
 - **Conversation memory** - server-side, keyed by an optional `conversation_id`, so follow-ups like "summarize that" are condensed into standalone questions before retrieval.
 - **Agent memory graph** - a queryable graph of sections and entities derived from indexed content.
 - **Agent memory (MCP)** - coding agents (Claude Code, Codex, Claude) save & recall per-project memory and pull document context through the Oreag MCP server.
@@ -356,16 +360,37 @@ Oreag/
 │   └── app/
 │       ├── routers/          # projects, files, keys, provider_keys, account, memory, meta, playground, rag_v1, memory_graph
 │       ├── providers/        # registry, resolver, openai/gemini/anthropic/sarvam/ollama/st + openai_compat (Azure, Mistral, Cohere, Together, xAI, Groq, …)
-│       ├── services/         # ingestion, retrieval, generation, query, agentic, query_cache, semantic_cache, explore, memory, memory_graph, conversion, storage
+│       ├── services/         # ingestion, ingest_queue, conversion, retrieval, generation, query, agentic, query_cache, semantic_cache, explore, memory, memory_graph, rate_limit, usage, content_version, maintenance, storage
+│       ├── sse.py            # Server-Sent Events helper for streaming answers
 │       ├── crypto.py         # Fernet encrypt/decrypt for BYOK keys
 │       └── models.py, schemas.py, config.py, db.py, main.py
-├── mcp-server/               # Oreag MCP server (FastMCP) - agent memory + docs tools
+├── mcp-server/               # Oreag MCP server (FastMCP) - 9 agent memory + docs tools
 ├── supabase/
-│   ├── migrations/           # 0001…0012 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search)
+│   ├── migrations/           # 0001…0017 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering)
 │   └── templates/            # branded auth email templates
+├── scripts/
+│   └── check_docs_sync.py    # documentation drift harness - see below
 ├── render.yaml               # backend blueprint
-├── FLOW.md                   # architecture + flow diagrams
-└── DEPLOY.md                 # production deploy guide
+├── oreag_1.c4                # LikeC4 architecture model (npx likec4 start)
+└── flow.md                   # architecture + flow diagrams
 ```
+
+---
+
+## Keeping the docs honest
+
+The code is the source of truth. `scripts/check_docs_sync.py` extracts the real
+facts from the source (routes, tuning constants, provider catalog, MCP tools,
+migrations) and fails if any surface that describes the system has drifted:
+the LikeC4 model, this README, `flow.md`, the in-app docs page and the in-app
+API tab.
+
+```bash
+python scripts/check_docs_sync.py          # report drift, non-zero exit if any
+python scripts/check_docs_sync.py --list   # print the facts it extracted
+```
+
+Run it after changing a flow, an endpoint, a tuning constant, a provider or an
+MCP tool. It also runs in CI and as part of the backend test suite.
 
 ---

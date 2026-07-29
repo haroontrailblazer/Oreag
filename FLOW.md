@@ -401,8 +401,84 @@ sequenceDiagram
     API-->>A: relevant document chunks
 ```
 
-MCP tools: `save_memory`, `search_memory`, `list_recent_memory`, `delete_memory`,
-`search_docs`, `ask_docs`. Connect an agent via `mcp-server/README.md`.
+MCP tools (9): `save_memory`, `search_memory`, `list_recent_memory`,
+`delete_memory`, `search_docs`, `ask_docs`, `add_document`, `get_memory_graph`,
+`explore_brain`. Connect an agent via `mcp-server/README.md`.
+
+---
+
+## 7. Streaming answers · SSE
+
+`POST /v1/projects/{id}/query/stream` and the dashboard playground stream the
+answer token by token. Same brain, same caches, same agentic loop as `/query` -
+only the final generation is streamed.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant API as Public API
+    participant AC as Answer cache
+    participant AG as Agentic loop
+    participant P as Model provider
+
+    C->>API: POST /query/stream
+    API->>API: key check · suspension check · rate limit
+    API-->>C: 200 text/event-stream
+    API->>AC: L1 then L2 lookup
+    alt cache hit
+        loop 18-char slices
+            API-->>C: data {"type":"token"}
+        end
+    else miss
+        par silent retrieval
+            AG->>AG: gather_context on a worker thread
+        and keep the connection open
+            API-->>C: ": keep-alive" every 10 s
+        end
+        loop per provider delta
+            P-->>API: delta
+            API-->>C: data {"type":"token"}
+        end
+        API->>AC: stores the accumulated answer in L1 + L2
+    end
+    API-->>C: data {"type":"done","response":{…}}
+```
+
+Errors arrive as `{"type":"error"}` frames, never as an HTTP status - the 200 was
+already sent. Native streaming: OpenAI and OpenAI-compatible vendors, Anthropic,
+Gemini, Sarvam, Ollama; anything else yields one full-answer frame.
+
+---
+
+## 8. Admission control · rate limits, quotas, metering
+
+Every `/v1` request passes the same gate before any work happens, and leaves a
+metering row behind.
+
+```mermaid
+flowchart LR
+    REQ["/v1 request"] --> K{"valid oreag_sk_ key?"}
+    K -- no --> R401["401"]
+    K -- yes --> S{"project or account suspended?"}
+    S -- yes --> R403["403"]
+    S -- no --> RL{"within the window budget?"}
+    RL -- no --> R429["429 + Retry-After"]
+    RL -- yes --> WORK["handler runs"]
+    WORK --> U["usage_events row"]
+    WORK --> QL["query_logs row with cache_layer"]
+```
+
+| Bucket | Endpoints | Per key | Per project |
+|---|---|---|---|
+| standard | query, query/stream, retrieve, memory* | 120/min | 300/min |
+| heavy | explore, memory-graph | 10/min | 20/min |
+
+Uploads are additionally capped at 20 files per request, 60 files/minute and
+1,000 files per project, counted inside `pg_advisory_xact_lock` so concurrent
+keys cannot overshoot. Memories cap at 2,000 per project. The limiter **fails
+open**: if its counter store is unreachable the request proceeds rather than
+erroring.
 
 ---
 
