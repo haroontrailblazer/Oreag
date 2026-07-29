@@ -65,6 +65,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
+      # crypto.py refuses to encrypt without APP_ENCRYPTION_KEY, which is
+      # correct: a silent fallback would mean shipping unencrypted BYOK keys.
+      # CI has no .env (it is gitignored, and must stay that way), so mint a
+      # throwaway key per run instead. Generated rather than hardcoded so no
+      # key-shaped string sits in the repo to be mistaken for the real one -
+      # the tests only encrypt and decrypt within a single process, so the
+      # value is irrelevant as long as it is a valid Fernet key.
+      - name: Mint a throwaway encryption key for this run
+        working-directory: backend
+        run: |
+          KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          echo "APP_ENCRYPTION_KEY=$KEY" >> "$GITHUB_ENV"
       - name: Run pytest
         working-directory: backend
         run: python -m pytest tests -q
