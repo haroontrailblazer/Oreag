@@ -106,6 +106,21 @@ def _request_helpers(db: Session, project: Project):
     return embed_memo, embed_query, llm
 
 
+def _llm_step(db: Session, llm_fn, call):
+    """Run a step that is nothing but a provider round-trip, holding no
+    connection while it waits.
+
+    ``llm_fn`` resolves the project's LLM key first (one SELECT, memoized per
+    request); after that condense / plan / clarify only talk to the provider.
+    The connection goes back to the pool in between and the session checks a
+    fresh one out on its next statement - see ``generation.release_connection``
+    for the measured semantics.
+    """
+    llm = llm_fn()
+    generation.release_connection(db)
+    return call(llm)
+
+
 def run_query(
     db: Session,
     project: Project,
@@ -202,8 +217,12 @@ def run_query(
 
     try:
         agentic_question = (
-            agentic.condense_question(
-                _llm(), history, question, settings.conversation_history_turns
+            _llm_step(
+                db,
+                _llm,
+                lambda llm: agentic.condense_question(
+                    llm, history, question, settings.conversation_history_turns
+                ),
             )
             if history
             else question
@@ -213,14 +232,22 @@ def run_query(
             return agentic.run_agentic_query(
                 question=agentic_question,
                 retrieve_fn=retrieve_fn,
-                plan_fn=lambda q: agentic.plan_subqueries(
-                    _llm(), q, settings.agentic_max_subqueries
+                plan_fn=lambda q: _llm_step(
+                    db,
+                    _llm,
+                    lambda llm: agentic.plan_subqueries(
+                        llm, q, settings.agentic_max_subqueries
+                    ),
                 ),
                 generate_fn=lambda q, srcs, depth: generation.generate_answer(
                     db, project, q, srcs, depth, llm_fn=_llm
                 ),
-                clarify_fn=lambda q: agentic.request_clarification(
-                    _llm(), q, settings.agentic_max_clarifying
+                clarify_fn=lambda q: _llm_step(
+                    db,
+                    _llm,
+                    lambda llm: agentic.request_clarification(
+                        llm, q, settings.agentic_max_clarifying
+                    ),
                 ),
                 top_k=top_k,
                 min_similarity=settings.agentic_min_similarity,
@@ -269,7 +296,12 @@ def run_query(
                 if key is not None:
                     _cache.set(key, hit)  # promote to the exact-match L1
             elif key is not None:
-                # single-flight: simultaneous identical asks compute once
+                # single-flight: simultaneous identical asks compute once.
+                # A follower blocks in here for the cache's whole flight wait,
+                # on the LEADER's provider I/O, so give the connection back
+                # before queueing - waiting on someone else's LLM call is no
+                # reason to sit on a pool slot.
+                generation.release_connection(db)
                 result = _cache.get_or_compute(key, compute_and_remember)
             else:
                 result = compute_and_remember()
@@ -431,8 +463,12 @@ def run_query_stream(
 
     try:
         agentic_question = (
-            agentic.condense_question(
-                _llm(), history, question, settings.conversation_history_turns
+            _llm_step(
+                db,
+                _llm,
+                lambda llm: agentic.condense_question(
+                    llm, history, question, settings.conversation_history_turns
+                ),
             )
             if history
             else question
@@ -476,6 +512,9 @@ def run_query_stream(
                     result = refreshed
                     cache_layer = "l1"
             else:
+                # Follower: this waits on the leader's provider I/O for up to
+                # two minutes. Hand the connection back first - see run_query.
+                generation.release_connection(db)
                 if flight.acquire(timeout=120.0):
                     flight.release()
                 refreshed = _cache.get(key)
@@ -507,11 +546,19 @@ def run_query_stream(
                         agentic.gather_context,
                         question=agentic_question,
                         retrieve_fn=retrieve_fn,
-                        plan_fn=lambda q: agentic.plan_subqueries(
-                            _llm(), q, settings.agentic_max_subqueries
+                        plan_fn=lambda q: _llm_step(
+                            db,
+                            _llm,
+                            lambda llm: agentic.plan_subqueries(
+                                llm, q, settings.agentic_max_subqueries
+                            ),
                         ),
-                        clarify_fn=lambda q: agentic.request_clarification(
-                            _llm(), q, settings.agentic_max_clarifying
+                        clarify_fn=lambda q: _llm_step(
+                            db,
+                            _llm,
+                            lambda llm: agentic.request_clarification(
+                                llm, q, settings.agentic_max_clarifying
+                            ),
                         ),
                         top_k=top_k,
                         min_similarity=settings.agentic_min_similarity,

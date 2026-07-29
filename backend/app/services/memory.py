@@ -101,6 +101,14 @@ def save_memory(db: Session, project: Project, body: MemoryCreate) -> Memory:
     return memory
 
 
+# Deliberately an exact scan, with no HNSW index behind it (migration 0018
+# indexes `chunks` only). max_memories_per_project caps this at 2000 rows per
+# project and memories_project_idx bounds the scan to those, so it is tens of
+# milliseconds with PERFECT recall. A global HNSW index would have to
+# post-filter by project_id across every tenant, and because the per-project
+# row count is capped the project's share of the table is guaranteed tiny -
+# exactly where post-filtering collapses. It would be strictly worse on both
+# axes. Revisit only if that cap moves by an order of magnitude.
 _SEARCH_SQL = text(
     """
     SELECT id, 1 - (embedding <=> CAST(:qvec AS vector)) AS similarity

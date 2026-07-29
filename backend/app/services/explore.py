@@ -8,6 +8,11 @@ embedding space, so both are first-class nodes and link to each other.
 
 All neighbour expansion references each node's stored embedding by id (no vector
 round-trips), and the whole walk is bounded by a node budget.
+
+Every chunk-target query below has an indexable ANN sibling that is used only
+when retrieval.ann_plan opens the gate; the exact statements stay the default.
+The memory-target queries have none - `memories` is capped per project, so its
+exact scan is bounded and has perfect recall (see migration 0018).
 """
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -18,6 +23,7 @@ from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
 from ..providers.registry import get_embedder
 from ..schemas import MemoryGraphEdge, MemoryGraphNode
+from . import retrieval
 
 # Seeds: nearest chunks / memories to the query vector.
 _SEED_CHUNK_SQL = text(
@@ -87,6 +93,102 @@ _MEMORY_REL_MEMORY_SQL = text(
     """
 )
 
+# ── indexable siblings of the three chunk-target statements ─────────────────
+#
+# Same columns in the same order, same bind parameters, same distance-ascending
+# ordering, same `1 - distance` similarity: casting a vector to its OWN
+# dimension is a value-preserving copy, so a caller cannot tell these apart
+# from the statements above except by which rows the scan reached. The cast in
+# the ORDER BY is textually the index expression and the WHERE clause repeats
+# the index predicate verbatim - both are required or the planner ignores the
+# index and the cast is paid for nothing.
+#
+# In the neighbour statements the probe vector is lifted into its own
+# MATERIALIZED CTE and read as an uncorrelated `(SELECT v FROM probe)`, which
+# the planner evaluates once as an InitPlan. That makes it a pseudo-constant to
+# the ORDER BY, which is what lets the HNSW order-by key resolve; a correlated
+# reference to `x.embedding` in the same rel would not.
+_ANN_SEED_CHUNK_TEMPLATE = """
+    WITH nn AS MATERIALIZED (
+        SELECT c.id, c.content, c.page_number, c.chunk_index, c.file_id,
+               c.embedding::vector({dim}) <=> CAST(:qvec AS vector({dim})) AS distance
+        FROM chunks c
+        WHERE c.project_id = :pid
+          AND vector_dims(c.embedding) = {dim}
+        ORDER BY c.embedding::vector({dim}) <=> CAST(:qvec AS vector({dim}))
+        LIMIT :k
+    )
+    SELECT nn.id, nn.content, nn.page_number, nn.chunk_index, f.filename,
+           1 - nn.distance AS similarity
+    FROM nn JOIN files f ON f.id = nn.file_id
+    ORDER BY nn.distance
+    """
+
+_ANN_CHUNK_REL_CHUNK_TEMPLATE = """
+    WITH probe AS MATERIALIZED (
+        SELECT x.embedding::vector({dim}) AS v, x.project_id AS pid
+        FROM chunks x
+        WHERE x.id = :id AND x.project_id = :pid
+          AND vector_dims(x.embedding) = {dim}
+    ),
+    nn AS MATERIALIZED (
+        SELECT c.id, c.content, c.page_number, c.chunk_index, c.file_id,
+               c.embedding::vector({dim}) <=> (SELECT v FROM probe) AS distance
+        FROM chunks c
+        WHERE c.project_id = (SELECT pid FROM probe)
+          AND c.id <> :id
+          AND vector_dims(c.embedding) = {dim}
+        ORDER BY c.embedding::vector({dim}) <=> (SELECT v FROM probe)
+        LIMIT :k
+    )
+    SELECT nn.id, nn.content, nn.page_number, nn.chunk_index, f.filename,
+           1 - nn.distance AS similarity
+    FROM nn JOIN files f ON f.id = nn.file_id
+    ORDER BY nn.distance
+    """
+
+_ANN_MEMORY_REL_CHUNK_TEMPLATE = """
+    WITH probe AS MATERIALIZED (
+        SELECT x.embedding::vector({dim}) AS v, x.project_id AS pid
+        FROM memories x
+        WHERE x.id = :id AND x.project_id = :pid
+          AND x.embedding IS NOT NULL
+          AND vector_dims(x.embedding) = {dim}
+    ),
+    nn AS MATERIALIZED (
+        SELECT c.id, c.content, c.page_number, c.chunk_index, c.file_id,
+               c.embedding::vector({dim}) <=> (SELECT v FROM probe) AS distance
+        FROM chunks c
+        WHERE c.project_id = (SELECT pid FROM probe)
+          AND vector_dims(c.embedding) = {dim}
+        ORDER BY c.embedding::vector({dim}) <=> (SELECT v FROM probe)
+        LIMIT :k
+    )
+    SELECT nn.id, nn.content, nn.page_number, nn.chunk_index, f.filename,
+           1 - nn.distance AS similarity
+    FROM nn JOIN files f ON f.id = nn.file_id
+    ORDER BY nn.distance
+    """
+
+_ann_sql_cache: dict[tuple[str, int], object] = {}
+
+
+def _ann_sql(name: str, template: str, dim: int | None):
+    """Render (once) the ANN sibling named `name`, or None for the exact path."""
+    stmt = _ann_sql_cache.get((name, dim))
+    if stmt is None:
+        stmt = retrieval.build_ann_sql(template, dim)
+        if stmt is None:
+            return None
+        _ann_sql_cache[(name, dim)] = stmt
+    return stmt
+
+
+def _pick(ann, exact):
+    """`ann if ann is not None else exact` - a TextClause raises on __bool__,
+    so `ann or exact` would blow up on the ANN path, not fall back."""
+    return exact if ann is None else ann
+
 
 def _chunk_node(row) -> MemoryGraphNode:
     return MemoryGraphNode(
@@ -119,17 +221,27 @@ def _memory_node(row) -> MemoryGraphNode:
     )
 
 
-def _neighbours(db: Session, project: Project, node_id: str, k: int):
+def _neighbours(
+    db: Session, project: Project, node_id: str, k: int, ann_dim: int | None = None
+):
     kind, raw = node_id.split(":", 1)
     params = {"id": int(raw), "pid": str(project.id), "k": k}
     out: list[tuple[MemoryGraphNode, float]] = []
     if kind == "chunk":
-        for row in db.execute(_CHUNK_REL_CHUNK_SQL, params).mappings():
+        chunk_sql = _pick(
+            _ann_sql("chunk_rel_chunk", _ANN_CHUNK_REL_CHUNK_TEMPLATE, ann_dim),
+            _CHUNK_REL_CHUNK_SQL,
+        )
+        for row in db.execute(chunk_sql, params).mappings():
             out.append((_chunk_node(row), float(row["similarity"])))
         for row in db.execute(_CHUNK_REL_MEMORY_SQL, params).mappings():
             out.append((_memory_node(row), float(row["similarity"])))
     else:
-        for row in db.execute(_MEMORY_REL_CHUNK_SQL, params).mappings():
+        chunk_sql = _pick(
+            _ann_sql("memory_rel_chunk", _ANN_MEMORY_REL_CHUNK_TEMPLATE, ann_dim),
+            _MEMORY_REL_CHUNK_SQL,
+        )
+        for row in db.execute(chunk_sql, params).mappings():
             out.append((_chunk_node(row), float(row["similarity"])))
         for row in db.execute(_MEMORY_REL_MEMORY_SQL, params).mappings():
             out.append((_memory_node(row), float(row["similarity"])))
@@ -175,9 +287,18 @@ def explore_brain(
             )
         )
 
+    # Decided (and the transaction-local HNSW settings applied) ONCE for the
+    # whole walk: the traversal below never commits or rolls back, so the
+    # SET LOCAL holds for every statement it issues, and re-deciding per
+    # neighbour would add a round trip per node per hop.
+    ann_dim = retrieval.ann_plan(db, project)
+
     seeds: list[str] = []
     seed_params = {"qvec": qvec, "pid": str(project.id), "k": seeds_per_type}
-    for row in db.execute(_SEED_CHUNK_SQL, seed_params).mappings():
+    seed_chunk_sql = _pick(
+        _ann_sql("seed_chunk", _ANN_SEED_CHUNK_TEMPLATE, ann_dim), _SEED_CHUNK_SQL
+    )
+    for row in db.execute(seed_chunk_sql, seed_params).mappings():
         node = _chunk_node(row)
         if add_node(node):
             seeds.append(node.id)
@@ -194,7 +315,9 @@ def explore_brain(
         for node_id in frontier:
             if len(nodes) >= max_nodes:
                 break
-            for neighbour, sim in _neighbours(db, project, node_id, fanout):
+            for neighbour, sim in _neighbours(
+                db, project, node_id, fanout, ann_dim
+            ):
                 existed = neighbour.id in nodes
                 if add_node(neighbour):
                     add_edge(node_id, neighbour.id, sim)

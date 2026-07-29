@@ -11,8 +11,19 @@ services:
                           # uninterrupted background ingestion
     autoDeploy: true
     envVars:
-      - key: DATABASE_URL            # Supabase session pooler, postgresql+psycopg://...
-        sync: false
+      - key: DATABASE_URL            # Supabase TRANSACTION pooler (port 6543), postgresql+psycopg://...
+        sync: false                  # Dashboard -> Connect -> "Transaction pooler"; swap the
+                                      # scheme to postgresql+psycopg:// and percent-encode the
+                                      # password. Do NOT append ?pgbouncer=true (Prisma-only).
+      - key: MIGRATION_DATABASE_URL  # Supabase SESSION pooler (port 5432). Used by
+        sync: false                  # backend/tests/apply_migrations.py, which falls back
+                                      # to DATABASE_URL when this is unset. CREATE INDEX
+                                      # CONCURRENTLY still needs psql - see the runbook in
+                                      # supabase/migrations/0018_hnsw_vector_indexes.sql.
+      - key: REDIS_URL               # shared CAG cache, conversation memory, rate limits.
+        sync: false                  # Unset = in-memory fallback: every restart wipes cached
+                                      # answers AND conversation threads, and rate limits stop
+                                      # being shared across instances.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
@@ -23,5 +34,29 @@ services:
         sync: false                  # generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       - key: JWT_MODE
         value: jwks
-      - key: CORS_ORIGINS            # your Vercel URL, e.g. https://oreag.vercel.app
+      # Comma-separated list of exact allowed origins, e.g.
+      # https://oreag.vercel.app plus any custom domain. Dashboard-managed so
+      # the blueprint never overwrites what is set there.
+      # This must contain the LITERAL production origin: the preview regex
+      # below only matches Vercel's generated <project>-<hash>-<scope>
+      # hostnames, never the bare <project>.vercel.app alias.
+      # Leaving it unset is NOT harmless - config.py falls back to the
+      # localhost dev default, which silently breaks CORS for the live site.
+      - key: CORS_ORIGINS
         sync: false
+      # Vercel preview deployments. Both must be set or NO preview origin is
+      # allowed (fail-closed). Read the scope slug off a real preview URL -
+      # https://<project>-<hash>-<scope>.vercel.app - not the team display name.
+      - key: VERCEL_PROJECT
+        value: oreag                 # replace with the real project slug
+      - key: VERCEL_SCOPE
+        sync: false                  # the account/team slug
+      - key: CORS_ALLOW_LOCAL_NETWORK  # localhost/LAN origins: dev only
+        value: "false"
+      # Client pool. Keep the total (size + overflow) at or below Supavisor's
+      # per-tenant Pool Size, so waits fast-fail here instead of queueing
+      # invisibly inside the pooler. Raise Supavisor's Pool Size to 20 to match.
+      - key: DB_POOL_SIZE
+        value: "10"
+      - key: DB_MAX_OVERFLOW
+        value: "10"

@@ -1,7 +1,8 @@
 """Apply all supabase/migrations/*.sql in order (idempotent).
 
 Run from backend/: python -m tests.apply_migrations
-Reads DATABASE_URL from backend/.env. No secrets in this file.
+Reads MIGRATION_DATABASE_URL (else DATABASE_URL) from backend/.env. No secrets
+in this file.
 """
 import pathlib
 import sys
@@ -10,7 +11,13 @@ import psycopg
 
 from app.config import settings
 
-dsn = settings.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+# DDL belongs on the SESSION pooler (port 5432) when one is configured: the
+# transaction pooler multiplexes statements across backends, so session state
+# (SET maintenance_work_mem, advisory locks) does not survive. Falls back to
+# DATABASE_URL so a single-URL setup keeps working unchanged.
+dsn = (settings.migration_database_url or settings.database_url).replace(
+    "postgresql+psycopg://", "postgresql://", 1
+)
 migrations_dir = pathlib.Path(__file__).resolve().parents[2] / "supabase" / "migrations"
 
 conn = psycopg.connect(dsn, autocommit=True, connect_timeout=15)

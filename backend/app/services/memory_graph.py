@@ -38,6 +38,12 @@ MEMORY_CAP = 1000           # skip the memory linking pass above this many memor
 # same project (exact cosine scan - every project's chunks share one embedding
 # dimension, so the operator is well defined). Returns candidate pairs with the
 # creation times needed to orient each edge from the newer file back to the older.
+#
+# These three statements stay EXACT even where migration 0018's HNSW indexes
+# exist. They are already bounded by RELATED_CHUNK_CAP / MEMORY_CAP and the
+# whole response is cached per content_version, so there is little to win - and
+# their output is a THRESHOLDED edge set rather than a ranked list, so an ANN
+# miss would silently drop graph edges with no ranking signal to notice it.
 RELATED_SQL = text(
     """
     SELECT a.id AS source_id, a.file_id AS source_file, a.created_at AS source_created,

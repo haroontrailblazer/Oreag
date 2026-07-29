@@ -27,6 +27,13 @@ from . import agentic
 
 logger = logging.getLogger(__name__)
 
+# Seven equality columns plus expires_at make this extremely selective: the
+# vector ORDER BY runs over the handful of rows left after the scope filter,
+# not over the table, and migration 0018 adds a btree on exactly that scope.
+# That is also why this table gets NO HNSW index - the planner would rarely
+# choose one given these quals, and it is the highest-churn table in the schema
+# (one INSERT per cache miss, a bulk DELETE on every store and sweep), so graph
+# maintenance would be pure cost.
 _LOOKUP_SQL = text(
     """
     SELECT result, 1 - (embedding <=> CAST(:qvec AS vector)) AS similarity

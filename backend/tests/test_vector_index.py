@@ -1,0 +1,677 @@
+"""The HNSW gate and the indexable SQL siblings it routes to.
+
+The live database is unreachable, so nothing here connects to Postgres. Two
+things ARE testable without one, and they are the two that actually break:
+
+  * SQL TEXT INVARIANTS. A partial expression index is only used when the
+    ORDER BY operand is textually the index expression AND the WHERE clause
+    repeats the index predicate AND both carry the same dimension as the index
+    name. Get one of the three wrong and the query silently falls back to a seq
+    scan that is SLOWER than today (it now also pays the cast per row) while
+    still returning correct rows - so no test that only checks results would
+    ever catch it. These assertions are that check.
+
+  * THE GATE FAILING CLOSED. Every unexpected condition - no pgvector, an old
+    pgvector, a missing/invalid index, an unknown dimension, a probe error, a
+    project too small or too small a share of the table - must run the ORIGINAL
+    statement object and issue exactly the statements it issues today. A gate
+    that fails OPEN would change the DB call sequence under every existing
+    fake, which is also how it would misbehave in production against a server
+    it cannot interrogate.
+
+Recall and plan quality (does the planner actually pick the index, and what is
+recall@k) cannot be established without a database; that belongs in a live
+verify_* harness.
+"""
+import re
+import uuid
+
+import pytest
+
+from app.models import Project
+from app.services import explore, retrieval
+
+
+@pytest.fixture(autouse=True)
+def _reset_ann_caches():
+    """The capability probe and the size memo are process-wide by design."""
+    retrieval.reset_ann_caches()
+    yield
+    retrieval.reset_ann_caches()
+
+
+def _project(dimensions=1536):
+    return Project(
+        id=uuid.uuid4(),
+        embedding_provider="openai",
+        embedding_model="text-embedding-3-small",
+        embedding_dimensions=dimensions,
+        content_version=7,
+    )
+
+
+# ── fakes ───────────────────────────────────────────────────────────────────
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+    def scalar(self):
+        return self._rows[0] if self._rows else None
+
+    def __iter__(self):
+        return iter(self._rows)
+
+
+class _Savepoint:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FakeConnection:
+    """The Core connection the capability probe and size query run on."""
+
+    def __init__(self, session):
+        self._session = session
+
+    def begin_nested(self):
+        return _Savepoint()
+
+    def execute(self, statement, params=None):
+        return self._session._answer(statement, params, core=True)
+
+
+class _FakeSession:
+    """A session that answers the probe, the size query and the real query.
+
+    ``capable=False`` models everything the gate has to survive - most
+    importantly a session that cannot hand out a Core connection at all, which
+    is what every pre-existing test fake looks like.
+    """
+
+    def __init__(
+        self,
+        capable=True,
+        vector_version="0.8.0",
+        indexes=("chunks_embedding_hnsw_1536_idx",),
+        total_chunks=1_000_000.0,
+        project_chunks=200_000,
+        probe_raises=False,
+    ):
+        self.capable = capable
+        self.vector_version = vector_version
+        self.indexes = list(indexes)
+        self.total_chunks = total_chunks
+        self.project_chunks = project_chunks
+        self.probe_raises = probe_raises
+        self.statements = []       # every statement passed to session.execute
+        self.core_statements = []  # every statement run on the connection
+        self.rollbacks = 0
+
+    # -- Session API used by the gate and by retrieve() ----------------------
+    def connection(self):
+        if not self.capable:
+            raise AttributeError("connection")
+        return _FakeConnection(self)
+
+    def execute(self, statement, params=None):
+        self.statements.append(statement)
+        return self._answer(statement, params, core=False)
+
+    def rollback(self):
+        self.rollbacks += 1
+
+    # -- routing ------------------------------------------------------------
+    def _answer(self, statement, params, core):
+        sql = str(statement)
+        if core:
+            self.core_statements.append(statement)
+        if self.probe_raises and "pg_extension" in sql:
+            raise RuntimeError("catalog unavailable")
+        if "pg_extension" in sql:
+            return _Rows(
+                [
+                    {
+                        "vector_version": self.vector_version,
+                        "hnsw_indexes": self.indexes,
+                        "chunk_reltuples": self.total_chunks,
+                    }
+                ]
+            )
+        if "sum(chunk_count)" in sql:
+            return _Rows([self.project_chunks])
+        if "set_config" in sql:
+            return _Rows([])
+        if "m.tags" in sql:  # a memory-target neighbour query
+            return _Rows(
+                [
+                    {
+                        "id": 2,
+                        "content": "a saved memory",
+                        "tags": ["x"],
+                        "pinned": False,
+                        "source": "mcp",
+                        "similarity": 0.7,
+                    }
+                ]
+            )
+        return _Rows(
+            [
+                {
+                    "id": 1,
+                    "content": "alpha",
+                    "page_number": None,
+                    "chunk_index": 0,
+                    "filename": "a.pdf",
+                    "similarity": 0.9,
+                }
+            ]
+        )
+
+
+def _retrieve(db, project):
+    """retrieve() with the embedder stubbed out (no provider round trip)."""
+
+    class _Embedder:
+        def embed_query(self, q):
+            return [0.1] * (project.embedding_dimensions or 1)
+
+    original_resolve = retrieval.resolver.resolve_embedding_key
+    original_embedder = retrieval.get_embedder
+    retrieval.resolver.resolve_embedding_key = lambda db, p: "k"
+    retrieval.get_embedder = lambda *a, **k: _Embedder()
+    try:
+        return retrieval.retrieve(db, project, "what is X", 5)
+    finally:
+        retrieval.resolver.resolve_embedding_key = original_resolve
+        retrieval.get_embedder = original_embedder
+
+
+def _semantic_statement(db):
+    """The statement retrieve() used for the semantic half."""
+    return db.statements[-2]  # -1 is the lexical query
+
+
+# ── SQL text invariants ─────────────────────────────────────────────────────
+
+ALL_TEMPLATES = [
+    ("semantic", retrieval._ANN_SEMANTIC_TEMPLATE),
+    ("seed_chunk", explore._ANN_SEED_CHUNK_TEMPLATE),
+    ("chunk_rel_chunk", explore._ANN_CHUNK_REL_CHUNK_TEMPLATE),
+    ("memory_rel_chunk", explore._ANN_MEMORY_REL_CHUNK_TEMPLATE),
+]
+
+
+def _split_top_level(text_: str) -> list[str]:
+    """Split a SELECT list on commas that are not inside parentheses."""
+    out, depth, current = [], 0, []
+    for ch in text_:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    out.append("".join(current))
+    return [item.strip() for item in out if item.strip()]
+
+
+def _result_columns(sql: str) -> list[str]:
+    """Column names produced by the LAST select list in a statement."""
+    start = sql.upper().rindex("SELECT ") + len("SELECT ")
+    end = sql.upper().index("FROM", start)
+    names = []
+    for item in _split_top_level(sql[start:end]):
+        alias = re.split(r"\s+AS\s+", item, flags=re.I)[-1]
+        names.append(alias.strip().split(".")[-1])
+    return names
+
+
+def _bind_params(sql: str) -> set[str]:
+    # (?<!:) so the second colon of a `::vector` cast is not read as a bind
+    return set(re.findall(r"(?<!:):([a-z_]+)", sql))
+
+
+class TestAnnSqlShape:
+    """The cast, the predicate and the index name must agree on the dimension.
+
+    A mismatch between any two of them is the classic silent "index is never
+    used" bug: the query still returns the right rows, it just does it with a
+    seq scan plus a per-row cast.
+    """
+
+    @pytest.mark.parametrize("dim", sorted(retrieval.ANN_DIMENSIONS))
+    @pytest.mark.parametrize("name,template", ALL_TEMPLATES)
+    def test_one_dimension_everywhere(self, name, template, dim):
+        sql = str(retrieval.build_ann_sql(template, dim))
+
+        # every dimension mentioned anywhere in the statement is THIS one
+        casts = re.findall(r"::vector\((\d+)\)", sql)
+        casted = re.findall(r"CAST\(:qvec AS vector\((\d+)\)\)", sql)
+        predicates = re.findall(r"vector_dims\([a-z]+\.embedding\) = (\d+)", sql)
+        assert casts, f"{name}: no ::vector(d) cast at all"
+        assert predicates, f"{name}: no vector_dims predicate - index unusable"
+        assert set(casts) | set(casted) | set(predicates) == {str(dim)}
+
+        # the ORDER BY operand must be TEXTUALLY the index expression
+        order_by = re.search(r"ORDER BY (.+?)\n\s+LIMIT", sql, re.S)
+        assert order_by, f"{name}: no ranked ORDER BY ... LIMIT"
+        assert f"c.embedding::vector({dim})" in order_by.group(1)
+
+        # and it must name the index that migration 0018 actually creates
+        assert retrieval.ann_index_name(dim) == f"chunks_embedding_hnsw_{dim}_idx"
+
+    @pytest.mark.parametrize("name,template", ALL_TEMPLATES)
+    def test_orders_by_distance_ascending(self, name, template):
+        sql = str(retrieval.build_ann_sql(template, 1536))
+        # nearest first, exactly like `ORDER BY embedding <=> q` today
+        assert sql.rstrip().endswith("ORDER BY nn.distance")
+
+    @pytest.mark.parametrize("name,template", ALL_TEMPLATES)
+    def test_similarity_is_one_minus_distance(self, name, template):
+        sql = str(retrieval.build_ann_sql(template, 768))
+        assert "1 - nn.distance AS similarity" in sql
+
+    def test_semantic_sibling_matches_the_exact_statement(self):
+        """Same columns in the same order, same binds: the two are drop-in."""
+        exact = str(retrieval.SEMANTIC_SQL)
+        ann = str(retrieval.ann_semantic_sql(1536))
+        assert _result_columns(ann) == _result_columns(exact)
+        assert _result_columns(exact) == [
+            "id", "content", "page_number", "chunk_index", "filename", "similarity",
+        ]
+        assert _bind_params(ann) == _bind_params(exact) == {
+            "qvec", "project_id", "limit",
+        }
+
+    @pytest.mark.parametrize(
+        "template,exact",
+        [
+            (explore._ANN_SEED_CHUNK_TEMPLATE, explore._SEED_CHUNK_SQL),
+            (explore._ANN_CHUNK_REL_CHUNK_TEMPLATE, explore._CHUNK_REL_CHUNK_SQL),
+            (explore._ANN_MEMORY_REL_CHUNK_TEMPLATE, explore._MEMORY_REL_CHUNK_SQL),
+        ],
+    )
+    def test_explore_siblings_match_their_exact_statements(self, template, exact):
+        ann = str(retrieval.build_ann_sql(template, 1024))
+        assert _result_columns(ann) == _result_columns(str(exact))
+        assert _bind_params(ann) == _bind_params(str(exact))
+
+    def test_chunk_neighbour_still_excludes_the_probe_chunk(self):
+        sql = str(retrieval.build_ann_sql(explore._ANN_CHUNK_REL_CHUNK_TEMPLATE, 512))
+        assert "c.id <> :id" in sql
+        # ...and the memory-target one must NOT (different tables, ids collide)
+        memory_sql = str(
+            retrieval.build_ann_sql(explore._ANN_MEMORY_REL_CHUNK_TEMPLATE, 512)
+        )
+        assert "c.id <> :id" not in memory_sql
+        assert "x.embedding IS NOT NULL" in memory_sql
+
+    def test_probe_vector_is_uncorrelated(self):
+        """Read as an InitPlan, or the HNSW order-by key cannot resolve."""
+        for template in (
+            explore._ANN_CHUNK_REL_CHUNK_TEMPLATE,
+            explore._ANN_MEMORY_REL_CHUNK_TEMPLATE,
+        ):
+            sql = str(retrieval.build_ann_sql(template, 256))
+            assert "(SELECT v FROM probe)" in sql
+            assert "x.embedding <=>" not in sql
+
+
+class TestDimensionAllowlist:
+    def test_unknown_dimensions_get_no_sql(self):
+        # 3072 exceeds pgvector's 2000-dimension HNSW limit and 999 is not a
+        # real embedding size; both must take the exact path, not interpolate.
+        for dim in (None, 0, 999, 3072, 2048):
+            assert retrieval.ann_semantic_sql(dim) is None
+            assert retrieval.build_ann_sql(retrieval._ANN_SEMANTIC_TEMPLATE, dim) is None
+            assert explore._ann_sql("seed_chunk", explore._ANN_SEED_CHUNK_TEMPLATE, dim) is None
+
+    def test_only_indexed_dimensions_are_allowed(self):
+        assert retrieval.ANN_DIMENSIONS == {256, 384, 512, 768, 1024, 1536}
+        assert 3072 not in retrieval.ANN_DIMENSIONS
+
+    def test_statements_are_built_once_per_dimension(self):
+        assert retrieval.ann_semantic_sql(1536) is retrieval.ann_semantic_sql(1536)
+        assert retrieval.ann_semantic_sql(768) is not retrieval.ann_semantic_sql(1536)
+
+    def test_non_integer_dimensions_cannot_reach_the_sql(self):
+        """The allowlist is the injection guard - the dimension is interpolated
+        because it is part of a TYPE and cannot be a bind parameter."""
+        for hostile in ("1536); drop table chunks --", "1536", 1536.0, True):
+            assert retrieval.ann_semantic_sql(hostile) is None
+
+
+class TestCapabilityProbe:
+    def test_parses_version_and_index_names(self):
+        db = _FakeSession(
+            vector_version="0.8.1",
+            indexes=[
+                "chunks_embedding_hnsw_768_idx",
+                "chunks_embedding_hnsw_1536_idx",
+                "chunks_embedding_hnsw_3072_idx",   # not allowlisted - ignored
+                "chunks_embedding_hnsw_bogus_idx",  # unparseable - ignored
+            ],
+        )
+        cap = retrieval.ann_capability(db)
+        assert cap.pgvector == (0, 8, 1)
+        assert cap.dimensions == {768, 1536}
+        assert cap.total_chunks == 1_000_000.0
+
+    def test_probe_result_is_cached(self):
+        db = _FakeSession()
+        retrieval.ann_capability(db)
+        retrieval.ann_capability(db)
+        assert len(db.core_statements) == 1
+
+    def test_probe_failure_reports_no_ann(self):
+        db = _FakeSession(probe_raises=True)
+        assert retrieval.ann_capability(db) is retrieval.NO_ANN
+
+    def test_missing_pgvector_reports_no_ann(self):
+        db = _FakeSession(vector_version=None, indexes=[])
+        cap = retrieval.ann_capability(db)
+        assert cap.pgvector == (0, 0, 0)
+        assert cap.dimensions == frozenset()
+
+
+class TestGateFailsClosed:
+    """Every closed gate must run the ORIGINAL statement object and issue
+    exactly the two statements retrieve() issues today."""
+
+    def _assert_exact_path(self, db, project):
+        _retrieve(db, project)
+        assert len(db.statements) == 2  # semantic + lexical, nothing extra
+        assert _semantic_statement(db) is retrieval.SEMANTIC_SQL
+        assert db.statements[-1] is retrieval.LEXICAL_SQL
+
+    def test_session_without_a_core_connection(self):
+        # This is what every pre-existing test fake looks like: the gate must
+        # close without consuming a statement.
+        db = _FakeSession(capable=False)
+        self._assert_exact_path(db, _project())
+        assert db.rollbacks == 0
+
+    def test_probe_error(self):
+        self._assert_exact_path(_FakeSession(probe_raises=True), _project())
+
+    def test_kill_switch_off(self, monkeypatch):
+        monkeypatch.setattr(retrieval.settings, "vector_ann_enabled", False)
+        db = _FakeSession()
+        self._assert_exact_path(db, _project())
+        assert db.core_statements == []  # not even probed
+
+    def test_old_pgvector(self):
+        # hnsw.iterative_scan does not exist before 0.8.0, and without it a
+        # post-filtered scan silently returns too few rows.
+        self._assert_exact_path(_FakeSession(vector_version="0.7.4"), _project())
+
+    def test_index_missing_entirely(self):
+        self._assert_exact_path(_FakeSession(indexes=[]), _project())
+
+    def test_index_for_a_different_dimension(self):
+        db = _FakeSession(indexes=["chunks_embedding_hnsw_768_idx"])
+        self._assert_exact_path(db, _project(dimensions=1536))
+
+    def test_invalid_index_is_treated_as_absent(self):
+        # The probe filters on indisvalid, so a half-built index never appears
+        # in the list at all - modelled here as an empty result.
+        self._assert_exact_path(_FakeSession(indexes=[]), _project())
+
+    def test_dimension_off_the_allowlist(self):
+        db = _FakeSession(indexes=["chunks_embedding_hnsw_1536_idx"])
+        self._assert_exact_path(db, _project(dimensions=3072))
+        assert db.core_statements == []  # closed before any DB work
+
+    def test_project_too_small(self, monkeypatch):
+        monkeypatch.setattr(retrieval.settings, "vector_ann_min_chunks", 20000)
+        db = _FakeSession(project_chunks=19_999, total_chunks=20_000.0)
+        self._assert_exact_path(db, _project())
+
+    def test_project_share_too_small(self, monkeypatch):
+        monkeypatch.setattr(retrieval.settings, "vector_ann_min_chunks", 20000)
+        monkeypatch.setattr(retrieval.settings, "vector_ann_min_project_share", 0.02)
+        # 25k chunks is big in absolute terms but 0.25% of a 10M-row table:
+        # an HNSW post-filter would burn its whole budget on other tenants.
+        db = _FakeSession(project_chunks=25_000, total_chunks=10_000_000.0)
+        self._assert_exact_path(db, _project())
+
+    def test_unanalyzed_table(self):
+        # pg_class.reltuples is -1 until the table is analyzed; an unknown
+        # denominator means the share gate cannot be evaluated.
+        self._assert_exact_path(_FakeSession(total_chunks=-1.0), _project())
+
+    def test_size_query_failure(self, monkeypatch):
+        # An unanswerable size question means 0, which closes the size gate.
+        monkeypatch.setattr(retrieval, "_project_chunk_count", lambda d, p: 0)
+        self._assert_exact_path(_FakeSession(), _project())
+
+
+class TestGateOpens:
+    def _open(self, monkeypatch):
+        monkeypatch.setattr(retrieval.settings, "vector_ann_enabled", True)
+        monkeypatch.setattr(retrieval.settings, "vector_ann_min_chunks", 20000)
+        monkeypatch.setattr(retrieval.settings, "vector_ann_min_project_share", 0.02)
+        return _FakeSession(project_chunks=200_000, total_chunks=1_000_000.0)
+
+    def test_large_dominant_project_uses_the_ann_sibling(self, monkeypatch):
+        db = self._open(monkeypatch)
+        project = _project()
+        rows = _retrieve(db, project)
+
+        semantic = _semantic_statement(db)
+        assert semantic is not retrieval.SEMANTIC_SQL
+        assert semantic is retrieval.ann_semantic_sql(1536)
+        # the lexical half is never rewritten: it ranks by ts_rank_cd
+        assert db.statements[-1] is retrieval.LEXICAL_SQL
+        # ...and the rows still look exactly like the exact path's rows
+        assert rows and "similarity" in rows[0] and "id" not in rows[0]
+
+    def test_scan_settings_are_transaction_local(self, monkeypatch):
+        db = self._open(monkeypatch)
+        _retrieve(db, _project())
+        gucs = [s for s in db.statements if "set_config" in str(s)]
+        assert len(gucs) == 1
+        sql = str(gucs[0])
+        # the third argument to set_config is is_local => SET LOCAL, so the
+        # setting cannot leak onto the next request that borrows this
+        # connection from the pool
+        assert sql.count(", true)") == 3
+        for guc in ("hnsw.iterative_scan", "hnsw.ef_search", "hnsw.max_scan_tuples"):
+            assert guc in sql
+        # values are bound, never interpolated
+        assert ":mode" in sql and ":ef_search" in sql and ":max_scan_tuples" in sql
+
+    def test_settings_failure_falls_back_to_exact(self, monkeypatch):
+        db = self._open(monkeypatch)
+        monkeypatch.setattr(retrieval, "apply_ann_gucs", lambda db_: False)
+        _retrieve(db, _project())
+        assert _semantic_statement(db) is retrieval.SEMANTIC_SQL
+
+    def test_ann_plan_returns_none_when_settings_cannot_be_applied(self, monkeypatch):
+        db = self._open(monkeypatch)
+        monkeypatch.setattr(retrieval, "apply_ann_gucs", lambda db_: False)
+        assert retrieval.ann_plan(db, _project()) is None
+
+    def test_gucs_failure_rolls_back(self, monkeypatch):
+        db = self._open(monkeypatch)
+
+        def _boom(statement, params=None):
+            if "set_config" in str(statement):
+                raise RuntimeError("unrecognized configuration parameter")
+            return _Rows([])
+
+        monkeypatch.setattr(db, "execute", _boom)
+        assert retrieval.apply_ann_gucs(db) is False
+        assert db.rollbacks == 1
+
+    def test_project_size_is_memoized_on_content_version(self, monkeypatch):
+        db = self._open(monkeypatch)
+        project = _project()
+        retrieval.ann_dimension(db, project)
+        retrieval.ann_dimension(db, project)
+        size_queries = [s for s in db.core_statements if "sum(chunk_count)" in str(s)]
+        assert len(size_queries) == 1
+        # a content write bumps the version, which invalidates the memo
+        project.content_version = 8
+        retrieval.ann_dimension(db, project)
+        size_queries = [s for s in db.core_statements if "sum(chunk_count)" in str(s)]
+        assert len(size_queries) == 2
+
+
+class TestExploreGate:
+    def test_exact_statements_by_default(self):
+        db = _FakeSession(capable=False)
+        project = _project()
+        explore._neighbours(db, project, "chunk:1", 4, None)
+        assert db.statements[0] is explore._CHUNK_REL_CHUNK_SQL
+        assert db.statements[1] is explore._CHUNK_REL_MEMORY_SQL
+
+        db = _FakeSession(capable=False)
+        explore._neighbours(db, project, "memory:1", 4, None)
+        assert db.statements[0] is explore._MEMORY_REL_CHUNK_SQL
+        assert db.statements[1] is explore._MEMORY_REL_MEMORY_SQL
+
+    def test_only_chunk_targets_are_rewritten(self):
+        db = _FakeSession()
+        project = _project()
+        explore._neighbours(db, project, "chunk:1", 4, 1536)
+        assert db.statements[0] is not explore._CHUNK_REL_CHUNK_SQL
+        # memories have no HNSW index, so that half is untouched
+        assert db.statements[1] is explore._CHUNK_REL_MEMORY_SQL
+
+        db = _FakeSession()
+        explore._neighbours(db, project, "memory:1", 4, 1536)
+        assert db.statements[0] is not explore._MEMORY_REL_CHUNK_SQL
+        assert db.statements[1] is explore._MEMORY_REL_MEMORY_SQL
+
+    def test_statements_are_built_once(self):
+        first = explore._ann_sql("seed_chunk", explore._ANN_SEED_CHUNK_TEMPLATE, 384)
+        second = explore._ann_sql("seed_chunk", explore._ANN_SEED_CHUNK_TEMPLATE, 384)
+        assert first is second
+
+
+class TestExactStatementsAreUntouched:
+    """The exact SQL is the fallback for every gate above, so it must not have
+    drifted while the ANN siblings were added."""
+
+    def test_semantic_sql(self):
+        sql = " ".join(str(retrieval.SEMANTIC_SQL).split())
+        assert sql == (
+            "SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename, "
+            "1 - (c.embedding <=> CAST(:qvec AS vector)) AS similarity "
+            "FROM chunks c JOIN files f ON f.id = c.file_id "
+            "WHERE c.project_id = :project_id "
+            "ORDER BY c.embedding <=> CAST(:qvec AS vector) LIMIT :limit"
+        )
+
+    def test_memories_stay_exact(self):
+        from app.services import memory
+
+        sql = str(memory._SEARCH_SQL)
+        assert "::vector(" not in sql
+        assert "vector_dims" not in sql
+
+    def test_semantic_cache_stays_exact(self):
+        from app.services import semantic_cache
+
+        sql = str(semantic_cache._LOOKUP_SQL)
+        assert "::vector(" not in sql
+        assert "vector_dims" not in sql
+
+    def test_memory_graph_stays_exact(self):
+        from app.services import memory_graph
+
+        for statement in (
+            memory_graph.RELATED_SQL,
+            memory_graph.MEMORY_CHUNK_SQL,
+            memory_graph.MEMORY_MEMORY_SQL,
+        ):
+            assert "::vector(" not in str(statement)
+
+
+class TestMigrationIsDefensive:
+    """The database is unreachable, so 0018 cannot be test-run. These are the
+    properties that make a blind paste into a SQL editor survivable."""
+
+    @staticmethod
+    def _sql():
+        from pathlib import Path
+
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "supabase"
+            / "migrations"
+            / "0018_hnsw_vector_indexes.sql"
+        )
+        return path.read_text(encoding="utf-8")
+
+    @classmethod
+    def _executable(cls):
+        """The migration with comments and string literals removed.
+
+        Both carry prose that names the very statements these tests assert are
+        absent (the runbook, and the NOTICE that points an operator at it), so
+        searching the raw file would test the documentation, not the SQL.
+        """
+        body = re.sub(r"--.*$", "", cls._sql(), flags=re.M)
+        return re.sub(r"'[^']*'", "''", body)
+
+    def test_every_index_is_idempotent(self):
+        statements = re.findall(r"create index[^;]*", self._executable(), re.I)
+        assert len(statements) >= 2  # the two semantic_query_cache btrees
+        for statement in statements:
+            assert "if not exists" in statement.lower()
+
+    def test_nothing_raises_an_exception(self):
+        # RAISE NOTICE only: a guard that fails must not abort the migration.
+        body = self._executable()
+        assert "raise exception" not in body.lower()
+        assert "raise notice" in self._sql().lower()
+
+    def test_concurrently_is_not_in_an_executable_statement(self):
+        # CREATE INDEX CONCURRENTLY cannot run in a transaction block, and both
+        # the Supabase SQL editor and the repo's migration runner impose one.
+        # It belongs in the runbook comment, never in a statement.
+        assert "concurrently" not in self._executable().lower()
+        assert "concurrently" in self._sql().lower()  # ...but it IS documented
+
+    def test_indexes_match_the_allowlist(self):
+        sql = self._sql()
+        dims = re.search(r"dims\s+constant int\[\]\s*:=\s*array\[([^\]]+)\]", sql)
+        assert dims
+        declared = {int(d.strip()) for d in dims.group(1).split(",")}
+        assert declared == set(retrieval.ANN_DIMENSIONS)
+        assert 3072 not in declared  # over pgvector's 2000-dimension HNSW limit
+
+    def test_index_names_match_what_the_runtime_probes_for(self):
+        sql = self._sql()
+        assert "chunks_embedding_hnsw_%s_idx" in sql
+        assert retrieval.ANN_INDEX_PREFIX in sql
+        assert "vector_dims(embedding) = %s" in sql
+
+    def test_semantic_query_cache_gets_btrees_not_hnsw(self):
+        body = self._executable()
+        assert "semantic_query_cache_scope_idx" in body
+        assert "semantic_query_cache_expiry_idx" in body
+        assert not re.search(
+            r"create index[^;]*semantic_query_cache[^;]*using hnsw", body, re.I
+        )
+
+    def test_no_index_on_memories(self):
+        assert not re.search(
+            r"create index[^;]*\bon\s+\S*memories", self._executable(), re.I
+        )

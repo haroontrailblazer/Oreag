@@ -5,6 +5,33 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = ""
+    # Session-pooler (5432) URL for DDL, where session state (SET
+    # maintenance_work_mem, advisory locks) actually survives.
+    # tests/apply_migrations.py uses it when set and falls back to database_url
+    # otherwise. It does NOT unlock CREATE INDEX CONCURRENTLY: that also needs
+    # one statement per round trip outside any transaction block, i.e. psql -
+    # see the runbook in supabase/migrations/0018_hnsw_vector_indexes.sql.
+    migration_database_url: str = ""
+
+    # SQLAlchemy connection pool. Sized to sit at or below Supavisor's
+    # per-tenant transaction-mode Pool Size, so waits happen here - where
+    # pool_timeout fast-fails them into main.py's 503 handler - instead of
+    # invisibly inside the pooler.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10        # total client capacity 20, not 40
+    db_pool_timeout: int = 5         # must stay in step with the sizes above
+    db_pool_recycle: int = 1500      # drop sockets before Render NAT / Supavisor idle-kill them
+    db_connect_timeout: int = 10     # libpq connect_timeout; without it a pooler outage hangs a thread
+    # Escape hatch for many Render instances or a separate ingest service. Off
+    # by default: with a transaction pooler idle client connections are cheap,
+    # and NullPool adds a TLS+SCRAM handshake to every request and worker poll.
+    db_use_null_pool: bool = False
+    # Kill switch for releasing the connection during provider I/O. The live
+    # database is unreachable, so this can't be validated against real Postgres
+    # first; false restores today's hold-for-the-whole-request behaviour with
+    # an env change and no redeploy.
+    db_release_during_provider_io: bool = True
+
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
@@ -24,6 +51,30 @@ class Settings(BaseSettings):
     lmstudio_base_url: str = "http://localhost:1234/v1"
 
     cors_origins: str = "http://localhost:3000,http://192.168.56.1:3000"
+    # Auto-generated Vercel preview hostnames. Both ends must match, which
+    # keeps unrelated origins out - but it is a SHAPE filter, not proof of
+    # ownership: *.vercel.app is a shared namespace, so anyone can register
+    # oreag-<anything> under their own team and satisfy it. That is tolerable
+    # only because main.py sets allow_credentials=False; see the note there
+    # before turning credentials on. An empty project means no preview regex is
+    # emitted at all, so the default is fail-closed and only CORS_ORIGINS
+    # applies.
+    vercel_project: str = ""    # slug every preview hostname starts with
+    vercel_scope: str = ""      # team/account slug every preview hostname ends with
+    # Gates the localhost / RFC1918 branch of the origin regex. True so local
+    # and LAN dev keep working with no .env change (api.ts follows
+    # window.location.hostname, so LAN origins aren't in CORS_ORIGINS);
+    # render.yaml sets it to false.
+    cors_allow_local_network: bool = True
+    # Access-Control-Expose-Headers (comma-separated). Retry-After is part of
+    # the documented 429 contract but is unreadable by cross-origin JS today.
+    cors_expose_headers: str = "Retry-After"
+    # Access-Control-Allow-Credentials. False is what makes a mistakenly
+    # allowed origin harmless, because the preview regex over the shared
+    # *.vercel.app namespace is a SHAPE filter and cannot prove ownership.
+    # Turning this on while VERCEL_PROJECT/VERCEL_SCOPE are set is refused at
+    # startup by main.py rather than merely discouraged - see the guard there.
+    cors_allow_credentials: bool = False
 
     max_upload_bytes: int = 50 * 1024 * 1024
 
@@ -82,6 +133,39 @@ class Settings(BaseSettings):
     # hit alongside meaning matches. Degrades to semantic-only automatically
     # if the full-text column is missing (migration 0012 not applied).
     hybrid_search_enabled: bool = True
+
+    # Approximate vector search (HNSW). The master kill switch: false forces
+    # every vector search back onto today's exact SQL without dropping an index
+    # or shipping code. Safe to default True because three further gates
+    # (pgvector >= 0.8, index present and valid, project large enough) mean
+    # dev, tests and every small tenant never reach the ANN path.
+    vector_ann_enabled: bool = True
+    # Project size below which the exact scan wins outright: ~20k x 1536 float4
+    # is a few ms of distance arithmetic plus a bounded bitmap heap read, which
+    # ANN can't beat and can only lose recall against. Read from a
+    # per-(project, content_version) memoized sum(files.chunk_count).
+    vector_ann_min_chunks: int = 20000
+    # The recall gate. A global HNSW index must post-filter by project_id, so
+    # recall depends on the project's SHARE of indexed rows, not its size. At
+    # 2% share with max_scan_tuples 40000 a k=20 query expects ~800 in-project
+    # candidates inside the scan budget - a ~40x margin. Below this, exact.
+    vector_ann_min_project_share: float = 0.02
+    # hnsw.iterative_scan - relaxed rather than strict because the rewritten
+    # SQL already re-sorts the <=20 returned rows in an outer ORDER BY, so we
+    # get strict ordering at relaxed cost. 'off' tests raw post-filter behaviour.
+    vector_ann_iterative_scan: str = "relaxed_order"
+    # hnsw.ef_search on the ANN path only (pgvector default 40). Must exceed
+    # the LIMIT with headroom for the project_id post-filter; top_k caps at 20.
+    vector_ann_ef_search: int = 100
+    # hnsw.max_scan_tuples (pgvector 0.8 default 20000). Bounds the worst-case
+    # iterative scan so a mis-gated query degrades to a bounded cost rather
+    # than a full index walk; doubled because our post-filter is a tenant filter.
+    vector_ann_max_scan_tuples: int = 40000
+    # How long the pgvector-version / index-existence / reltuples probe is
+    # cached per process: one round trip per 5 minutes, a newly built index
+    # takes effect without a restart, and a dropped or invalidated index can
+    # only be wrongly assumed present for this long.
+    vector_ann_capability_ttl_seconds: int = 300
 
     # Agentic retrieval (explore_brain): graph-aware traversal of the brain.
     explore_seeds_per_type: int = 6        # top chunks + top memories to seed from

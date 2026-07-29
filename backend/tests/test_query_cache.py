@@ -5,9 +5,17 @@ A backend is just get/set(ttl)/delete/clear over strings. The in-memory backend
 is the local-dev/test default; the Redis backend (tested here with a fake client,
 no server) is selected when REDIS_URL is configured. The query cache and the
 conversation store both ride on whichever backend is active.
+
+Single-flight is covered at both levels: per-process (the plain lock) and
+fleet-wide (the Redis SET NX lock), the latter driven by two QueryCache objects
+sharing one fake client - that is what "two app instances" looks like in a unit
+test.
 """
 import threading
+import time
 import uuid
+
+import pytest
 
 from app.models import Project
 
@@ -131,21 +139,53 @@ class TestInMemoryBackend:
 
 
 class _FakeRedis:
-    """Minimal stand-in for a redis client: get/set(ex)/delete over a dict."""
+    """Minimal stand-in for a redis client: get/set(ex|nx|px)/delete/eval over a
+    dict, guarded by a lock because real Redis executes one command at a time
+    (the concurrency tests below drive it from several threads).
+
+    ``eval`` implements the ONE script we send - the compare-and-delete lock
+    release - since that is where the release's atomicity actually lives.
+    """
 
     def __init__(self):
         self.store = {}
         self.last_ex = None
+        self.last_px = None
+        self._guard = threading.Lock()
 
     def get(self, key):
-        return self.store.get(key)
+        with self._guard:
+            return self.store.get(key)
 
-    def set(self, key, value, ex=None):
-        self.last_ex = ex
-        self.store[key] = value.encode() if isinstance(value, str) else value
+    def set(self, key, value, ex=None, nx=False, px=None):
+        with self._guard:
+            if nx and key in self.store:
+                return None  # redis-py returns None when NX didn't apply
+            self.last_ex = ex
+            self.last_px = px
+            self.store[key] = value.encode() if isinstance(value, str) else value
+            return True
 
     def delete(self, *keys):
-        for key in keys:
+        with self._guard:
+            for key in keys:
+                self.store.pop(key, None)
+
+    def eval(self, script, numkeys, *args):
+        from app.services.query_cache import _RELEASE_IF_MINE
+
+        assert script == _RELEASE_IF_MINE, "unexpected Lua script"
+        keys, argv = args[:numkeys], args[numkeys:]
+        with self._guard:
+            current = self.store.get(keys[0])
+            if current is not None and current.decode() == argv[0]:
+                del self.store[keys[0]]
+                return 1
+            return 0
+
+    def expire_now(self, key):
+        """Simulate a lock's TTL lapsing while its holder is still running."""
+        with self._guard:
             self.store.pop(key, None)
 
 
@@ -301,10 +341,13 @@ class _ExplodingRedis:
     def get(self, key):
         raise ConnectionError("redis down")
 
-    def set(self, key, value, ex=None):
+    def set(self, key, value, ex=None, nx=False, px=None):
         raise ConnectionError("redis down")
 
     def delete(self, key):
+        raise ConnectionError("redis down")
+
+    def eval(self, script, numkeys, *args):
         raise ConnectionError("redis down")
 
 
@@ -371,3 +414,302 @@ class TestRedisBackendDegradesOnOutage:
         assert returned == [{"question": "new q", "answer": "new a"}]
         # ...but the stored history was NOT clobbered.
         assert flaky.store["conv:p1:cid"] == '[{"question": "old", "answer": "history"}]'
+
+
+def _instance(client, **kwargs):
+    """One app instance's QueryCache over a shared Redis - separate process
+    state (its own in-process locks), same fleet-wide backend."""
+    from app.services.query_cache import QueryCache, RedisBackend
+
+    kwargs.setdefault("ttl_seconds", 60)
+    return QueryCache(RedisBackend(client), **kwargs)
+
+
+class TestFlightLockSemantics:
+    """flight_lock's return value must keep behaving like the threading.Lock it
+    replaced - services/query.py drives it by hand (acquire/release/`with`)."""
+
+    def test_in_memory_backend_keeps_the_plain_per_process_lock(self):
+        from app.services.query_cache import InMemoryBackend, QueryCache
+
+        cache = QueryCache(InMemoryBackend(clock=_Clock(0)), ttl_seconds=60)
+        lock = cache.flight_lock("k")
+        assert lock.acquire(blocking=False) is True
+        assert cache.flight_lock("k").acquire(blocking=False) is False  # held
+        assert lock.locked() is True
+        lock.release()
+        assert cache.flight_lock("k").acquire(blocking=False) is True
+
+    def test_works_as_a_context_manager(self):
+        client = _FakeRedis()
+        cache = _instance(client)
+        with cache.flight_lock("k"):
+            assert "flight:k" in client.store  # the fleet-wide lock is held
+        assert "flight:k" not in client.store  # ...and released on exit
+
+    def test_locks_are_scoped_per_key(self):
+        client = _FakeRedis()
+        cache = _instance(client)
+        first = cache.flight_lock("a")
+        assert first.acquire(blocking=False) is True
+        assert cache.flight_lock("b").acquire(blocking=False) is True
+        first.release()
+
+
+class TestRedisSingleFlightAcrossInstances:
+    """The Phase 3 point of the Redis lock: with several app instances, the
+    leader must be elected across the fleet, not once per process."""
+
+    def test_leader_takes_the_lock_and_another_instance_cannot(self):
+        client = _FakeRedis()
+        one, two = _instance(client), _instance(client)
+
+        leader = one.flight_lock("k")
+        assert leader.acquire(blocking=False) is True
+        token = client.store["flight:k"]
+        assert token  # a unique token, not a fixed marker
+
+        follower = two.flight_lock("k")
+        assert follower.acquire(blocking=False) is False
+        assert client.store["flight:k"] == token  # a loser never overwrites it
+
+        leader.release()
+        assert "flight:k" not in client.store
+        assert follower.acquire(blocking=False) is True
+        follower.release()
+
+    def test_each_acquisition_gets_a_fresh_token(self):
+        client = _FakeRedis()
+        cache = _instance(client)
+        lock = cache.flight_lock("k")
+        lock.acquire(blocking=False)
+        first = client.store["flight:k"]
+        lock.release()
+        lock.acquire(blocking=False)
+        assert client.store["flight:k"] != first
+        lock.release()
+
+    def test_lock_carries_a_ttl_so_a_crashed_leader_frees_it(self):
+        client = _FakeRedis()
+        cache = _instance(client, flight_ttl_seconds=90.0)
+        lock = cache.flight_lock("k")
+        lock.acquire(blocking=False)
+        assert client.last_px == 90_000  # milliseconds, as SET PX wants
+        lock.release()
+
+    def test_follower_waits_then_serves_the_leaders_cached_value(self):
+        """The whole point: instance B must NOT run its own copy of the
+        pipeline while instance A is already computing the same answer."""
+        client = _FakeRedis()
+        one, two = _instance(client), _instance(client)
+        calls: list[str] = []
+        leading = threading.Event()
+        finish = threading.Event()
+        results: dict[str, object] = {}
+
+        def leader_compute():
+            calls.append("leader")
+            leading.set()
+            finish.wait(timeout=3)
+            return {"answer": "FROM THE LEADER"}
+
+        def follower_compute():
+            calls.append("follower")
+            return {"answer": "DUPLICATE WORK"}
+
+        def lead():
+            results["one"] = one.get_or_compute("k", leader_compute)
+
+        def follow():
+            results["two"] = two.get_or_compute("k", follower_compute)
+
+        leader = threading.Thread(target=lead)
+        leader.start()
+        assert leading.wait(timeout=3)
+
+        follower = threading.Thread(target=follow)
+        follower.start()
+        time.sleep(0.2)  # long enough that an unlocked follower would have run
+        assert calls == ["leader"]
+
+        finish.set()
+        leader.join(timeout=3)
+        follower.join(timeout=3)
+
+        assert calls == ["leader"]  # computed once for the whole fleet
+        assert results["one"] == {"answer": "FROM THE LEADER"}
+        assert results["two"] == {"answer": "FROM THE LEADER"}
+
+    def test_follower_falls_through_and_computes_when_the_wait_expires(self):
+        """A wedged leader must not park followers forever: past the wait
+        budget a follower computes on its own (correctness over dedup)."""
+        client = _FakeRedis()
+        one = _instance(client)
+        two = _instance(client, flight_wait_seconds=0.1)
+
+        stuck = one.flight_lock("k")
+        assert stuck.acquire(blocking=False) is True  # leads and never finishes
+
+        calls = []
+
+        def compute():
+            calls.append(1)
+            return {"answer": "SELF SERVED"}
+
+        started = time.monotonic()
+        assert two.get_or_compute("k", compute) == {"answer": "SELF SERVED"}
+        assert calls == [1]
+        assert time.monotonic() - started >= 0.1  # it really did wait first
+
+        # The follower gave the local slot back on the way out, so this
+        # instance can lead the next flight for the same key.
+        stuck.release()
+        after = two.flight_lock("k")
+        assert after.acquire(blocking=False) is True
+        after.release()
+
+    def test_a_failed_leader_frees_the_lock_instead_of_wedging_the_fleet(self):
+        """A leader whose compute raises must release the fleet-wide lock on
+        the way out. Otherwise one upstream 500 parks every other instance
+        asking that question for a whole flight TTL."""
+        client = _FakeRedis()
+        one, two = _instance(client), _instance(client)
+
+        def explode():
+            raise RuntimeError("provider blew up")
+
+        with pytest.raises(RuntimeError):
+            one.get_or_compute("k", explode)
+
+        assert "flight:k" not in client.store  # released, not left to expire
+        assert one.get("k") is None  # and the failure was NOT cached
+        successor = two.flight_lock("k")
+        assert successor.acquire(blocking=False) is True  # no waiting for TTL
+        successor.release()
+
+    def test_the_lock_and_the_answer_it_guards_never_clobber_each_other(self):
+        """Both are keyed by the same cache key, so they need separate
+        namespaces: a lock written over the answer would drop a fresh cache
+        entry, and an answer written over the lock would hand a second leader
+        the flight."""
+        client = _FakeRedis()
+        cache = _instance(client)
+        cache.set("k", {"answer": "A"})
+
+        lock = cache.flight_lock("k")
+        assert lock.acquire(blocking=False) is True
+        assert sorted(client.store) == ["cache:k", "flight:k"]
+        assert cache.get("k") == {"answer": "A"}  # survives the lock
+
+        lock.release()
+        assert cache.get("k") == {"answer": "A"}  # survives the release
+        assert "flight:k" not in client.store
+
+    def test_release_never_deletes_a_newer_leaders_lock(self):
+        """A leader slower than the TTL wakes up holding a stale token. Its
+        release must be a no-op, not a delete of the lock its successor now
+        holds - otherwise a third caller leads alongside the second."""
+        client = _FakeRedis()
+        one, two = _instance(client), _instance(client)
+
+        slow = one.flight_lock("k")
+        assert slow.acquire(blocking=False) is True
+        client.expire_now("flight:k")  # the TTL lapses mid-flight
+
+        successor = two.flight_lock("k")
+        assert successor.acquire(blocking=False) is True
+        successor_token = client.store["flight:k"]
+
+        slow.release()  # the stale leader finally finishes
+        assert client.store["flight:k"] == successor_token  # untouched
+
+        successor.release()
+        assert "flight:k" not in client.store
+
+    def test_a_double_release_cannot_reach_a_later_lock(self):
+        from app.services.query_cache import RedisBackend
+
+        client = _FakeRedis()
+        cache = _instance(client)
+        lock = cache.flight_lock("k")
+        lock.acquire(blocking=False)
+        lock.release()
+
+        RedisBackend(client).lock_acquire("flight:k", "someone-elses", 60)
+        try:
+            lock.release()  # threading.Lock raises on an unheld release
+        except RuntimeError:
+            pass
+        assert client.store["flight:k"] == b"someone-elses"
+
+
+class _LockBlindRedis(_FakeRedis):
+    """Reads and writes work, but the LOCK commands (SET NX, EVAL) fail.
+
+    The partial outage that isolates the fallback: the answer cache is still
+    shared, so the only thing a failed lock can cost is fleet-wide dedup.
+    """
+
+    def set(self, key, value, ex=None, nx=False, px=None):
+        if nx:
+            raise ConnectionError("redis down")
+        return super().set(key, value, ex=ex)
+
+    def eval(self, script, numkeys, *args):
+        raise ConnectionError("redis down")
+
+
+class TestFlightLockDegradesWhenRedisIsDown:
+    """Fail open: a Redis outage costs cross-instance dedup, never the query."""
+
+    def test_outage_falls_back_to_the_in_process_lock(self):
+        cache = _instance(_ExplodingRedis())
+        lock = cache.flight_lock("k")
+        assert lock.acquire(blocking=False) is True  # led anyway
+        assert cache.flight_lock("k").acquire(blocking=False) is False  # local
+        lock.release()  # must not raise even though the release call fails
+
+    def test_single_flight_still_dedupes_within_the_process(self):
+        cache = _instance(_LockBlindRedis())
+        calls = []
+        results = []
+        ready = threading.Event()
+        release = threading.Event()
+        barrier = threading.Barrier(2)
+
+        def compute():
+            calls.append(1)
+            ready.set()
+            release.wait(timeout=2)
+            return {"answer": "V"}
+
+        def worker():
+            barrier.wait()
+            results.append(cache.get_or_compute("k", compute))
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        ready.wait(timeout=2)
+        release.set()
+        for thread in threads:
+            thread.join(timeout=3)
+
+        assert len(calls) == 1  # the in-process lock is intact
+        assert results == [{"answer": "V"}, {"answer": "V"}]
+
+    def test_dedup_degrades_to_per_process_not_to_an_error(self):
+        """Honest about what is lost: with the lock layer down, two instances
+        can both lead - exactly the behaviour before this change - instead of
+        one of them failing."""
+        client = _LockBlindRedis()
+        one, two = _instance(client), _instance(client)
+        assert one.flight_lock("k").acquire(blocking=False) is True
+        assert two.flight_lock("k").acquire(blocking=False) is True
+
+    def test_backend_lock_helpers_report_the_outage_instead_of_raising(self):
+        from app.services.query_cache import UNAVAILABLE, RedisBackend
+
+        backend = RedisBackend(_ExplodingRedis())
+        assert backend.lock_acquire("flight:k", "tok", 60) is UNAVAILABLE
+        backend.lock_release("flight:k", "tok")  # must not raise
