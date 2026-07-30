@@ -39,6 +39,9 @@ GitLab, VS Code, Obsidian, and most Markdown viewers.
 | 4 | [BYOK Key Resolution](#4-byok-key-resolution) | decision tree |
 | 5 | [Authentication & Email Confirmation](#5-authentication--email-confirmation) | sequence |
 | 6 | [Agent Memory & Docs Recall (MCP)](#6-agent-memory--docs-recall-mcp) | sequence |
+| 7 | [Streaming answers · SSE](#7-streaming-answers--sse) | sequence |
+| 8 | [Admission control](#8-admission-control--rate-limits-quotas-metering) | decision tree |
+| 9 | [Structural scale](#9-structural-scale--indexes-pooling-fleet-wide-locks) | decision tree |
 
 ---
 
@@ -73,8 +76,8 @@ flowchart TB
         PublicAPI["Public API<br/>/v1/* - query · retrieve · memory"]
         subgraph services["Domain Services"]
             direction LR
-            Ingest["Ingestion<br/>background tasks"]
-            Retrieve["Retrieval"]
+            Ingest["Ingestion<br/>durable queue · SKIP LOCKED"]
+            Retrieve["Retrieval<br/>hybrid · exact or HNSW"]
             Generate["Generation"]
             Agentic["Agentic query loop<br/>depth · sub-queries · clarify"]
             QCache["Answer cache<br/>L1 exact + L2 semantic"]
@@ -479,6 +482,141 @@ Uploads are additionally capped at 20 files per request, 60 files/minute and
 keys cannot overshoot. Memories cap at 2,000 per project. The limiter **fails
 open**: if its counter store is unreachable the request proceeds rather than
 erroring.
+
+---
+
+## 9. Structural scale · indexes, pooling, fleet-wide locks
+
+None of this changes a single response. Same request, same answer, same
+`similarity` values - these are the things that decide whether the system can
+serve a thousand of them at once. The shared rule is that **every fast path is
+an optimisation that may be declined**, never something correctness depends on.
+
+### 9.1 Exact or approximate vector search
+
+`chunks.embedding` is a dimensionless `vector`, so one table holds every
+project's embedding size and no plain index is possible. Migration 0018 adds one
+**partial** HNSW index per dimension instead. Routing a query onto them is a
+decision with four gates, checked cheapest first:
+
+```mermaid
+flowchart TD
+    Q["vector search"] --> G1{"VECTOR_ANN_ENABLED?"}
+    G1 -- no --> EX["exact scan"]
+    G1 -- yes --> G2{"dimension has an index?<br/>256 · 384 · 512 · 768 · 1024 · 1536"}
+    G2 -- "no · e.g. 3072" --> EX
+    G2 -- yes --> G3{"pgvector >= 0.8<br/>AND a VALID cosine HNSW index?"}
+    G3 -- no --> EX
+    G3 -- yes --> G4{">= 20,000 chunks<br/>AND >= 2% of the table?"}
+    G4 -- no --> EX
+    G4 -- yes --> G5{"scan settings applied?"}
+    G5 -- no --> EX
+    G5 -- yes --> ANN["HNSW scan"]
+    EX --> RRF["RRF fusion"]
+    ANN --> RRF
+```
+
+**Why both size gates.** Every statement is `WHERE project_id = X ORDER BY
+embedding <=> q LIMIT k`, and a global HNSW index knows nothing about
+`project_id`, so it must **post-filter**. Recall therefore depends on the
+project's *share* of indexed rows, while the exact scan's cost depends on its
+*absolute size*. A small project inside a big table gets an exact scan that is
+both fast and perfect, where HNSW would burn its candidate budget on other
+tenants' rows.
+
+**Why 3072 is excluded.** pgvector caps HNSW at 2,000 dimensions for `vector`.
+The `halfvec` workaround would drop to half precision and change the distance
+arithmetic - and therefore change the `similarity` value that
+`agentic_min_similarity`, `rag_memory_min_similarity` and the UI's match % all
+read. A 3072-dimension project keeps the exact scan. Since every 3072 model is
+Matryoshka, shrinking it to 1536 or 1024 in Settings is an in-place `UPDATE`
+that makes it indexable without re-embedding anything.
+
+| Dimension | Indexed | Notes |
+|---|---|---|
+| 256, 384, 512, 768, 1024, 1536 | yes | one partial index each, `m=16`, `ef_construction=64` |
+| 3072 | no | over pgvector's 2,000-dimension HNSW limit; always exact |
+| memories (any size) | no | capped at 2,000 rows per project, so exact is bounded and perfect |
+
+Scan settings are applied with `SET LOCAL`, so they revert at the end of the
+transaction and cannot leak across the shared pool:
+`hnsw.iterative_scan=relaxed_order`, `ef_search=100`, `max_scan_tuples=40000`.
+The capability probe is memoized for 5 minutes, so a newly built index takes
+effect without a restart and a dropped one closes the gate within the same
+window. **Every** unexpected condition - no pgvector, old pgvector, an invalid
+index, an unknown dimension, a probe error - returns "use the exact SQL".
+
+### 9.2 Connection release during provider I/O
+
+A completion blocks for seconds; a streamed one, sometimes minutes. It needs no
+database at all, but holding the pooled connection across that wait is what
+drains the pool under load - idle, yet nobody else can have it.
+
+```mermaid
+sequenceDiagram
+    participant H as handler
+    participant P as pool
+    participant M as model provider
+
+    H->>P: checkout (retrieval)
+    P-->>H: connection
+    H->>H: release_connection(db) - Session.commit()
+    H-->>P: connection returned (checkedout drops to 0)
+    H->>M: completion (seconds to minutes)
+    M-->>H: answer
+    H->>P: checkout again (cache + log writes)
+```
+
+`Session.commit()` ends the transaction and checks the connection back in; the
+session transparently checks a fresh one out on its next statement.
+`expire_on_commit=False` keeps loaded ORM values across the release. On the
+failure branch `rollback()` expires them *regardless* of that flag, so the
+loaded values are snapshotted and restored around it - a release never changes
+what a loaded object says. `DB_RELEASE_DURING_PROVIDER_IO=false` restores the
+old hold-for-the-whole-request behaviour with an env change and a restart.
+
+The accepted trade: post-generation cache and log writes now re-acquire a
+connection, so they can hit `pool_timeout` where before they could not fail.
+
+### 9.3 Pooling
+
+`DATABASE_URL` points at the Supabase **transaction pooler**, which holds a
+server connection only for the length of a transaction rather than a session.
+Two consequences the code handles: `prepare_threshold=None`, because
+consecutive transactions can land on different backends; and the client pool
+total (10 + 10 overflow = 20) must stay at or below the tenant Pool Size, or
+waits queue invisibly *inside* Supavisor where `pool_timeout` cannot see them -
+which would destroy the fast-fail `PoolTimeoutError` → 503 path.
+
+DDL is the exception: session state only survives on the session pooler (5432),
+which is what `MIGRATION_DATABASE_URL` is for.
+
+### 9.4 Fleet-wide single-flight
+
+The answer cache dedupes simultaneous identical asks. On Redis that
+de-duplication is fleet-wide rather than per-process, so four workers asking the
+same question cost one AI call, not four.
+
+```mermaid
+flowchart LR
+    A["4 identical asks"] --> L{"SET NX flight:key"}
+    L -- won --> LEAD["leader computes<br/>heartbeat re-arms the TTL"]
+    L -- lost --> WAIT["followers wait, then read the cache"]
+    LEAD --> STORE["stores in L1 + L2"]
+    STORE --> WAIT
+    LEAD --> REL["Lua compare-and-delete"]
+```
+
+The token in the lock is what makes release safe: a slow leader whose generation
+outran the TTL must never delete the lock a *newer* leader has taken since, and
+GET-then-DEL from Python has exactly that race - so the check runs inside Redis.
+The heartbeat means the TTL bounds a leader that **died**, not one that is merely
+slow, and a 5-TTL lease means a leaked acquire still cannot hold the lock
+forever. If Redis is unreachable the lock **fails open** to the in-process one.
+
+The lock key is the cache key, and `project.id` is its first element - so
+single-flight is scoped **per project**, and two projects (or two accounts)
+asking the identical question never share a lock or an answer.
 
 ---
 

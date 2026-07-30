@@ -124,6 +124,7 @@ specification {
   tag readpath
   tag guard        // admission control: auth, rate limits, quotas, suspension
   tag background   // runs on a worker thread, not in the request path
+  tag scale        // Phase 3 structural scale: ANN index, pooling, fleet-wide locks
 
   deploymentNode platform {
     style {
@@ -169,6 +170,14 @@ model {
     backend = container 'Backend API' 'Ingestion, retrieval, generation, memory, metering and key resolution' {
       technology 'FastAPI · SQLAlchemy 2 · Pydantic · Uvicorn · Python 3.13'
       icon tech:python
+      metadata {
+        pool 'SQLAlchemy pool 10 + 10 overflow = 20 clients, timeout 5 s, recycle 1500 s, pre_ping on. Sized at or below Supavisor per-tenant Pool Size ON PURPOSE: connections above that number do not fail, they queue INSIDE the pooler where pool_timeout cannot see them, which would destroy the fast-fail 503 path.'
+        pool-timeout 'a PoolTimeoutError surfaces as HTTP 503, so overload is a fast honest rejection rather than a hang. A failed CONNECT raises OperationalError instead and is a 500.'
+        prepared-statements 'prepare_threshold=None is load-bearing under TRANSACTION pooling: a named prepared statement is created on one server backend and the next transaction can be routed to a different one'
+        null-pool 'DB_USE_NULL_POOL is the escape hatch for many instances or a separate ingest service; off by default because a TLS + SCRAM handshake per request is worse than a cheap idle connection'
+        cors 'allow_credentials=False is the actual control. The *.vercel.app preview pattern is a SHAPE filter and cannot prove ownership, since anyone can register a matching hostname under their own team. Startup REFUSES to run credentials plus a preview pattern - a hard failure the health check catches, not a warning that rots in a log.'
+        threads 'all four background threads (2 ingest workers, maintenance sweep, flight-lock heartbeat) are daemon=True with explicit stop signals, so none can hold the process open'
+      }
 
       routers = component 'Routers' 'backend/app/routers' {
         dashboardApi = component 'Dashboard API' '/api/* — Supabase JWT verified against JWKS, then an ownership check' {
@@ -192,6 +201,7 @@ model {
           metadata {
             claim 'SELECT ... WHERE status = pending OR lease_expires_at < now() ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED'
             retry 'attempts incremented on claim; at 3 the file is failed permanently'
+            lease-heartbeat 'a worker still making progress pushes its own lease out as it goes, so a genuinely long job is not stolen mid-flight while a DEAD worker still releases its file. A transient error only skips that beat - it can never permanently kill the heartbeat.'
           }
         }
         ingestion = component 'Ingestion' 'Convert, chunk, embed, write vectors. Idempotent: deletes prior chunks first, then commits per batch so a crash loses at most one batch.' {
@@ -214,9 +224,9 @@ model {
           }
         }
 
-        retrieval = component 'Retrieval' 'Hybrid: dense vector search for meaning plus sparse full-text for exact terms, fused by rank not score.' {
-          #readpath
-          technology 'pgvector cosine + Postgres FTS · RRF k=60'
+        retrieval = component 'Retrieval' 'Hybrid: dense vector search for meaning plus sparse full-text for exact terms, fused by rank not score. Also owns the HNSW planner that decides exact vs approximate.' {
+          #readpath #scale
+          technology 'pgvector cosine + Postgres FTS · RRF k=60 · HNSW planner'
           metadata {
             semantic 'cosine distance operator <=>, ORDER BY embedding <=> qvec LIMIT top_k'
             lexical 'content_tsv @@ websearch_to_tsquery(simple), ranked by ts_rank_cd, GIN index'
@@ -224,12 +234,35 @@ model {
             degradation 'lexical failure (missing content_tsv) rolls back and falls through to semantic-only'
           }
         }
-        generation = component 'Generation' 'Depth-aware grounded answers with inline citations. Sync and token streaming.' {
-          #readpath
-          technology 'depth-aware system prompts · [n] citations'
+        annPlanner = component 'HNSW Planner' 'Decides whether a vector search runs EXACT or APPROXIMATE. Exact is the default and is never removed; the index is an optimisation the planner may decline.' {
+          #readpath #scale
+          technology 'ann_plan() in services/retrieval.py · 4 gates · fails closed'
+          metadata {
+            why-not-always 'every vector statement is WHERE project_id = X ORDER BY embedding <=> q LIMIT k, and a global HNSW index knows nothing about project_id, so it must POST-FILTER. Recall then depends on the project SHARE of indexed rows, while exact cost depends on project SIZE. A small project inside a big table gets an exact scan that is both fast and perfect.'
+            gate-1-flag 'VECTOR_ANN_ENABLED must be true - the master kill switch, no index drop or redeploy needed to disable'
+            gate-2-version 'pgvector >= 0.8.0, because hnsw.iterative_scan landed there; below it a post-filtered scan silently returns too few rows'
+            gate-3-index 'a VALID cosine HNSW index must exist for this exact dimension, proven structurally: indrelid = public.chunks, amname = hnsw, opcname = vector_cosine_ops, indisvalid. A matching NAME alone is never accepted.'
+            gate-4-size 'the project needs >= 20000 chunks AND >= 2% of all indexed rows. Both, not either.'
+            dimensions-indexed '256, 384, 512, 768, 1024, 1536 - migration 0018 builds one PARTIAL index per dimension'
+            dimensions-excluded '3072 has NO index and always runs exact: pgvector caps HNSW at 2000 dimensions for `vector`, and the halfvec workaround would change the distance arithmetic and therefore the similarity value the thresholds and the UI depend on'
+            partial-index 'chunks.embedding is a DIMENSIONLESS vector so one table holds mixed dimensions; predicate `where vector_dims(embedding) = d` makes each index cover exactly one. Predicates are mutually exclusive, so six indexes cost the same on write as one.'
+            scan-settings 'set LOCAL per transaction, never globally: hnsw.iterative_scan=relaxed_order, ef_search=100, max_scan_tuples=40000. relaxed_order is safe because the rewritten SQL re-sorts its <=20 rows in an outer ORDER BY.'
+            probe-cache 'the capability probe is memoized 300 s per process, so a newly built index takes effect without a restart and a dropped one closes the gate within the same window'
+            fail-closed 'no pgvector, old pgvector, missing or invalid index, unknown dimension, probe error, or GUCs that will not set - every one of them returns None, which means "use the exact SQL". Correctness never depends on an index existing.'
+            equivalence 'the ANN statement returns the same columns in the same order, the same ordering, and the same 1 - distance arithmetic, so rrf_merge and every grounding threshold cannot tell the two paths apart'
+          }
+        }
+        generation = component 'Generation' 'Depth-aware grounded answers with inline citations. Sync and token streaming. Gives the pooled database connection back before every provider call.' {
+          #readpath #scale
+          technology 'depth-aware system prompts · [n] citations · connection release'
           metadata {
             prompts 'SHORT_SYSTEM_PROMPT for focused questions, LONG_SYSTEM_PROMPT for exam-style ones'
             grounding 'answers strictly from supplied context; refuses rather than inventing'
+            release-why 'a completion blocks for seconds, a streamed one sometimes minutes, and needs no database at all. Holding the pooled connection across that wait is what drains the pool under load: idle, but nobody else can have it.'
+            release-how 'release_connection(db) calls Session.commit(), which ends the transaction and checks the DBAPI connection back in - measured on the pinned SQLAlchemy 2.0.50, pool.checkedout() drops to 0 - and the session transparently checks a fresh one out on its next statement'
+            release-safety 'expire_on_commit=False keeps loaded ORM values across the release. On the FAILURE branch rollback() expires them regardless of that flag, so the loaded values are snapshotted and restored around it: a release never changes what a loaded object says.'
+            release-switch 'DB_RELEASE_DURING_PROVIDER_IO gates every call site from one place, so it cannot drift as sites are added; false restores hold-for-the-whole-request with an env change and a restart, no redeploy'
+            release-cost 'accepted trade: post-generation cache and log writes now re-acquire a connection, so they can hit pool_timeout where before they could not fail'
           }
         }
         agentic = component 'Agentic Query Loop' 'Classifies depth, decomposes broad questions, retrieves and merges over rounds, and escalates to the human instead of guessing.' {
@@ -242,14 +275,21 @@ model {
             sufficiency 'is_sufficient: at least 1 source at or above 0.2 cosine; otherwise widen top_k and retry, then clarify'
           }
         }
-        answerCache = component 'Answer Cache' 'Two layers. L1 hits an identical question, L2 hits one that merely means the same. Single-flight so simultaneous identical asks compute once.' {
-          #cache #readpath
-          technology 'L1 exact TTL 1 h · L2 semantic TTL 24 h · cosine >= 0.75'
+        answerCache = component 'Answer Cache' 'Two layers. L1 hits an identical question, L2 hits one that merely means the same. Fleet-wide single-flight so simultaneous identical asks compute once across every instance, not once each.' {
+          #cache #readpath #scale
+          technology 'L1 exact TTL 1 h · L2 semantic TTL 24 h · cosine >= 0.75 · Redis SET NX single-flight'
           metadata {
             l1 'normalize_question (lowercase, collapse whitespace, strip trailing punctuation) then an exact key lookup in Redis'
             l2 'embeds the question and runs pgvector cosine over cached questions; a hit is promoted into L1'
             key 'project + llm provider/model + embedding provider/model + top_k + content_version + normalized question'
+            isolation 'project.id is the FIRST key element, so cache and lock are scoped per project and two projects asking the identical question can never collide. A project has exactly one owner, so accounts cannot share an answer either. The dashboard /api and the public /v1 deliberately DO share, because both run the same run_query.'
             invalidation 'content_version bumps on any chunk or memory write, so the whole key space rolls over'
+            singleflight 'SET NX PX with a per-acquisition token. The leader computes, the followers wait, and only the leader stores.'
+            lock-release 'a Lua compare-and-delete: a slow leader whose generation outran the TTL must never delete the lock a NEWER leader has taken since, and GET-then-DEL from Python has exactly that race'
+            lock-renewal 'a daemon heartbeat re-arms the TTL at one third of it via Lua compare-and-PEXPIRE, so the TTL bounds a leader that DIED rather than one that is merely slow'
+            lock-lease 'renewal is itself capped at 5 TTLs, so a leaked acquire cannot hold the fleet-wide lock forever - the beat gives up and the TTL clears the key as it did before heartbeats existed'
+            lock-degradation 'Redis unreachable means fail-open to the in-process lock: per-process single-flight, never a failed query'
+            namespaces 'cache:{key} answers · flight:{key} locks · conv:{project}:{conversation} history'
           }
         }
         conversations = component 'Conversation Memory' 'Server-side chat threads, so a follow-up can be rewritten standalone' {
@@ -311,12 +351,15 @@ model {
           #byok
           technology '16 keyed providers · 3 keyless local · MRL dimensions'
           metadata {
-            mrl 'Matryoshka Representation Learning: important signal is packed into the vector prefix, so a prefix is itself a valid embedding'
+            mrl 'Matryoshka Representation Learning: the model is trained so the most important signal sits at the FRONT of the vector. A prefix of an MRL embedding is therefore itself a valid embedding of the same text, just coarser - which is what makes shrinking free.'
             mrl-models 'text-embedding-3-small [512,1536], 3-large [256,1024,3072], gemini-embedding-001 [768,1536,3072], cohere embed-v4.0 [256..1536], jina-v3 [256,512,1024]'
-            mrl-shrink 'same model, smaller size: UPDATE ... SET embedding = l2_normalize(subvector(embedding,1,dims)) - in place, zero API calls'
-            mrl-grow 'growing or switching model is a full re-embed; the discarded tail cannot be reconstructed'
+            mrl-shrink 'same model, smaller size: UPDATE ... SET embedding = l2_normalize(subvector(embedding, 1, dims)). One SQL statement over chunks and memories, in place, ZERO provider calls and zero re-reading of documents - seconds instead of a full re-ingest.'
+            mrl-renormalize 'l2_normalize is not cosmetic: cutting the tail changes the vector length, and cosine distance is only comparable between unit vectors, so the prefix must be scaled back onto the unit sphere before it is stored'
+            mrl-grow 'growing is NOT possible. The discarded tail is gone and cannot be reconstructed, so a larger size - like any model or provider switch - is a full re-embed of every chunk and every memory.'
+            mrl-scale-link 'shrinking is also the fastest route onto the ANN path: 3072 cannot be HNSW-indexed at all, so a 3072-dimension project that moves to 1536 or 1024 becomes indexable without re-embedding anything'
             normalization 'Gemini sub-native sizes come back un-normalized, so L2 normalization is applied locally'
-            change-plan 'embedding_change_plan returns keep | truncate | reembed'
+            change-plan 'embedding_change_plan returns one of three verdicts: keep (nothing changed), truncate (same model, smaller MRL size - the in-place shrink above), reembed (different model, different provider, or a larger size)'
+            reembed-scope 'a reembed nulls and rebuilds MEMORY vectors as well as chunks, memories first, so the two never sit in different embedding spaces'
           }
         }
         transcription = component 'Transcription Chain' 'Ordered BYOK speech-to-text: tries every usable key the owner holds, project provider first.' {
@@ -343,8 +386,16 @@ model {
     }
 
     db = containerDb 'Database' 'projects · files · chunks · memories · provider_keys · api_keys · query_logs · semantic_query_cache · usage_events · suspended_accounts' {
-      technology 'Supabase Postgres + pgvector'
+      #scale
+      technology 'Supabase Postgres 17 + pgvector 0.8 · 18 migrations'
       icon tech:postgresql
+      metadata {
+        vector-columns 'chunks.embedding, memories.embedding and semantic_query_cache.embedding are DIMENSIONLESS `vector`, so every project can pick its own model and size in one shared table'
+        vector-indexes 'six partial HNSW expression indexes on chunks (256/384/512/768/1024/1536), m=16, ef_construction=64. Nothing on memories: max_memories_per_project caps it at 2000 rows, so an exact scan is bounded and has perfect recall.'
+        cache-indexes 'semantic_query_cache gets btrees only, never HNSW: its lookup already filters on seven equality columns plus expires_at, and it is the highest-churn table in the schema'
+        migration-safety 'migration 0018 is additive, idempotent and RAISES NOTHING - every statement sits behind a to_regclass guard, an exception handler, or both, with query_canceled caught by name because PL/pgSQL excludes it from OTHERS. An unapplied or half-applied 0018 simply means every vector search keeps using the exact SQL.'
+        migration-inline-gate 'indexes are built inline only when chunks is under 5000 rows, and ANALYZE runs FIRST so the estimate is not the -1 "never analyzed" sentinel. A bigger table defers to a CREATE INDEX CONCURRENTLY runbook rather than holding a SHARE lock and blocking every ingest INSERT.'
+      }
     }
 
     files = containerStore 'File Storage' 'Raw uploads and converted markdown, private bucket' {
@@ -447,6 +498,12 @@ model {
   agentic -[internal]-> memory 'blends in relevant memories'
   explore -[internal]-> memory 'seeds on nearest memories'
 
+  // ── inside the backend: choosing exact vs approximate vector search ──────
+
+  retrieval -[internal]-> annPlanner 'exact or HNSW for this project?'
+  explore -[internal]-> annPlanner 'same gate, imported rather than duplicated'
+  annPlanner -[persist]-> db 'probes pgvector version, index validity and table size; sets the scan GUCs for this transaction only'
+
   // ── inside the backend: key resolution ───────────────────────────────────
 
   ingestion -[internal]-> resolver 'needs an embedding key'
@@ -491,7 +548,7 @@ deployment {
   }
 
   render = platform 'Render' {
-    technology 'Docker web services, render.yaml blueprints'
+    technology 'Docker web service, deployed from the backend/ directory, environment set in the dashboard'
     backendNode = instanceOf oreag.backend
     mcpRemoteNode = instanceOf oreag.mcpServer {
       title 'MCP Server (remote, multi-tenant)'
@@ -501,7 +558,23 @@ deployment {
   supabase = platform 'Supabase' {
     technology 'Managed Postgres, auth and object storage'
     identityNode = instanceOf oreag.identity
-    dbNode = instanceOf oreag.db
+    dbNode = instanceOf oreag.db {
+      description '''
+        Reached through Supavisor in TRANSACTION mode (port 6543), so a
+        connection is held only for the length of a transaction rather than
+        for the length of a session. Two consequences the code already
+        handles: named prepared statements are off (prepare_threshold=None),
+        because consecutive transactions can land on different backends; and
+        the client pool total must stay at or below the tenant Pool Size, or
+        waits queue invisibly inside Supavisor instead of fast-failing.
+
+        DDL is the exception. Session state - SET maintenance_work_mem,
+        advisory locks - only survives on the SESSION pooler (5432), which is
+        what MIGRATION_DATABASE_URL points at. CREATE INDEX CONCURRENTLY needs
+        more than that again: one statement per round trip, outside any
+        transaction block, i.e. psql against the direct host.
+      '''
+    }
     filesNode = instanceOf oreag.files
   }
 
@@ -659,6 +732,28 @@ views {
       oreag.backend.routers.publicApi,
       oreag.db,
       oreag.cache
+
+    autoLayout LeftRight 110 80
+  }
+
+  view scale {
+    title 'Level 3 — Structural scale (Phase 3)'
+    description '''
+      The four places the system was rebuilt to survive real load, and they
+      share one design rule: the fast path is an OPTIMISATION that may be
+      declined, never a dependency. The HNSW planner falls back to the exact
+      scan, the connection release has a kill switch, the fleet-wide lock
+      fails open to a per-process one, and the pool is sized to fast-fail
+      into a 503 instead of hanging.
+    '''
+
+    include oreag.backend.services.* where tag is #scale
+    include
+      oreag.backend,
+      oreag.backend.providers.registry,
+      oreag.db,
+      oreag.cache,
+      modelProviders
 
     autoLayout LeftRight 110 80
   }
@@ -979,6 +1074,7 @@ views {
     publicApi -> explore 'explore_brain(query, hops)'
 
     explore -> resolver 'resolves the embedding key'
+    explore -> annPlanner 'same exact-or-ANN decision as retrieval'
     explore -> db 'seeds: 6 nearest chunks and 6 nearest memories'
     explore <- db 'seed nodes'
 
@@ -991,6 +1087,119 @@ views {
     publicApi -> usage 'records a usage_events row'
     codingAgent <- mcpServer 'subgraph to reason over'
   }
+
+  dynamic view annFlow {
+    title 'Flows / 8 · Exact or approximate — how a vector search picks its path'
+    description '''
+      Four gates, cheapest first, and every one of them fails CLOSED to the
+      exact scan. The order matters: the local checks cost nothing, so a
+      closed gate never reaches the database.
+
+      Why not always use the index? Every vector statement filters by
+      project_id, and a global HNSW index knows nothing about project_id, so
+      it must post-filter. Recall then depends on the project's SHARE of
+      indexed rows, while the exact scan's cost depends on its SIZE. A small
+      project inside a big table therefore gets an exact scan that is both
+      fast AND perfect, where ANN would burn its candidate budget on other
+      tenants' rows.
+    '''
+    variant sequence
+
+    retrieval -> annPlanner 'ann_plan(project)'
+
+    alt {
+      when 'VECTOR_ANN_ENABLED is false' {
+        retrieval <- annPlanner 'None — the master kill switch, no index drop needed'
+      }
+      else 'gate 1 passed' {
+        alt {
+          when 'the project embeds at 3072, or any size with no index' {
+            retrieval <- annPlanner 'None — pgvector caps HNSW at 2000 dimensions'
+          }
+          else 'dimension is one of 256 · 384 · 512 · 768 · 1024 · 1536' {
+            annPlanner -> db 'probes: pgvector version, valid cosine HNSW indexes on chunks, reltuples'
+            annPlanner <- db 'capability, memoized 300 s per process'
+
+            alt {
+              when 'pgvector < 0.8, or no VALID index for this dimension' {
+                retrieval <- annPlanner 'None — a matching name is not evidence; the index must be on public.chunks, USING hnsw, vector_cosine_ops, indisvalid'
+              }
+              else 'server can do it' {
+                annPlanner -> db 'sums this project chunk_count, memoized on content_version'
+                annPlanner <- db 'chunks owned by this project'
+
+                alt {
+                  when 'under 20000 chunks, or under 2% of the table' {
+                    retrieval <- annPlanner 'None — exact is faster here, and perfect'
+                  }
+                  else 'big enough AND a large enough share' {
+                    annPlanner -> db 'SET LOCAL hnsw.iterative_scan=relaxed_order, ef_search=100, max_scan_tuples=40000'
+
+                    alt {
+                      when 'the settings applied' {
+                        retrieval <- annPlanner 'the dimension — build the ANN statement'
+                        retrieval -> db 'WHERE vector_dims(embedding) = d ORDER BY embedding::vector(d) <=> q'
+                        retrieval <- db 'same columns, same ordering, same 1 - distance similarity'
+                      }
+                      else 'the settings would not set' {
+                        retrieval <- annPlanner 'None — rolls back and takes the exact path'
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    retrieval -> retrieval 'either path feeds the same RRF fusion — nothing downstream can tell them apart'
+  }
+
+  dynamic view embeddingChangeFlow {
+    title 'Flows / 9 · Changing the embedding model or dimension'
+    description '''
+      Three verdicts, and only one of them is expensive. Matryoshka models
+      pack the important signal into the FRONT of the vector, so a prefix is
+      itself a valid embedding - which turns "use a smaller size" from a full
+      re-ingest into a single UPDATE. Growing is not symmetric: the discarded
+      tail is gone, so it costs the same as switching models outright.
+    '''
+    variant sequence
+
+    developer -> ui 'Settings → changes the embedding model or dimension'
+    ui -> dashboardApi 'PATCH /api/projects/{id}'
+    dashboardApi -> registry 'embedding_change_plan(old, new)'
+
+    alt {
+      when 'keep — nothing that affects vectors changed' {
+        dashboardApi <- registry 'keep'
+        dashboardApi -> db 'stores the setting, no vector touched'
+      }
+      else 'truncate — same model, SMALLER Matryoshka size' {
+        dashboardApi <- registry 'truncate'
+        dashboardApi -> db 'UPDATE chunks SET embedding = l2_normalize(subvector(embedding, 1, dims))'
+        dashboardApi -> db 'same UPDATE over memories, so both stay in one embedding space'
+        dashboardApi -> contentVersion 'bumps, rolling over every cache key'
+        developer <- ui 'done in seconds — zero provider calls, nothing re-read'
+      }
+      else 'reembed — different model, different provider, or a LARGER size' {
+        dashboardApi <- registry 'reembed'
+        dashboardApi -> db 'nulls memory vectors, then re-embeds them first'
+        dashboardApi -> db 'marks every file pending, so the ingest queue re-embeds its chunks'
+
+        loop 'per file, on a worker thread' {
+          ingestQueue -> ingestion 'claims and re-embeds'
+          ingestion -> registry 'embeds each batch at the new size'
+          registry -> modelProviders 'one call per batch'
+        }
+
+        developer <- ui 'progress in the Files tab — the whole corpus is re-embedded'
+      }
+    }
+  }
+
 }
 
 // ── Deployment ─────────────────────────────────────────────────────────────

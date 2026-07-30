@@ -410,6 +410,14 @@ def check_feature_surfaces(rep: Report) -> None:
         # user of the API has no way to observe them.
         ("usage metering", ["usage_events", "usage metering", "metering"], False),
         ("ingestion queue", ["skip locked", "queue"], False),
+        # Phase 3, structural scale. All three are invisible to an API caller -
+        # same request, same response, same similarity values - so none of them
+        # belongs on the user-facing docs page. They are load-bearing for anyone
+        # reasoning about capacity, though, so the architecture surfaces must
+        # keep describing them.
+        ("approximate vector search", ["hnsw"], False),
+        ("fleet-wide single-flight", ["single-flight", "single flight"], False),
+        ("connection release / pooling", ["transaction pooler", "release_connection"], False),
     ]
     for feature, markers, needs_user_docs in features:
         surfaces = dict(internal)
