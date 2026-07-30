@@ -26,10 +26,11 @@ class Settings(BaseSettings):
     # by default: with a transaction pooler idle client connections are cheap,
     # and NullPool adds a TLS+SCRAM handshake to every request and worker poll.
     db_use_null_pool: bool = False
-    # Kill switch for releasing the connection during provider I/O. The live
-    # database is unreachable, so this can't be validated against real Postgres
-    # first; false restores today's hold-for-the-whole-request behaviour with
-    # an env change and no redeploy.
+    # Kill switch for releasing the connection during provider I/O. Verified
+    # against live Supabase: with this on, a pooled connection goes checkedout
+    # 1 -> 0 across the provider call and the ORM objects stay usable after.
+    # False restores hold-for-the-whole-request behaviour with an env change
+    # and no redeploy.
     db_release_during_provider_io: bool = True
 
     supabase_url: str = ""
