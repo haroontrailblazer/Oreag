@@ -63,8 +63,9 @@ class Settings(BaseSettings):
     vercel_scope: str = ""      # team/account slug every preview hostname ends with
     # Gates the localhost / RFC1918 branch of the origin regex. True so local
     # and LAN dev keep working with no .env change (api.ts follows
-    # window.location.hostname, so LAN origins aren't in CORS_ORIGINS);
-    # render.yaml sets it to false.
+    # window.location.hostname, so LAN origins aren't in CORS_ORIGINS).
+    # Set CORS_ALLOW_LOCAL_NETWORK=false in the production environment, where
+    # no browser should ever be calling the API from a private address.
     cors_allow_local_network: bool = True
     # Access-Control-Expose-Headers (comma-separated). Retry-After is part of
     # the documented 429 contract but is unreadable by cross-origin JS today.

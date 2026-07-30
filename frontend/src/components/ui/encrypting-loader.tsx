@@ -27,18 +27,23 @@ export function EncryptingLoader({
   const [lines, setLines] = useState<string[]>(() =>
     Array.from({ length: rows }, code)
   )
-  const [tick, setTick] = useState(0)
-  const active = Math.floor(tick / 4) % rows
+  const [active, setActive] = useState(0)
 
+  // One timer drives both the highlighted row and its scrambling. Doing it in
+  // the interval callback rather than in a second effect keyed on a tick
+  // counter avoids a setState in an effect body, which cascades an extra
+  // render per frame (react-hooks/set-state-in-effect).
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 90)
+    let tick = 0
+    const id = setInterval(() => {
+      tick += 1
+      // Each row holds for 4 frames before the highlight moves on.
+      const row = Math.floor(tick / 4) % rows
+      setActive(row)
+      setLines((prev) => prev.map((l, i) => (i === row ? code() : l)))
+    }, 90)
     return () => clearInterval(id)
-  }, [])
-
-  // The highlighted row keeps scrambling while the others hold still.
-  useEffect(() => {
-    setLines((prev) => prev.map((l, i) => (i === active ? code() : l)))
-  }, [tick, active])
+  }, [rows])
 
   return (
     <div className="flex flex-col items-center gap-4 py-4">

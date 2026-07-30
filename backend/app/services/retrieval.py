@@ -125,7 +125,7 @@ class AnnCapability:
     """What the server can actually do, as of the last probe."""
 
     pgvector: tuple[int, int, int]
-    dimensions: frozenset[int]   # dimensions with a VALID hnsw index
+    dimensions: frozenset[int]   # dims with a VALID cosine hnsw index on chunks
     total_chunks: float          # pg_class.reltuples for public.chunks
 
 
@@ -137,6 +137,19 @@ NO_ANN = AnnCapability(pgvector=(0, 0, 0), dimensions=frozenset(), total_chunks=
 # server. `indisvalid` matters: a CREATE INDEX CONCURRENTLY that failed leaves
 # an index that is never used for reads but IS maintained on writes, and
 # treating it as absent is exactly right.
+#
+# A NAME is not evidence, so the row must survive three STRUCTURAL checks
+# before its name is read. `chunks_embedding_hnsw_1536_idx` sitting on another
+# table, built under a different access method, or built on a different
+# operator class all match the name pattern while being useless for
+# `embedding::vector(1536) <=> q`: the planner would ignore such an index and
+# the ANN path would be strictly SLOWER than today's exact scan (it also pays
+# the cast per row), and a non-cosine opclass would rank by a different
+# distance. So the index must be ON public.chunks, USING hnsw, with
+# `vector_cosine_ops` on its first key column. `indclass` is an oidvector and
+# is subscripted from 0; opclass names are unqualified, and `pg_am` has no
+# schema at all, so neither check cares where the extension was installed
+# (Supabase puts pgvector in `extensions`, not `public`).
 _CAPABILITY_SQL = text(
     """
     SELECT (SELECT extversion FROM pg_extension WHERE extname = 'vector')
@@ -145,9 +158,14 @@ _CAPABILITY_SQL = text(
               FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
               JOIN pg_index i ON i.indexrelid = c.oid
+              JOIN pg_am am ON am.oid = c.relam
+              JOIN pg_opclass op ON op.oid = i.indclass[0]
              WHERE n.nspname = 'public'
                AND strpos(c.relname::text, 'chunks_embedding_hnsw_') = 1
-               AND i.indisvalid) AS hnsw_indexes,
+               AND i.indisvalid
+               AND i.indrelid = to_regclass('public.chunks')
+               AND am.amname = 'hnsw'
+               AND op.opcname = 'vector_cosine_ops') AS hnsw_indexes,
            (SELECT c.reltuples FROM pg_class c
              WHERE c.oid = to_regclass('public.chunks')) AS chunk_reltuples
     """
@@ -252,6 +270,14 @@ def _parse_pgvector_version(raw) -> tuple[int, int, int]:
 
 
 def _indexed_dimensions(names) -> frozenset[int]:
+    """Read the dimension out of each index name the probe returned.
+
+    The name is only a LABEL here: _CAPABILITY_SQL has already proven every
+    name it hands over belongs to a valid cosine HNSW index on public.chunks,
+    so the one thing left that only the name carries is the dimension. An
+    unparseable or non-allowlisted name is still dropped - a dimension we would
+    not emit SQL for is a dimension we must not claim to have an index for.
+    """
     found = set()
     for name in names or ():
         match = _ANN_INDEX_RE.match(str(name))

@@ -14,9 +14,10 @@ On top of a backend:
 
   * ``QueryCache`` - CAG answer cache, keyed by project+model+top_k+content+
     question, with single-flight so simultaneous identical asks compute once.
-    On Redis that single-flight is fleet-wide (SET NX + a token-checked
-    release), so N app instances asking the same question compute once, not
-    once each; on the in-memory backend it stays per-process, as before.
+    On Redis that single-flight is fleet-wide (SET NX, with token-checked
+    renewal while the leader works and a token-checked release), so N app
+    instances asking the same question compute once, not once each; on the
+    in-memory backend it stays per-process, as before.
   * ``ConversationStore`` - server-side chat memory keyed by ``conversation_id``.
 """
 import json
@@ -123,6 +124,18 @@ end
 return 0
 """
 
+# Renewing the lock is the same shape and needs the same protection: a leader
+# whose generation outran the TTL must push out ITS OWN expiry, never the one
+# a newer leader has taken since. GET-then-PEXPIRE from Python would hand a
+# slow leader the power to keep a successor's lock alive, so the token check
+# runs inside Redis here too.
+_EXTEND_IF_MINE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('pexpire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
 
 class RedisBackend:
     """Same interface, backed by a redis client (injected, so it's testable).
@@ -163,8 +176,9 @@ class RedisBackend:
         pass
 
     # -- distributed single-flight (see _FlightLock) ------------------------
-    # Optional backend capability: a backend without these two methods simply
-    # has no fleet-wide layer, so the lock stays per-process.
+    # Optional backend capability: a backend without these methods simply has
+    # no fleet-wide layer, so the lock stays per-process. ``lock_extend`` is
+    # optional on top of that: without it a leader just can't renew.
 
     def lock_acquire(self, key: str, token: str, ttl_seconds: float):
         """Take the fleet-wide lock for ``key``, best-effort.
@@ -185,6 +199,26 @@ class RedisBackend:
             return UNAVAILABLE
         return bool(taken)
 
+    def lock_extend(self, key: str, token: str, ttl_seconds: float):
+        """Re-arm the lock's TTL, but only while it still carries ``token``.
+
+        Returns True when the extension landed, False when the lock is gone or
+        a NEWER holder owns it (this caller must stop renewing - it no longer
+        leads), and ``UNAVAILABLE`` when Redis itself failed, which is a blip
+        to retry rather than proof we lost the lock.
+        """
+        try:
+            extended = self._r.eval(
+                _EXTEND_IF_MINE, 1, key, token, max(int(ttl_seconds * 1000), 1)
+            )
+        except Exception as exc:
+            logger.warning(
+                "Redis lock extend failed (%s) - the lock may expire mid-flight",
+                type(exc).__name__,
+            )
+            return UNAVAILABLE
+        return bool(extended)
+
     def lock_release(self, key: str, token: str) -> None:
         """Drop the lock, but only while it still carries ``token``."""
         try:
@@ -197,6 +231,38 @@ class RedisBackend:
                 "Redis lock release failed (%s) - the lock will expire by TTL",
                 type(exc).__name__,
             )
+
+
+# How long ``release`` waits for the heartbeat thread to notice it should stop.
+# Only a beat already inside a Redis call can need it, and the client's socket
+# timeout is ~1s (see make_backend).
+_HEARTBEAT_JOIN_SECONDS = 2.0
+
+# Hard ceiling on how long ONE flight may keep renewing its lock, as a multiple
+# of the TTL. The heartbeat is what stops a merely slow leader from dropping its
+# lock mid-generation - but on its own it also removes the only backstop a
+# distributed lock has: a leader that never releases (an exception on a path
+# that does not reach its release, a request killed mid-flight) would hold the
+# FLEET-WIDE lock forever, because the TTL can no longer clear a key something
+# is still re-arming. The lease puts that backstop back: once it runs out the
+# beat gives up, and the lock expires by TTL exactly as it did before the
+# heartbeat existed. 5 TTLs (10 minutes at the 120s default) is an order of
+# magnitude longer than the slowest legitimate flight - an agentic query is
+# minutes at worst, and every HTTP client between here and the browser has given
+# up long before - and it is not forever.
+_MAX_LEASE_TTLS = 5
+
+# How long a waiter keeps following a leader it can no longer see, once the lock
+# store has gone dark mid-flight. Nothing can prove who leads while the store is
+# unreachable, so this is a choice between two degradations, not between right
+# and wrong: lead without fleet-wide exclusion (duplicate work), or follow
+# somebody nobody can confirm is there (a stall). A short grace absorbs the
+# common shape - a reconnect or failover of a second or two, after which the
+# store itself says who leads - and beyond it we degrade to per-process
+# single-flight rather than park a request for its whole budget. Sized above the
+# client's ~1s socket timeout so a hung (not refused) store gets more than one
+# attempt inside the grace.
+_LOCK_OUTAGE_GRACE_SECONDS = 1.5
 
 
 class _FlightLock:
@@ -213,6 +279,31 @@ class _FlightLock:
     to Redis for that key. Every remote hop is best-effort - a Redis outage
     degrades to exactly the old per-process single-flight instead of taking the
     query path down with it.
+
+    A leader keeps its own lock alive for as long as it works: a daemon
+    heartbeat re-arms the TTL (token-checked, so it can only ever extend OUR
+    lock) from ``acquire`` until ``release`` stops it. So the TTL bounds a
+    leader that DIED, not one that is merely slow - a generation longer than
+    the TTL no longer drops its lock mid-flight and elects a second leader
+    onto the same answer. That renewal is itself bounded by a LEASE
+    (``_MAX_LEASE_TTLS``): a flight that never releases stops being renewed and
+    the lock expires by TTL, so a leaked leader cannot wedge the fleet forever.
+
+    What an outage of the lock store costs is dedup, never the answer - and the
+    honest limit of that is worth stating, because a distributed lock cannot
+    exclude anyone while the thing it locks in is unreachable:
+
+      * while the store has never answered THIS PROCESS, leading is the only
+        option (nobody can be followed, and an unreachable lock store must not
+        fail a query);
+      * once it has answered, an outage may be hiding a leader elected while it
+        was healthy, so a waiter keeps following through
+        ``_LOCK_OUTAGE_GRACE_SECONDS`` - long enough for a blip to heal and for
+        the store to name the leader - and only then leads anyway;
+      * so two instances CAN both lead while the store is down. That is
+        per-process single-flight, exactly the pre-Redis behaviour, and it is a
+        deliberate trade against stalling every request for its whole budget on
+        a leader nobody can see.
     """
 
     def __init__(
@@ -222,14 +313,41 @@ class _FlightLock:
         backend=None,
         ttl_seconds: float = 120.0,
         poll_seconds: float = 0.05,
+        heartbeat_seconds: float | None = None,
+        max_lease_seconds: float | None = None,
+        outage_grace_seconds: float = _LOCK_OUTAGE_GRACE_SECONDS,
+        store_seen: threading.Event | None = None,
     ):
         self._local = local
         self._key = key
         self._acquire_remote = getattr(backend, "lock_acquire", None)
         self._release_remote = getattr(backend, "lock_release", None)
+        self._extend_remote = getattr(backend, "lock_extend", None)
         self._ttl = ttl_seconds
         self._poll = poll_seconds
+        # Renew at a third of the TTL: two beats can be lost to a Redis blip
+        # before the lock a live leader still holds could actually expire. The
+        # floor keeps a tiny TTL from turning the beat into a busy loop.
+        self._heartbeat_seconds = max(
+            ttl_seconds / 3.0 if heartbeat_seconds is None else heartbeat_seconds, 0.01
+        )
+        self._max_lease = max(
+            ttl_seconds * _MAX_LEASE_TTLS
+            if max_lease_seconds is None
+            else max_lease_seconds,
+            0.0,
+        )
+        self._outage_grace = outage_grace_seconds
+        # "Has the lock store ever answered?" is a property of the STORE, not of
+        # one request's lock object, so it is shared by every lock a QueryCache
+        # hands out (see flight_lock) and is sticky once set. A per-acquisition
+        # flag would say nothing about whether a leader could have been elected
+        # while the store was healthy - which is the only question that matters
+        # here. Own Event when unshared, so a bare _FlightLock still works.
+        self._store_seen = store_seen if store_seen is not None else threading.Event()
         self._token: str | None = None
+        self._heartbeat_thread: threading.Thread | None = None
+        self._heartbeat_stop: threading.Event | None = None
 
     def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
         """True when this caller LEADS the flight for the key.
@@ -247,6 +365,7 @@ class _FlightLock:
         if not got_local:
             return False
         if self._lead(blocking, deadline):
+            self._start_heartbeat()
             return True
         # Another instance leads. Hand the local slot back so this process's
         # other waiters queue behind that leader instead of behind us.
@@ -257,29 +376,128 @@ class _FlightLock:
         if self._acquire_remote is None:
             return True  # no fleet-wide layer: the in-process lock IS the flight
         token = uuid.uuid4().hex  # unique per acquisition - see lock_release
-        # An unbounded `with` wait must not park a request thread forever: a
-        # lock still held past its own TTL is stale by definition, so we stop
-        # waiting and lead anyway.
+        # An unbounded `with` wait must not park a request thread forever, so
+        # one TTL is its cap and it leads once that runs out. Note this is a
+        # WAIT cap, not proof the lock went stale: a live leader heartbeats
+        # past its TTL, so that fallback trades dedup for not hanging. Every
+        # caller that has a budget of its own (both of query.py's, and
+        # get_or_compute) passes a deadline and falls through as a follower
+        # instead.
         limit = deadline if deadline is not None else time.monotonic() + self._ttl
         lead_on_expiry = deadline is None
+        outage_started: float | None = None  # when the CURRENT dark spell began
         while True:
             outcome = self._acquire_remote(self._key, token, self._ttl)
-            if outcome is UNAVAILABLE:
-                return True  # Redis down - fail open onto the in-process lock
-            if outcome:
-                self._token = token
-                return True
+            if outcome is not UNAVAILABLE:
+                self._store_seen.set()  # sticky, and shared across this backend
+                outage_started = None
+                if outcome:
+                    self._token = token
+                    return True
+            else:
+                # The store is dark. It may be hiding a leader elected while it
+                # was healthy, so follow for a grace in case it comes back and
+                # says so - but no longer, because nothing here can ever prove
+                # who leads while it stays dark. See the class docstring for
+                # what this deliberately does NOT guarantee.
+                now = time.monotonic()
+                if outage_started is None:
+                    outage_started = now
+                if (
+                    not self._store_seen.is_set()
+                    or now - outage_started >= self._outage_grace
+                ):
+                    return self._lead_degraded()
             if not blocking:
-                return False
+                # No budget to wait with. A dark store must not turn a
+                # non-blocking caller into a follower: it would then sit out a
+                # whole follower budget (query.py's streaming path waits two
+                # minutes) on a leader nobody can confirm exists.
+                return self._lead_degraded() if outcome is UNAVAILABLE else False
             remaining = limit - time.monotonic()
             if remaining <= 0:
                 return lead_on_expiry
             time.sleep(min(self._poll, remaining))
 
+    def _lead_degraded(self) -> bool:
+        """Lead on the in-process lock alone, the remote store being unreachable.
+
+        No token is set, so there is no remote lock to renew (no heartbeat) and
+        none to release. Another instance may be leading the same key: with the
+        store down that is per-process single-flight, which is what this layer
+        degrades to rather than failing the query.
+        """
+        logger.warning(
+            "Flight lock store unreachable for %s - leading on the in-process "
+            "lock alone; another instance may be leading the same key",
+            self._key,
+        )
+        return True
+
+    def _start_heartbeat(self) -> None:
+        """Keep this leader's remote lock alive while it computes.
+
+        No token means there is no remote lock of ours to renew (no fleet-wide
+        layer, or we led by failing open), so there is nothing to beat for.
+        """
+        if self._token is None or self._extend_remote is None:
+            return
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=self._heartbeat,
+            args=(self._token, stop, time.monotonic() + self._max_lease),
+            name="flight-lock-heartbeat",
+            daemon=True,  # a leaked beat must never hold the process open
+        )
+        self._heartbeat_stop = stop
+        self._heartbeat_thread = thread
+        thread.start()
+
+    def _heartbeat(self, token: str, stop: threading.Event, lease_until: float) -> None:
+        while not stop.wait(self._heartbeat_seconds):
+            if time.monotonic() >= lease_until:
+                # The lease is the TTL's replacement as the backstop: a flight
+                # this long has either leaked (an acquire whose release never
+                # ran) or is beyond anything a caller is still waiting for.
+                # Stop renewing and the lock clears itself one TTL later, as it
+                # did before the heartbeat existed.
+                logger.error(
+                    "Flight lock %s was never released within its %.0fs lease - "
+                    "stopping the heartbeat so the TTL can clear it",
+                    self._key,
+                    self._max_lease,
+                )
+                return
+            outcome = self._extend_remote(self._key, token, self._ttl)
+            if outcome is UNAVAILABLE:
+                continue  # a blip, not a verdict - try again next beat
+            if not outcome:
+                # The key is gone or a NEWER leader owns it: our token can
+                # never come back, so further beats could only be no-ops.
+                logger.warning(
+                    "Flight lock %s is no longer ours - stopping the heartbeat",
+                    self._key,
+                )
+                return
+
+    def _stop_heartbeat(self) -> None:
+        stop, thread = self._heartbeat_stop, self._heartbeat_thread
+        self._heartbeat_stop = self._heartbeat_thread = None
+        if stop is not None:
+            stop.set()  # deterministic: the beat exits at its next wait
+        if thread is not None and thread is not threading.current_thread():
+            # Bounded join: a beat parked in a hung Redis call returns within
+            # the client's socket timeout, and it is a daemon either way, so
+            # release never becomes the thing that stalls a request.
+            thread.join(timeout=_HEARTBEAT_JOIN_SECONDS)
+
     def release(self) -> None:
         # Clear the token FIRST: a double release must never reach Redis with a
-        # token that a newer leader could still be holding.
+        # token that a newer leader could still be holding. Stop the heartbeat
+        # before the release for the same reason - no beat may outlive the
+        # flight it was renewing.
         token, self._token = self._token, None
+        self._stop_heartbeat()
         if token is not None and self._release_remote is not None:
             self._release_remote(self._key, token)
         self._local.release()
@@ -325,11 +543,17 @@ class QueryCache:
     ``deserialize`` can be overridden to round-trip richer objects (e.g. an
     ``AgenticResult``).
 
-    ``flight_ttl_seconds`` bounds a lock a crashed leader left behind: long
-    enough to cover a slow leader (retrieval plus a full generation) so the
-    lock can't expire mid-flight and elect a second leader, short enough that
-    it can't outlast a follower's own wait budget. ``flight_wait_seconds`` is
-    how long ``get_or_compute``'s followers wait for the leader.
+    ``flight_ttl_seconds`` bounds a lock whose leader stopped renewing it -
+    i.e. one that CRASHED - so the flight can't wedge for the fleet; it is not
+    a budget a live leader has to finish inside, because while a leader holds
+    the flight it heartbeats its lock forward (see ``_FlightLock``). A slow
+    generation therefore keeps its lock instead of silently electing a second
+    leader onto the same answer. ``flight_max_lease_seconds`` caps that renewal
+    so a flight that never releases still frees the lock (one TTL after the
+    lease runs out) instead of holding it for the life of the process; it
+    defaults to ``_MAX_LEASE_TTLS`` times the flight TTL. ``flight_wait_seconds``
+    is how long ``get_or_compute``'s followers wait for the leader before giving
+    up and computing on their own.
     """
 
     def __init__(
@@ -340,6 +564,7 @@ class QueryCache:
         deserialize: Callable[[str], Any] = json.loads,
         flight_ttl_seconds: float = 120.0,
         flight_wait_seconds: float = 30.0,
+        flight_max_lease_seconds: float | None = None,
     ):
         self._backend = backend
         self._ttl = ttl_seconds
@@ -347,8 +572,13 @@ class QueryCache:
         self._deserialize = deserialize
         self._flight_ttl = flight_ttl_seconds
         self._flight_wait = flight_wait_seconds
+        self._flight_max_lease = flight_max_lease_seconds
         self._key_locks: dict[str, threading.Lock] = {}
         self._key_locks_guard = threading.Lock()
+        # Shared by every flight lock over this backend: whether the lock store
+        # has ever answered is a fact about the STORE, and a lock built fresh
+        # per request must not keep forgetting it (see _FlightLock._lead).
+        self._flight_store_seen = threading.Event()
 
     @staticmethod
     def _namespaced(key: str) -> str:
@@ -395,6 +625,8 @@ class QueryCache:
             self._flight_namespaced(key),
             backend=self._backend,
             ttl_seconds=self._flight_ttl,
+            max_lease_seconds=self._flight_max_lease,
+            store_seen=self._flight_store_seen,
         )
 
     def get_or_compute(self, key: str, compute: Callable[[], Any]) -> Any:

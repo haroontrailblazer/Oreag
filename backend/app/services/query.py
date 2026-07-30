@@ -156,6 +156,16 @@ def run_query(
 
     top_k = min(top_k_override or project.top_k, 20)
     started = time.perf_counter()
+    # Everything the tail reads off the Project, read NOW while it is certainly
+    # loaded - same hazard as the streaming twin: retrieve_fn's memory-blend
+    # recovery rolls back, and a rollback expires every persistent instance
+    # regardless of expire_on_commit=False (pinned in TestReleaseSemantics).
+    # An expired read down in the tail would emit a refresh SELECT, i.e. a pool
+    # checkout that can time out after the answer is already paid for, losing a
+    # finished answer to a 500.
+    project_id = project.id
+    project_key = str(project_id)
+    model = f"{project.llm_provider}/{project.llm_model}"
 
     embed_memo, embed_query, _llm = _request_helpers(db, project)
 
@@ -201,7 +211,7 @@ def run_query(
                 logger.exception(
                     "Memory blending failed for project %s; answering from "
                     "documents only",
-                    project.id,
+                    project_id,
                 )
                 db.rollback()
         return sources
@@ -210,7 +220,7 @@ def run_query(
     # "summarize that" into a standalone question before retrieval. Empty history
     # (or no conversation) leaves the question untouched and costs nothing.
     history = (
-        _conversations.get_history(str(project.id), conversation_id)
+        _conversations.get_history(project_key, conversation_id)
         if conversation_id
         else []
     )
@@ -319,17 +329,30 @@ def run_query(
         raise
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    db.add(
-        QueryLog(
-            project_id=project.id,
-            api_key_id=api_key_id,
-            question=question,
-            top_k=top_k,
-            latency_ms=latency_ms,
-            cache_layer=cache_layer,
+    # Guarded exactly like the streaming twin, and for the same reason: the
+    # answer is generated and already paid for by here, and this commit is a
+    # pool CHECKOUT - generation.generate_answer released the connection before
+    # the LLM call, so the session holds none and has to take one back under
+    # db_pool_timeout. Losing an analytics row is the cheap failure; turning a
+    # finished answer into a 503 from main.py's PoolTimeoutError handler is not.
+    try:
+        db.add(
+            QueryLog(
+                project_id=project_id,
+                api_key_id=api_key_id,
+                question=question,
+                top_k=top_k,
+                latency_ms=latency_ms,
+                cache_layer=cache_layer,
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except Exception:
+        logger.warning(
+            "Query log write failed for project %s - the answer is still served",
+            project_id,
+        )
+        db.rollback()
 
     answer = (
         agentic.clarification_message(result.clarification_questions)
@@ -340,12 +363,12 @@ def run_query(
     # Remember this turn (the original question the user typed, plus the answer)
     # so the next follow-up has context.
     if conversation_id:
-        _conversations.append_turn(str(project.id), conversation_id, question, answer)
+        _conversations.append_turn(project_key, conversation_id, question, answer)
 
     return QueryResponse(
         answer=answer,
         sources=[SourceChunk(**s) for s in result.sources],
-        model=f"{project.llm_provider}/{project.llm_model}",
+        model=model,
         latency_ms=latency_ms,
         depth=result.depth,
         sub_queries=result.sub_queries,
@@ -382,9 +405,32 @@ def run_query_stream(
       * ``{"type": "error", "detail": ...}`` - a failure the client should show
 
     Errors are yielded (not raised): a streaming response has already sent its
-    headers, so mid-stream failures cannot become HTTP status codes.
+    headers, so mid-stream failures cannot become HTTP status codes. That
+    applies from the FIRST statement on - sse_response builds this generator
+    lazily, so Starlette has emitted 200 + text/event-stream before anything
+    below runs, and an escaping exception reaches the client as a truncated
+    body, which an EventSource retries against the same broken dependency.
     """
+    started = time.perf_counter()
+    # Everything the tail reads off the Project, read NOW while it is certainly
+    # loaded. The tail runs AFTER the query-log write, and that write's failure
+    # branch rolls back - which expires every persistent instance regardless of
+    # expire_on_commit=False (pinned in TestReleaseSemantics). retrieve_fn's
+    # memory-blend recovery rolls back too. An expired attribute read down there
+    # would emit a refresh SELECT, i.e. a pool checkout that can time out after
+    # a complete answer has already been streamed, turning a good answer into a
+    # failure. Guarding the tail would still lose the done frame, so the values
+    # are captured instead and the tail touches no ORM attribute at all.
+    # The capture itself is inside the guard: on a Session whose instances are
+    # already expired, reading ANY mapped attribute is the refresh SELECT this
+    # is protecting against, project.id included.
+    project_id = None
     try:
+        project_id = project.id
+        project_key = str(project_id)
+        model = f"{project.llm_provider}/{project.llm_model}"
+        signature = f"v{project.content_version}"
+        top_k = min(top_k_override or project.top_k, 20)
         has_chunks = bool(
             db.scalar(select(Chunk.id).where(Chunk.project_id == project.id).limit(1))
         )
@@ -403,15 +449,22 @@ def run_query_stream(
             "detail": "Server is at capacity - please retry shortly",
         }
         return
+    except Exception:
+        # PoolTimeoutError is only ONE of the ways this can fail: a failed
+        # CONNECT raises OperationalError (see app/db.py), which is exactly what
+        # pool_pre_ping produces when the pooler restarts under us - and the ORM
+        # reads above can emit a refresh SELECT of their own. None of it may
+        # escape past the headers, so everything the pre-flight touches is
+        # covered, not just the checkout.
+        logger.exception("Streaming query pre-flight failed for project %s", project_id)
+        yield {"type": "error", "detail": "The query failed. Please try again."}
+        return
     if not has_chunks and not has_memories:
         yield {
             "type": "error",
             "detail": "Project has no indexed content yet - upload files (or save memories) and wait for indexing",
         }
         return
-
-    top_k = min(top_k_override or project.top_k, 20)
-    started = time.perf_counter()
 
     embed_memo, embed_query, _llm = _request_helpers(db, project)
 
@@ -446,17 +499,18 @@ def run_query_stream(
                 logger.exception(
                     "Memory blending failed for project %s; answering from "
                     "documents only",
-                    project.id,
+                    project_id,
                 )
                 db.rollback()
         return sources
 
     history = (
-        _conversations.get_history(str(project.id), conversation_id)
+        _conversations.get_history(project_key, conversation_id)
         if conversation_id
         else []
     )
-    signature = f"v{project.content_version}"
+    # signature was captured with the other Project reads in the guarded
+    # pre-flight above - nothing between here and there writes content_version.
     cache_layer: str | None = None
     cache_similarity: float | None = None
     semantic_vector: list[float] | None = None
@@ -506,11 +560,11 @@ def run_query_stream(
         if result is None and key is not None:
             flight = _cache.flight_lock(key)
             if flight.acquire(blocking=False):
+                # NOTHING between this line and the try below: acquiring the
+                # flight is the last statement outside the finally that releases
+                # it, so no failure in between can leak the FLEET-WIDE lock.
+                # (The re-read that used to sit here is the first thing inside.)
                 lead_lock = flight
-                refreshed = _cache.get(key)  # leader may have JUST finished
-                if refreshed is not None:
-                    result = refreshed
-                    cache_layer = "l1"
             else:
                 # Follower: this waits on the leader's provider I/O for up to
                 # two minutes. Hand the connection back first - see run_query.
@@ -525,6 +579,11 @@ def run_query_stream(
                 # unlocked (correctness over dedup in the degraded case).
 
         try:
+            if lead_lock is not None:
+                refreshed = _cache.get(key)  # leader may have JUST finished
+                if refreshed is not None:
+                    result = refreshed
+                    cache_layer = "l1"
             if result is not None:
                 text = (
                     agentic.clarification_message(result.clarification_questions)
@@ -620,7 +679,7 @@ def run_query_stream(
                 "code": 429,
             }
             return
-        logger.exception("Streaming query failed for project %s", project.id)
+        logger.exception("Streaming query failed for project %s", project_id)
         yield {"type": "error", "detail": "The query failed. Please try again."}
         return
 
@@ -628,7 +687,7 @@ def run_query_stream(
     try:
         db.add(
             QueryLog(
-                project_id=project.id,
+                project_id=project_id,
                 api_key_id=api_key_id,
                 question=question,
                 top_k=top_k,
@@ -638,6 +697,10 @@ def run_query_stream(
         )
         db.commit()
     except Exception:
+        logger.warning(
+            "Query log write failed for project %s - the answer is still streamed",
+            project_id,
+        )
         db.rollback()
 
     answer = (
@@ -646,14 +709,14 @@ def run_query_stream(
         else final.answer
     )
     if conversation_id:
-        _conversations.append_turn(str(project.id), conversation_id, question, answer)
+        _conversations.append_turn(project_key, conversation_id, question, answer)
 
     yield {
         "type": "done",
         "response": {
             "answer": answer,
             "sources": [dict(s) for s in final.sources],
-            "model": f"{project.llm_provider}/{project.llm_model}",
+            "model": model,
             "latency_ms": latency_ms,
             "depth": final.depth,
             "sub_queries": final.sub_queries,

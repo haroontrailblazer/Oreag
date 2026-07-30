@@ -3,6 +3,7 @@ import logging
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..models import Project
 from ..providers import resolver
 from ..providers.registry import get_llm
@@ -144,6 +145,15 @@ def release_connection(db: Session | None) -> None:
     the connection back must never fail the answer.
     """
     if db is None:  # standalone callers may generate without a session
+        return
+    if not settings.db_release_during_provider_io:
+        # The kill switch. Guarding here rather than at each call site means
+        # every release point is covered by the one flag, and it cannot drift
+        # as call sites are added. Releasing has not been exercised against
+        # real Postgres (the database was unreachable when this shipped), so
+        # DB_RELEASE_DURING_PROVIDER_IO=false must genuinely restore the old
+        # hold-for-the-whole-request behaviour with an env change and a
+        # restart, no redeploy.
         return
     try:
         db.commit()

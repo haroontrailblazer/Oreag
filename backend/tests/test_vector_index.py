@@ -9,7 +9,10 @@ things ARE testable without one, and they are the two that actually break:
     name. Get one of the three wrong and the query silently falls back to a seq
     scan that is SLOWER than today (it now also pays the cast per row) while
     still returning correct rows - so no test that only checks results would
-    ever catch it. These assertions are that check.
+    ever catch it. These assertions are that check. The capability probe is the
+    same check from the other side: without a server all we can assert is that
+    it still ASKS for a valid cosine HNSW index on public.chunks instead of
+    trusting an index NAME.
 
   * THE GATE FAILING CLOSED. Every unexpected condition - no pgvector, an old
     pgvector, a missing/invalid index, an unknown dimension, a probe error, a
@@ -97,6 +100,11 @@ class _FakeSession:
     ``capable=False`` models everything the gate has to survive - most
     importantly a session that cannot hand out a Core connection at all, which
     is what every pre-existing test fake looks like.
+
+    ``indexes`` is what the probe RETURNED, i.e. names that already passed its
+    structural filter (right table, right access method, right opclass). That
+    filter lives in SQL and cannot be exercised from here at all - see
+    TestCapabilityProbeSql for what is assertable without a server.
     """
 
     def __init__(
@@ -353,6 +361,70 @@ class TestDimensionAllowlist:
         because it is part of a TYPE and cannot be a bind parameter."""
         for hostile in ("1536); drop table chunks --", "1536", 1536.0, True):
             assert retrieval.ann_semantic_sql(hostile) is None
+
+
+class TestCapabilityProbeSql:
+    """TEXT-LEVEL checks on the probe statement - nothing here runs any SQL.
+
+    These cannot prove the catalog query returns the right rows; only a live
+    server can, and whether the planner then picks the index belongs in a
+    verify_* harness. What they CAN pin is that the statement still asks the
+    questions that make an index NAME trustworthy. The probe used to trust the
+    name alone, so a `chunks_embedding_hnsw_1536_idx` sitting on a DIFFERENT
+    table, built under a different access method, or built on a different
+    operator class would have opened the ANN path onto an index the planner
+    cannot use - slower than the exact scan it replaced (the rewritten SQL also
+    pays a per-row cast), and with the wrong opclass a different ranking.
+    """
+
+    PROBE = " ".join(str(retrieval._CAPABILITY_SQL).split())
+
+    def test_probe_text_joins_the_index_catalogs(self):
+        for catalog in ("pg_class", "pg_namespace", "pg_index", "pg_am", "pg_opclass"):
+            assert catalog in self.PROBE
+        assert "JOIN pg_index i ON i.indexrelid = c.oid" in self.PROBE
+        assert "JOIN pg_am am ON am.oid = c.relam" in self.PROBE
+        # indclass is an oidvector, which is subscripted from 0 - [1] would
+        # read the SECOND key column and match nothing on a one-column index
+        assert "JOIN pg_opclass op ON op.oid = i.indclass[0]" in self.PROBE
+
+    def test_probe_text_still_requires_indisvalid(self):
+        # a failed CREATE INDEX CONCURRENTLY leaves an index that is never used
+        # for reads but IS maintained on writes: treat it as absent
+        assert "i.indisvalid" in self.PROBE
+
+    def test_probe_text_pins_the_table(self):
+        # a same-named index on another table is not an index on chunks
+        assert "i.indrelid = to_regclass('public.chunks')" in self.PROBE
+        # to_regclass returns NULL instead of raising when the table is absent,
+        # so the comparison yields no rows rather than failing the statement
+        assert "i.indrelid = 'public.chunks'::regclass" not in self.PROBE
+
+    def test_probe_text_pins_the_access_method_and_the_opclass(self):
+        assert "am.amname = 'hnsw'" in self.PROBE
+        assert "op.opcname = 'vector_cosine_ops'" in self.PROBE
+        # unqualified catalog names on purpose: pg_am has no schema, and an
+        # opclass name is schema-independent, so neither check breaks when
+        # pgvector lives in `extensions` rather than `public`
+        assert "extensions." not in self.PROBE
+
+    def test_probe_text_is_still_one_cheap_statement(self):
+        # one round trip answers all three questions, and it stays a single
+        # statement so the SAVEPOINT around it covers the whole probe
+        assert ";" not in self.PROBE
+        assert _bind_params(self.PROBE) == set()
+        assert "extversion" in self.PROBE
+        assert "reltuples" in self.PROBE
+        assert retrieval.ANN_INDEX_PREFIX in self.PROBE
+
+    def test_dimensions_are_still_read_from_the_name(self):
+        """The SQL does the structural filtering; the name carries the dim."""
+        names = [
+            "chunks_embedding_hnsw_768_idx",
+            "chunks_embedding_hnsw_99_idx",     # not an allowlisted dimension
+            "chunks_embedding_hnsw_idx",        # no dimension at all
+        ]
+        assert retrieval._indexed_dimensions(names) == {768}
 
 
 class TestCapabilityProbe:
@@ -663,6 +735,21 @@ class TestMigrationIsDefensive:
         assert retrieval.ANN_INDEX_PREFIX in sql
         assert "vector_dims(embedding) = %s" in sql
 
+    def test_built_indexes_match_the_structure_the_probe_demands(self):
+        # The probe no longer trusts the NAME: it also requires the hnsw access
+        # method and vector_cosine_ops. Text-level on both sides, but if the two
+        # ever disagree the gate silently never opens, which no other test here
+        # would notice. (Read from the raw file: _executable() blanks string
+        # literals, and these CREATE INDEXes are built inside format() strings.)
+        sql = self._sql()
+        assert (
+            "on public.chunks using hnsw ((embedding::vector(%s)) vector_cosine_ops)"
+            in sql
+        )
+        probe = " ".join(str(retrieval._CAPABILITY_SQL).split())
+        assert "am.amname = 'hnsw'" in probe
+        assert "op.opcname = 'vector_cosine_ops'" in probe
+
     def test_semantic_query_cache_gets_btrees_not_hnsw(self):
         body = self._executable()
         assert "semantic_query_cache_scope_idx" in body
@@ -675,3 +762,90 @@ class TestMigrationIsDefensive:
         assert not re.search(
             r"create index[^;]*\bon\s+\S*memories", self._executable(), re.I
         )
+
+    def test_a_cancelled_build_stops_the_block_it_is_in(self):
+        """A caught query_canceled leaves NO armed statement_timeout behind.
+
+        statement_timeout is armed once per top-level protocol message; when it
+        fires, ProcessInterrupts consumes it, and PL/pgSQL catching the 57014
+        does not re-arm anything until the next message. So any later build in
+        the same DO block runs UNBOUNDED - and both of these hold a ShareLock on
+        a table the running system writes to (the ingest queue, the cache
+        sweep). The operator Ctrl-C meant to stop that would be swallowed by the
+        same handler. Both blocks therefore stop on a cancel.
+        """
+        blocks = re.findall(r"do \$\$(.*?)\$\$;", self._executable(), re.S | re.I)
+        assert len(blocks) == 2  # chunks HNSW, then the two cache btrees
+        for block in blocks:
+            assert "when query_canceled then" in block
+            assert "cancelled := true" in block
+            # ...and the stop itself is a plain statement in the block body, not
+            # something the handler has to get right: exit for the loop, return
+            # for the straight-line block.
+            assert re.search(r"exit when cancelled|if cancelled then", block), block
+
+
+class TestTheMigrationRunnerSurfacesNotices:
+    """0018 is written so that NOTHING raises: every skipped index degrades to a
+    RAISE NOTICE naming what was skipped and pointing at the runbook. psycopg3
+    installs its own notice processor over libpq's stderr default, and that one
+    DISCARDS every notice while no handler is registered - so a runner that
+    registers none turns the whole design into a silent success, printing
+    "applied 0018..." and "OK" for a run that created zero indexes."""
+
+    @staticmethod
+    def _source():
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parent / "apply_migrations.py").read_text(
+            encoding="utf-8"
+        )
+
+    @staticmethod
+    def _tree(source):
+        import ast
+
+        return ast.parse(source)
+
+    def test_a_notice_handler_is_registered_on_the_connection(self):
+        import ast
+
+        calls = [
+            node
+            for node in ast.walk(self._tree(self._source()))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_notice_handler"
+        ]
+        assert len(calls) == 1
+        owner = calls[0].func.value
+        assert isinstance(owner, ast.Name) and owner.id == "conn"
+
+    def test_the_handler_prints_the_severity_and_the_message(self, capsys):
+        # exec the handler alone: importing the module would try to connect.
+        import ast
+
+        source = self._source()
+        fn = next(
+            node
+            for node in self._tree(source).body
+            if isinstance(node, ast.FunctionDef) and node.name == "print_notice"
+        )
+        scope: dict = {"current_file": ["0018_hnsw_vector_indexes.sql"], "notices": []}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "<handler>", "exec"), scope)
+
+        class _Diagnostic:
+            severity_nonlocalized = "NOTICE"
+            severity = "NOTICE"
+            message_primary = (
+                "0018: public.semantic_query_cache does not exist "
+                "(migration 0010 has not been applied here); no cache index created."
+            )
+
+        scope["print_notice"](_Diagnostic())
+
+        printed = capsys.readouterr().out
+        assert "no cache index created" in printed  # the operator can see it...
+        assert "NOTICE" in printed
+        assert "0018_hnsw_vector_indexes.sql" in printed  # ...and which file said so
+        assert len(scope["notices"]) == 1  # counted, so the OK line can say so

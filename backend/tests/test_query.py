@@ -341,6 +341,342 @@ class TestRunQueryStream:
         ]
 
 
+class ExpiredAfterRollback:
+    """A Project that behaves like a persistent ORM instance after a rollback.
+
+    ``Session.rollback()`` expires every persistent instance regardless of
+    expire_on_commit=False - pinned right below in
+    ``TestReleaseSemantics::test_rollback_expires_loaded_objects_but_the_release_hides_it``.
+    The next read of an expired attribute is therefore a refresh SELECT, i.e. a
+    pool checkout, which under a saturated pool times out. Every mapped
+    attribute read after ``expire()`` raises exactly that here, so a test fails
+    loudly if any code path reads the Project once it has been expired.
+    """
+
+    def __init__(self, project):
+        self._expired = False
+        self._project = project
+
+    def expire(self):
+        self._expired = True
+
+    def __getattr__(self, name):
+        # Only reached for names that are not on the instance or the class -
+        # i.e. the mapped columns, which are what a rollback expires.
+        if self._expired:
+            raise sa.exc.TimeoutError(
+                "QueuePool limit of size 5 overflow 10 reached, connection timed out"
+            )
+        return getattr(self._project, name)
+
+
+class ExpiringRollbackDB(FakeDB):
+    """FakeDB whose rollback expires the loaded Project, like a real Session."""
+
+    def __init__(self, scalars, project):
+        super().__init__(scalars)
+        self.project = project
+
+    def rollback(self):
+        super().rollback()
+        self.project.expire()
+
+
+class LogWriteFailsDB(ExpiringRollbackDB):
+    """...and whose terminal QueryLog write fails, taking the rollback branch.
+
+    Only the log write fails: ``release_connection`` commits with nothing
+    pending all through the query, and those must keep succeeding or the test
+    would be measuring the wrong failure.
+    """
+
+    def commit(self):
+        if self.added:  # the QueryLog write, not a provider-IO release
+            raise RuntimeError("server closed the connection")
+        self.committed = True
+
+
+class TestTailSurvivesARollbackExpiry:
+    """The post-answer tail must touch no ORM attribute.
+
+    Its rollbacks (the guarded QueryLog write, retrieve_fn's memory-blend
+    recovery) expire the Project, so any attribute read below them is a hidden
+    connection checkout that can time out - throwing away an answer that has
+    already been paid for, and in the streaming case already delivered.
+    """
+
+    def test_done_frame_still_arrives_when_the_query_log_write_fails(
+        self, monkeypatch
+    ):
+        from app.services import query
+
+        monkeypatch.setattr(
+            query.retrieval, "retrieve",
+            lambda db, p, q, k, **kw:[_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+        )
+        monkeypatch.setattr(
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
+        )
+        monkeypatch.setattr(
+            query.generation, "generate_answer_stream",
+            lambda db, p, q, srcs, depth="short", **kw: iter(["Hello ", "world"]),
+        )
+        monkeypatch.setattr(
+            query.semantic_cache, "lookup", lambda db, p, q, k, s, **kw:(None, [0.1], None)
+        )
+        monkeypatch.setattr(query.semantic_cache, "store", lambda *a, **k: None)
+        monkeypatch.setattr(query.settings, "query_cache_enabled", False)
+
+        real = _project()
+        pid = real.id
+        project = ExpiredAfterRollback(real)
+        db = LogWriteFailsDB([10, 0], project)
+        cid = "conv-" + uuid.uuid4().hex
+
+        events = list(
+            query.run_query_stream(db, project, "what is X", None, conversation_id=cid)
+        )
+
+        # The write really did fail, and the rollback really did expire the
+        # Project - the tail below ran against an unreadable ORM object.
+        assert db.added and db.added[0].project_id == pid
+        assert db.rollbacks == 1
+        assert project._expired is True
+
+        # ...and the client still got its terminal frame, fully populated.
+        assert "".join(e["text"] for e in events if e["type"] == "token") == "Hello world"
+        assert [e for e in events if e["type"] == "error"] == []
+        done = [e for e in events if e["type"] == "done"]
+        assert len(done) == 1
+        resp = done[0]["response"]
+        assert resp["answer"] == "Hello world"
+        assert resp["model"] == "openai/gpt-4o-mini"  # not re-read off the Project
+        assert len(resp["sources"]) == 2
+        assert resp["conversation_id"] == cid
+        # The turn was stored under the project's real key, not some other string.
+        assert query._conversations.get_history(str(pid), cid) == [
+            {"question": "what is X", "answer": "Hello world"}
+        ]
+
+    def test_run_query_response_survives_the_memory_blend_rollback(self, monkeypatch):
+        """The non-streaming twin has the same hazard: retrieve_fn's blend
+        recovery rolls back mid-query, and the tail below it still had to build
+        the model string and the QueryLog row off the Project."""
+        from app.services import query
+
+        monkeypatch.setattr(
+            query.retrieval, "retrieve",
+            lambda db, p, q, k, **kw:[_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+        )
+
+        def exploding_search(db, p, q, k, **kw):
+            raise RuntimeError("different vector dimensions 1536 and 768")
+
+        monkeypatch.setattr(query.memory_service, "search_memories", exploding_search)
+        monkeypatch.setattr(query.settings, "rag_memory_blend_k", 3)
+        monkeypatch.setattr(
+            query.generation, "generate_answer",
+            lambda db, p, question, sources, depth="short", **kw: "DOCS ONLY",
+        )
+        monkeypatch.setattr(
+            query.semantic_cache, "lookup", lambda db, p, q, k, s, **kw:(None, [0.1], None)
+        )
+        monkeypatch.setattr(query.semantic_cache, "store", lambda *a, **k: None)
+        monkeypatch.setattr(query.settings, "query_cache_enabled", False)
+
+        real = _project()
+        pid = real.id
+        project = ExpiredAfterRollback(real)
+        db = ExpiringRollbackDB([10, 3], project)  # chunks AND embedded memories
+        cid = "conv-" + uuid.uuid4().hex
+
+        resp = query.run_query(db, project, "what is X", None, None, conversation_id=cid)
+
+        assert db.rollbacks == 1
+        assert project._expired is True
+        assert resp.answer == "DOCS ONLY"
+        assert resp.model == "openai/gpt-4o-mini"
+        assert resp.conversation_id == cid
+        assert db.added and db.added[0].project_id == pid
+        assert query._conversations.get_history(str(pid), cid) == [
+            {"question": "what is X", "answer": "DOCS ONLY"}
+        ]
+
+
+class LogWriteTimesOutDB(FakeDB):
+    """...and whose terminal QueryLog write hits a saturated pool.
+
+    The realistic shape: generation released the connection before the LLM call,
+    so by the time the log is written the Session holds none and has to check
+    one back out under db_pool_timeout. Only that write fails - the
+    release_connection commits (nothing pending) must keep succeeding.
+    """
+
+    def commit(self):
+        if self.added:
+            raise sa.exc.TimeoutError(
+                "QueuePool limit of size 10 overflow 10 reached, connection timed out"
+            )
+        self.committed = True
+
+
+class TestTheAnswerSurvivesTheQueryLogWrite:
+    """run_query's terminal write is a pool CHECKOUT, and an uncaught
+    PoolTimeoutError there reaches main.py's handler as a 503 - throwing away an
+    answer that is generated, delivered by the provider and already paid for.
+    Analytics is the cheap thing to lose here; the answer is not. The streaming
+    twin has always guarded this write; the non-streaming one now does too."""
+
+    def _wire(self, monkeypatch):
+        from app.services import query
+
+        monkeypatch.setattr(
+            query.retrieval, "retrieve",
+            lambda db, p, q, k, **kw:[_src("alpha", 0.9, 0), _src("beta", 0.8, 1)],
+        )
+        monkeypatch.setattr(
+            query.memory_service, "search_memories", lambda db, p, q, k, **kw:[]
+        )
+        monkeypatch.setattr(
+            query.generation, "generate_answer",
+            lambda db, p, question, sources, depth="short", **kw: "GROUNDED",
+        )
+        monkeypatch.setattr(
+            query.semantic_cache, "lookup", lambda db, p, q, k, s, **kw:(None, [0.1], None)
+        )
+        monkeypatch.setattr(query.semantic_cache, "store", lambda *a, **k: None)
+        monkeypatch.setattr(query.settings, "query_cache_enabled", False)
+
+    def test_a_pool_timeout_on_the_log_write_still_returns_the_answer(
+        self, monkeypatch
+    ):
+        from app.services import query
+
+        self._wire(monkeypatch)
+        db = LogWriteTimesOutDB([10, 0])
+        cid = "conv-" + uuid.uuid4().hex
+
+        resp = query.run_query(
+            db, _project(), "what is X", None, None, conversation_id=cid
+        )
+
+        assert db.added  # the write really was attempted...
+        assert db.rollbacks == 1  # ...really failed, and was cleaned up
+        assert resp.answer == "GROUNDED"  # and the caller still got the answer
+        assert resp.model == "openai/gpt-4o-mini"
+        assert resp.conversation_id == cid
+
+    def test_the_log_is_still_written_when_the_pool_is_healthy(self, monkeypatch):
+        """The guard must not turn the write into a no-op: query_logs is what
+        the dashboard and per-key usage are counted from."""
+        from app.services import query
+
+        self._wire(monkeypatch)
+        db = FakeDB([10, 0])
+        real = _project()
+
+        resp = query.run_query(db, real, "what is X", None, None)
+
+        assert db.committed and db.rollbacks == 0
+        assert len(db.added) == 1 and db.added[0].project_id == real.id
+        assert db.added[0].latency_ms == resp.latency_ms
+
+
+class TestTheStreamNeverEscapesPastItsHeaders:
+    """sse_response builds the generator lazily, so 200 + text/event-stream are
+    on the wire before run_query_stream's first statement runs. From there on an
+    exception cannot become a status code: it reaches the client as a truncated
+    body with no error frame and no done frame, which EventSource treats as a
+    dropped transport and RETRIES against the same broken dependency. So
+    everything the pre-flight touches is guarded, not only the pool checkout."""
+
+    def test_a_failed_connect_yields_an_error_frame(self, monkeypatch):
+        from app.services import query
+
+        class DeadPoolerDB(FakeDB):
+            # app/db.py says it in this very repo: a failed CONNECT raises
+            # OperationalError, NOT PoolTimeoutError - and with pool_pre_ping a
+            # checkout opens one whenever the pooler has restarted under us.
+            def scalar(self, *args, **kwargs):
+                raise sa.exc.OperationalError(
+                    "SELECT 1", {}, Exception("server closed the connection")
+                )
+
+        events = list(query.run_query_stream(DeadPoolerDB([]), _project(), "q", None))
+        assert events == [
+            {"type": "error", "detail": "The query failed. Please try again."}
+        ]
+
+    def test_a_pool_timeout_keeps_its_own_capacity_frame(self, monkeypatch):
+        from app.services import query
+
+        class SaturatedPoolDB(FakeDB):
+            def scalar(self, *args, **kwargs):
+                raise sa.exc.TimeoutError("QueuePool limit of size 10 overflow 10")
+
+        events = list(query.run_query_stream(SaturatedPoolDB([]), _project(), "q", None))
+        assert events == [
+            {"type": "error", "detail": "Server is at capacity - please retry shortly"}
+        ]
+
+    def test_an_expired_project_yields_a_frame_instead_of_aborting(self, monkeypatch):
+        """The pre-flight reads the Project too (top_k, content_version, the
+        model string), and on an expired instance every one of those is a
+        refresh SELECT - i.e. another checkout, after the headers."""
+        from app.services import query
+
+        project = ExpiredAfterRollback(_project())
+        project.expire()
+
+        events = list(query.run_query_stream(FakeDB([10, 0]), project, "q", None))
+        assert events == [
+            {"type": "error", "detail": "Server is at capacity - please retry shortly"}
+        ]
+
+
+class TestTheStreamCannotLeakTheFlightLock:
+    """The fleet-wide lock must be acquired as the LAST statement before the try
+    whose finally releases it.
+
+    A leaked leader is no longer self-healing: its heartbeat keeps renewing the
+    lock that release() never stops, so the TTL cannot clear it either, and
+    every later asker of that question waits out the full follower budget before
+    computing unlocked - for the life of the worker process."""
+
+    def test_a_failure_right_after_acquiring_still_hands_the_flight_back(
+        self, monkeypatch
+    ):
+        from app.services import query
+
+        monkeypatch.setattr(query.settings, "query_cache_enabled", True)
+        monkeypatch.setattr(
+            query.semantic_cache, "lookup", lambda db, p, q, k, s, **kw:(None, [0.1], None)
+        )
+        monkeypatch.setattr(query.retrieval, "retrieve", lambda *a, **kw: [])
+        monkeypatch.setattr(query.memory_service, "search_memories", lambda *a, **kw: [])
+
+        reads = []
+
+        def poisoned_get(key):
+            reads.append(key)
+            if len(reads) > 1:
+                # The leader's re-read, on an entry written by a
+                # differently-versioned pod sharing this Redis:
+                # _deserialize_result is AgenticResult(**json.loads(raw)).
+                raise TypeError("unexpected keyword argument 'trace'")
+            return None
+
+        monkeypatch.setattr(query._cache, "get", poisoned_get)
+
+        events = list(query.run_query_stream(FakeDB([10, 0]), _project(), "q", None))
+
+        assert [e["type"] for e in events] == ["error"]
+        assert len(reads) == 2  # it really did blow up on the leader's re-read
+        after = query._cache.flight_lock(reads[0])
+        assert after.acquire(blocking=False) is True  # ...and the flight is free
+        after.release()
+
+
 class TestQueryCaching:
     def _wire(self, monkeypatch, gen_calls, retrieval_calls=None):
         from app.services import query
@@ -897,3 +1233,49 @@ class TestReleaseSemantics:
             db.close()
         finally:
             engine.dispose()
+
+
+class TestReleaseKillSwitch:
+    """DB_RELEASE_DURING_PROVIDER_IO must genuinely disable the release.
+
+    Releasing the connection during provider I/O shipped without ever running
+    against real Postgres, so the documented escape hatch has to work by an env
+    change and a restart - not a redeploy. The setting was declared and then
+    read by nothing, which is the failure this pins.
+    """
+
+    class _SpyDB:
+        def __init__(self):
+            self.commits = 0
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            pass
+
+    def test_enabled_releases(self, monkeypatch):
+        from app.services import generation
+
+        monkeypatch.setattr(generation.settings, "db_release_during_provider_io", True)
+        db = self._SpyDB()
+        generation.release_connection(db)
+        assert db.commits == 1, "the release must commit to hand the connection back"
+
+    def test_disabled_does_not_touch_the_session(self, monkeypatch):
+        from app.services import generation
+
+        monkeypatch.setattr(generation.settings, "db_release_during_provider_io", False)
+        db = self._SpyDB()
+        generation.release_connection(db)
+        assert db.commits == 0, "the kill switch must restore hold-for-the-request"
+
+    def test_none_session_is_still_safe_either_way(self, monkeypatch):
+        """Standalone callers generate without a session at all."""
+        from app.services import generation
+
+        for flag in (True, False):
+            monkeypatch.setattr(
+                generation.settings, "db_release_during_provider_io", flag
+            )
+            generation.release_connection(None)

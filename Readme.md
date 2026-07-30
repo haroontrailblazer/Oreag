@@ -370,7 +370,6 @@ Oreag/
 │   └── templates/            # branded auth email templates
 ├── scripts/
 │   └── check_docs_sync.py    # documentation drift harness - see below
-├── render.yaml               # backend blueprint
 ├── oreag_1.c4                # LikeC4 architecture model (npx likec4 start)
 └── flow.md                   # architecture + flow diagrams
 ```

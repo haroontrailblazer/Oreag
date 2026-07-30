@@ -42,13 +42,22 @@
 --    where post-filtering collapses. Revisit only if that cap moves by an
 --    order of magnitude.
 --
--- SAFETY: everything below is additive and idempotent, and NOTHING raises. On
--- an old pgvector, a missing `hnsw` access method, or non-IMMUTABLE
--- preconditions this migration emits NOTICEs and creates no HNSW index. The
--- backend never depends on these indexes for correctness: services/retrieval.py
--- probes for them and only rewrites a query when the matching index is present
--- and valid, so an unapplied (or partially applied) 0018 simply means every
--- vector search keeps using today's exact SQL.
+-- SAFETY: everything below is additive and idempotent, and NOTHING raises -
+-- every statement that can fail sits behind a to_regclass() guard, an
+-- exception handler, or both, the two cache btrees included. An old pgvector,
+-- a missing `hnsw` access method, non-IMMUTABLE preconditions, a table that
+-- does not exist yet (0018 run before 0001 or 0010, or over a partial
+-- restore), or a role that may not index the table all degrade to a NOTICE
+-- that skips only the index they affect. A CANCEL (statement timeout or an
+-- operator Ctrl-C) degrades to a NOTICE too, but it stops the whole block it
+-- happened in: a cancelled statement leaves no armed statement_timeout behind
+-- for the rest of that block, so every later build in it would run unbounded.
+-- NOTHING raises also means nothing FAILS the run, so read those notices - the
+-- repo's runner prints them (tests/apply_migrations.py) and each one names
+-- exactly what was skipped. The backend never depends on these indexes for
+-- correctness: services/retrieval.py probes for them and only rewrites a query
+-- when the matching index is present and valid, so an unapplied (or partially
+-- applied) 0018 simply means every vector search keeps using today's exact SQL.
 
 -- ── chunks: per-dimension partial HNSW indexes ──────────────────────────────
 --
@@ -89,9 +98,14 @@ begin
     return;
   end if;
 
+  -- substring(), not split_part(): the guard below only anchors the START of
+  -- the version string, so a build that tags its minor part (`0.8rc1`) would
+  -- hand split_part() `8rc1`, and the ::int cast would raise straight out of
+  -- this DO block and abort the migration. A capture group can only ever
+  -- return digits.
   if ext_version ~ '^[0-9]+\.[0-9]+' then
-    major := split_part(ext_version, '.', 1)::int;
-    minor := split_part(ext_version, '.', 2)::int;
+    major := substring(ext_version, '^([0-9]+)')::int;
+    minor := substring(ext_version, '^[0-9]+\.([0-9]+)')::int;
   end if;
 
   -- Informational only. hnsw.iterative_scan (which stops a project_id
@@ -221,11 +235,64 @@ $$;
 -- keeps them even if an index build above is cancelled. In a client that wraps
 -- the whole script in one transaction the ordering is moot - which is why the
 -- DO block above also refuses to raise.
-create index if not exists semantic_query_cache_scope_idx
-  on public.semantic_query_cache (project_id, content_signature, top_k, expires_at desc);
+--
+-- Guarded exactly like the chunks block above, and for the same reason: this
+-- table is created by 0010, so on a database where 0010 has not been applied -
+-- a fresh environment, a partial restore, migrations run out of order - a bare
+-- CREATE INDEX raises and takes the whole migration down with it, including
+-- the HNSW work above that had already succeeded. to_regclass() degrades that
+-- to a NOTICE, and a handler per index keeps a role that may not index this
+-- table from costing the other index.
+--
+-- A CANCEL stops the rest, exactly like the loop above. Catching query_canceled
+-- and carrying on would leave the remaining build with NO armed timeout at all:
+-- statement_timeout is armed once per top-level protocol message, and once it
+-- has fired and been caught inside PL/pgSQL nothing re-arms it until the next
+-- message. The second CREATE INDEX would then run unbounded while holding a
+-- ShareLock on the highest-churn table in the schema, blocking every cache
+-- INSERT and every TTL sweep for as long as it takes - and the operator Ctrl-C
+-- meant to stop it would be swallowed by the same handler. One small extra
+-- index is not worth that; the runbook builds both CONCURRENTLY instead.
+do $$
+declare
+  cancelled boolean := false;
+begin
+  if to_regclass('public.semantic_query_cache') is null then
+    raise notice
+      '0018: public.semantic_query_cache does not exist (migration 0010 has not been applied here); no cache index created.';
+    return;
+  end if;
 
-create index if not exists semantic_query_cache_expiry_idx
-  on public.semantic_query_cache (expires_at);
+  begin
+    create index if not exists semantic_query_cache_scope_idx
+      on public.semantic_query_cache (project_id, content_signature, top_k, expires_at desc);
+  exception
+    when query_canceled then
+      raise notice
+        '0018: the build of semantic_query_cache_scope_idx was cancelled (statement timeout, or an operator cancel); it was not created, and semantic_query_cache_expiry_idx is not attempted - a cancel leaves no armed statement timeout for the rest of this block, so the next build would run unbounded while locking the table. Build both with CREATE INDEX CONCURRENTLY - see the runbook at the end of supabase/migrations/0018_hnsw_vector_indexes.sql.';
+      cancelled := true;
+    when others then
+      raise notice '0018: could not create semantic_query_cache_scope_idx: %', sqlerrm;
+  end;
+
+  -- Same shape as the loop above: the decision sits in the block body, not in
+  -- the handler.
+  if cancelled then
+    return;
+  end if;
+
+  begin
+    create index if not exists semantic_query_cache_expiry_idx
+      on public.semantic_query_cache (expires_at);
+  exception
+    when query_canceled then
+      raise notice
+        '0018: the build of semantic_query_cache_expiry_idx was cancelled (statement timeout, or an operator cancel); it was not created. Build it with CREATE INDEX CONCURRENTLY - see the runbook at the end of supabase/migrations/0018_hnsw_vector_indexes.sql.';
+    when others then
+      raise notice '0018: could not create semantic_query_cache_expiry_idx: %', sqlerrm;
+  end;
+end
+$$;
 
 -- ── runbook: building the same indexes CONCURRENTLY on a large table ────────
 --
@@ -267,6 +334,15 @@ create index if not exists semantic_query_cache_expiry_idx
 --
 --   -- 5. Finally:
 --   analyze public.chunks;
+--
+--   -- 6. The two semantic_query_cache btrees, if the block above skipped them
+--   --    (its NOTICE says so). Same rules: one statement per round trip,
+--   --    outside any transaction block. CONCURRENTLY is what keeps the cache
+--   --    INSERTs and the TTL sweep running while they build.
+--   create index concurrently if not exists semantic_query_cache_scope_idx
+--     on public.semantic_query_cache (project_id, content_signature, top_k, expires_at desc);
+--   create index concurrently if not exists semantic_query_cache_expiry_idx
+--     on public.semantic_query_cache (expires_at);
 --
 -- Rollback is symmetric and needs no schema revert: DROP INDEX CONCURRENTLY
 -- the offending chunks_embedding_hnsw_<d>_idx (also one statement per round
