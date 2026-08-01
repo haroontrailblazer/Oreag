@@ -8,6 +8,7 @@ import {
   Cube,
   Files,
   FolderSimple,
+  PencilSimple,
   SealCheck,
   SignOut,
   WarningCircle,
@@ -90,9 +91,12 @@ function StatTile({
 export default function ProfilePage() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
 
   const [email, setEmail] = useState<string | null>(null)
   const [name, setName] = useState("")
+  const [savedName, setSavedName] = useState("")
+  const [editingName, setEditingName] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [gravatar, setGravatar] = useState<string | null>(null)
   const [meta, setMeta] = useState<AccountMeta | null>(null)
@@ -126,7 +130,10 @@ export default function ProfilePage() {
         if (!u) return
         const e = u.email ?? null
         setEmail(e)
-        setName((u.user_metadata?.username as string | undefined) ?? "")
+        const displayName =
+          (u.user_metadata?.username as string | undefined) ?? ""
+        setName(displayName)
+        setSavedName(displayName)
         const a = (u.user_metadata?.avatar_url as string | undefined) ?? null
         setAvatarUrl(a)
         if (!a && e) gravatarUrl(e).then(setGravatar)
@@ -140,17 +147,29 @@ export default function ProfilePage() {
   }, [])
 
   async function handleSaveName() {
+    const nextName = name.trim()
     setSavingName(true)
     const { error } = await createClient().auth.updateUser({
-      data: { username: name.trim() },
+      data: { username: nextName },
     })
     setSavingName(false)
     if (error) {
       toast.error(error.message)
       return
     }
+    setName(nextName)
+    setSavedName(nextName)
+    setEditingName(false)
     toast.success("Display name updated")
     router.refresh()
+  }
+
+  function handleEditName() {
+    setEditingName(true)
+    requestAnimationFrame(() => {
+      nameInputRef.current?.focus()
+      nameInputRef.current?.select()
+    })
   }
 
   async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -295,16 +314,48 @@ export default function ProfilePage() {
                 <Label htmlFor="display-name">Display name</Label>
                 <div className="flex justify-center gap-2 sm:justify-start">
                   <Input
+                    ref={nameInputRef}
                     id="display-name"
                     value={name}
                     placeholder="Your name"
                     maxLength={50}
+                    readOnly={!editingName}
                     onChange={(e) => setName(e.target.value)}
-                    className="max-w-72"
+                    onKeyDown={(e) => {
+                      if (
+                        e.key === "Enter" &&
+                        editingName &&
+                        !savingName &&
+                        name.trim() !== savedName
+                      ) {
+                        handleSaveName()
+                      }
+                      if (e.key === "Escape") {
+                        setName(savedName)
+                        setEditingName(false)
+                      }
+                    }}
+                    className="max-w-72 read-only:cursor-default read-only:bg-muted/30"
                   />
-                  <Button onClick={handleSaveName} disabled={savingName}>
-                    {savingName ? <Spin /> : "Save"}
-                  </Button>
+                  {editingName ? (
+                    <Button
+                      onClick={handleSaveName}
+                      disabled={savingName || name.trim() === savedName}
+                    >
+                      {savingName ? <Spin /> : "Save"}
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={handleEditName}
+                      aria-label="Edit display name"
+                      title="Edit display name"
+                    >
+                      <PencilSimple className="size-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
 

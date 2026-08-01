@@ -475,6 +475,11 @@ export default function LoginPage() {
           ? "Enter the code from your authenticator app"
           : "Sign in to your workspace to continue"
       }
+      keyboardCompact={
+        step === "code" ||
+        step === "mfa" ||
+        (step === "reset" && !recovered)
+      }
     >
       {/* key={step} remounts this on every step change so the fade+slide
           replays; the footer below stays put and doesn't re-animate. */}
