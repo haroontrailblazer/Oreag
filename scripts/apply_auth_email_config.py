@@ -29,6 +29,15 @@ WHAT IT SETS
     {{ .TokenHash }} link into /auth/confirm
   * OTP length 6, matching NEXT_PUBLIC_OTP_LENGTH and every authenticator app
 
+NEVER PATCH A SINGLE smtp_* FIELD
+  The auth config endpoint does NOT do partial updates of the SMTP block. A
+  PATCH carrying only `smtp_admin_email` clears smtp_host, smtp_user,
+  smtp_pass and smtp_sender_name with it - which drops the project back to the
+  default email provider, and on the free tier that ALSO force-resets all four
+  email templates to Supabase's defaults and refuses further template edits.
+  Change SMTP in the dashboard, or send the whole block at once. This script
+  deliberately touches no smtp_* key.
+
 WHY THE LINK IS NOT {{ .ConfirmationURL }}
   That URL routes through Supabase's own verify endpoint, which hands the app
   back a PKCE ?code= - and PKCE only works in the browser that STARTED the
