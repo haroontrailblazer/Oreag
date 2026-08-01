@@ -97,6 +97,10 @@ export default function LoginPage() {
   // inside this one is a new type on every render, so React would remount it
   // and lose exactly this flag.
   const [recovered, setRecovered] = useState(false)
+  // Loaded while the user is typing their code, not when they press Verify.
+  // listFactors() is a network round trip; doing it on the click put three
+  // sequential auth requests between the button and any visible progress.
+  const [mfaFactorId, setMfaFactorId] = useState<string | null>(null)
   const resend = useResendCooldown()
 
   // NOTE: do NOT prefetch /dashboard from here. It is behind the middleware,
@@ -132,6 +136,12 @@ export default function LoginPage() {
       setCode("")
       setCodeError(false)
       setStep("mfa")
+      // Deliberately not awaited: show the code field immediately and resolve
+      // the factor in the background while the user reaches for their phone.
+      void supabase.auth.mfa.listFactors().then(({ data: list }) => {
+        const factor = list?.totp?.[0]
+        if (factor) setMfaFactorId(factor.id)
+      })
       return
     }
     finish()
@@ -325,10 +335,14 @@ export default function LoginPage() {
       if (loading) return
       setLoading(true)
       setCodeError(false)
-      const { data: list, error: listError } =
-        await supabase.auth.mfa.listFactors()
-      const factor = list?.totp?.[0]
-      if (listError || !factor) {
+      // Normally already primed above; the lookup is a fallback for a very
+      // fast typist who beat the background fetch.
+      let factorId = mfaFactorId
+      if (!factorId) {
+        const { data: list } = await supabase.auth.mfa.listFactors()
+        factorId = list?.totp?.[0]?.id ?? null
+      }
+      if (!factorId) {
         setLoading(false)
         toast.error("No authenticator app is set up for this account.")
         return
@@ -336,7 +350,7 @@ export default function LoginPage() {
       // Supabase recomputes the TOTP HMAC server-side; nothing here can
       // approve a code.
       const { error } = await supabase.auth.mfa.challengeAndVerify({
-        factorId: factor.id,
+        factorId,
         code: value,
       })
       if (error) {
@@ -360,7 +374,7 @@ export default function LoginPage() {
       }
       finish()
     },
-    [supabase, loading, finish]
+    [supabase, loading, finish, mfaFactorId]
   )
 
   function backToEmail() {
@@ -660,8 +674,12 @@ export default function LoginPage() {
           ) : (
             <div className="space-y-4">
               {emailChip}
+              {/* Both routes are live and land in the same place, so say so.
+                  The code continues here; the link goes through /auth/confirm
+                  to /auth/reset-password. */}
               <p className="text-center text-sm text-muted-foreground">
-                Enter the code we emailed you, then choose a new password.
+                Enter the code we emailed you, then choose a new password - or
+                just click the link in the same email.
               </p>
               <OtpField
                 value={code}
@@ -706,7 +724,14 @@ export default function LoginPage() {
               disabled={!isCompleteCode(code, TOTP_LENGTH) || loading}
               onClick={() => verifyMfa(code)}
             >
-              {loading ? <Spin /> : "Verify"}
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  Verifying
+                  <Spin />
+                </span>
+              ) : (
+                "Verify"
+              )}
             </Button>
             <p className="text-center text-xs text-muted-foreground">
               Lost your device? Sign in with a passkey, or contact support.

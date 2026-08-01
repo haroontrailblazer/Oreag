@@ -2,6 +2,8 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 
+import { STEP_UP_PATH, needsStepUp } from "@/lib/auth-step-up"
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
@@ -27,8 +29,13 @@ export async function GET(request: Request) {
         },
       }
     )
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
+      // Same reasoning as /auth/confirm: an OAuth round trip bypasses the
+      // login page's gate entirely, so it is enforced here as well.
+      if (needsStepUp(data.session)) {
+        return NextResponse.redirect(`${origin}${STEP_UP_PATH}`)
+      }
       return NextResponse.redirect(`${origin}${next}`)
     }
   }

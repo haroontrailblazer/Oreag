@@ -1,12 +1,28 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
+/**
+ * Paths reachable WITHOUT a session.
+ *
+ * Every landing page named in an email link belongs here. A link is clicked by
+ * someone who is, by definition, not signed in yet - that is the whole point of
+ * the link - so if its target is missing from this list the middleware bounces
+ * them to /login and the email appears broken. `/auth/confirm` was exactly that
+ * bug: the signup and password-reset emails point at it, and without this entry
+ * every link in every auth email dead-ended on the sign-in page.
+ *
+ * scripts/check_docs_sync.py enforces this: it extracts every `redirectTo` /
+ * `emailRedirectTo` target in the source and fails the build if one is not
+ * listed here.
+ */
 const PUBLIC_PATHS = [
   "/",
   "/docs",
   "/login",
   "/signup",
-  "/auth/callback",
+  "/auth/callback", // PKCE ?code= exchange (OAuth)
+  "/auth/confirm", // token_hash links: signup confirm, password recovery
+  "/auth/reset-password", // landed on after /auth/confirm; checks its own session
   "/api/auth/methods", // pre-auth identifier-first login lookup
 ]
 
@@ -35,10 +51,22 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  // refreshes the session cookie if expired - do not remove
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Establishes identity, and refreshes the session cookie if expired - do not
+  // remove the call.
+  //
+  // getClaims(), NOT getUser(): getUser() asks the Supabase Auth server on
+  // EVERY navigation, so each page load paid for a network round trip before
+  // any HTML moved. getClaims() verifies the JWT signature locally with
+  // WebCrypto against the cached JWKS key, which this project has because it
+  // uses asymmetric signing keys (jwt_mode=jwks). It is equally trustworthy -
+  // the signature is cryptographically checked, unlike a bare getSession() -
+  // and it still calls getSession() internally first, so the expired-cookie
+  // refresh this comment has always warned about is preserved.
+  //
+  // It self-heals: if the algorithm were ever symmetric, or WebCrypto were
+  // unavailable, auth-js falls back to getUser() on its own.
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const user = claimsData?.claims?.sub ? claimsData.claims : null
 
   const path = request.nextUrl.pathname
   const isPublic = PUBLIC_PATHS.includes(path)

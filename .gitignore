@@ -13,3 +13,7 @@ frontend/.env
 # Misc
 .DS_Store
 chroma/
+
+# Supabase auth config backup written by scripts/apply_auth_email_config.py
+# (contains SMTP credentials)
+scripts/.auth-config-backup.json

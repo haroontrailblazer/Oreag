@@ -151,7 +151,14 @@ export default function TwoFactorPage() {
               disabled={!isCompleteCode(code, TOTP_LENGTH) || loading}
               onClick={() => verify(code)}
             >
-              {loading ? <Spin /> : "Verify"}
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  Verifying
+                  <Spin />
+                </span>
+              ) : (
+                "Verify"
+              )}
             </Button>
             <button
               type="button"

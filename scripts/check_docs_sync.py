@@ -468,6 +468,52 @@ def check_api_tab(rep: Report, cfg: dict) -> None:
 # ── entry point ─────────────────────────────────────────────────────────────
 
 
+def check_auth_redirects_are_public(rep: Report) -> None:
+    """Every email-link landing page must be reachable without a session.
+
+    An auth email is clicked by someone who is not signed in - that is the
+    entire point of the link. If its target is missing from PUBLIC_PATHS the
+    middleware redirects them to /login and the email looks broken, with no
+    error anywhere to explain it.
+
+    This exact bug shipped once: the signup and recovery emails were pointed at
+    /auth/confirm while PUBLIC_PATHS still only listed /auth/callback, so every
+    link in every auth email dead-ended on the sign-in page.
+    """
+    proxy = read(ROOT / "frontend/src/proxy.ts")
+    if not proxy:
+        return
+
+    block = re.search(r"PUBLIC_PATHS\s*=\s*\[(.*?)\]", proxy, re.S)
+    if not block:
+        rep.fail(
+            "auth-redirects",
+            "could not find PUBLIC_PATHS in proxy.ts",
+            "frontend/src/proxy.ts",
+        )
+        return
+    public = set(re.findall(r'"([^"]+)"', block.group(1)))
+
+    # `redirectTo: \`${location.origin}/auth/confirm?next=/auth/reset-password\``
+    targets: set[str] = set()
+    for src in (ROOT / "frontend/src").rglob("*.tsx"):
+        text = read(src)
+        for m in re.finditer(
+            r"(?:emailRedirectTo|redirectTo)\s*:\s*`[^`]*?\$\{[^}]*\}(/[A-Za-z0-9/_-]+)",
+            text,
+        ):
+            targets.add(m.group(1))
+
+    for target in sorted(targets):
+        if target not in public:
+            rep.fail(
+                "auth-redirects",
+                f"auth email links to {target}, which is not in PUBLIC_PATHS - "
+                "the middleware will bounce every click to /login",
+                "frontend/src/proxy.ts",
+            )
+
+
 def run() -> Report:
     rep = Report()
     cfg = settings_from_config()
@@ -485,6 +531,7 @@ def run() -> Report:
     check_readme_freshness(rep, n_migrations)
     check_feature_surfaces(rep)
     check_api_tab(rep, cfg)
+    check_auth_redirects_are_public(rep)
     return rep
 
 
