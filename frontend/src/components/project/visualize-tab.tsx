@@ -2,15 +2,30 @@
 
 import {
   ArrowsClockwise,
+  ArrowsIn,
+  ArrowsOut,
   CornersOut,
   FileText,
+  Hand,
+  Minus,
+  Plus,
   X,
 } from "@phosphor-icons/react/dist/ssr"
 import { useTheme } from "next-themes"
-import { useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import type ForceGraph3DComponent from "react-force-graph-3d"
 import type { ForceGraphMethods, NodeObject } from "react-force-graph-3d"
 import useSWR from "swr"
+import { MOUSE, TOUCH, Vector2 } from "three"
+import type { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js"
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js"
 
 import { Badge } from "@/components/ui/badge"
 import { BestPractices } from "@/components/ui/best-practices"
@@ -34,6 +49,7 @@ import type {
   MemoryGraphResponse,
   Project,
 } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 /* Colors / sizes per node kind - files are the anchors, chunks the fine grain.
    Separate palettes per theme so nodes and edges keep contrast on both
@@ -79,6 +95,78 @@ const LEGEND = [
   { type: "chunk", label: "Chunks" },
   { type: "memory", label: "Memories" },
 ] as const
+
+/* Bloom (the node glow). threshold 0.1 means "only pixels brighter than this
+   bloom", which is why this is DARK MODE ONLY: the light canvas (#fafafa) is
+   brighter than every node on it, so on light the whole frame would blow out
+   rather than the nodes glowing. Strength stays low - the goal is that nodes
+   read as emitting light, not that the graph turns into a smear. */
+const BLOOM = { strength: 0.85, radius: 0.5, threshold: 0.1 }
+/* Bloom is one extra full-screen GPU pass per frame. Past this many nodes the
+   scene is already the bottleneck, so the glow is dropped rather than making a
+   big graph unusable to look prettier. */
+const BLOOM_MAX_NODES = 4000
+
+/* Camera dolly per +/- press, and the distance band it may not leave: too
+   close and the camera ends up inside the graph with nothing on screen, too
+   far and the nodes collapse to a dot that no amount of clicking recovers. */
+const ZOOM_STEP_IN = 0.78
+const ZOOM_STEP_OUT = 1 / ZOOM_STEP_IN
+const MIN_CAMERA_DISTANCE = 30
+const MAX_CAMERA_DISTANCE = 6000
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)"
+
+/** Subscribe to the OS "reduce motion" setting.
+ *
+ * useSyncExternalStore rather than an effect: matchMedia is external state, so
+ * reading it in an effect body and calling setState is both a cascading render
+ * and a frame of the wrong UI. The server snapshot is `false` because the
+ * preference is unknowable there; the client corrects it during hydration.
+ */
+function usePrefersReducedMotion() {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia(REDUCED_MOTION_QUERY)
+      query.addEventListener("change", onChange)
+      return () => query.removeEventListener("change", onChange)
+    },
+    () => window.matchMedia(REDUCED_MOTION_QUERY).matches,
+    () => false
+  )
+}
+
+/** One control in the floating canvas toolbar. `active` marks a latched mode
+ * (hand tool, auto-rotate) so the toolbar shows state, not just actions. */
+function ToolButton({
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  label: string
+  active?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "size-8 rounded-full text-muted-foreground hover:text-foreground",
+        active && "bg-foreground/10 text-foreground"
+      )}
+    >
+      {children}
+    </Button>
+  )
+}
 
 const BEST_PRACTICE_TIPS = [
   {
@@ -390,7 +478,17 @@ export function VisualizeTab({
 
   const fgRef = useRef<ForceGraphMethods<MemoryGraphNode> | undefined>(undefined)
   const [selected, setSelected] = useState<MemoryGraphNode | null>(null)
-  const [rotating, setRotating] = useState(true)
+  // Auto-rotate follows the OS motion preference until the user overrides it
+  // from the toolbar, so "reduce motion" gets a still canvas without taking
+  // the control away.
+  const reducedMotion = usePrefersReducedMotion()
+  const [rotateOverride, setRotateOverride] = useState<boolean | null>(null)
+  const rotating = rotateOverride ?? !reducedMotion
+  // Hand tool: latched by the toolbar button, or held transiently with Space.
+  const [panLatched, setPanLatched] = useState(false)
+  const [spaceHeld, setSpaceHeld] = useState(false)
+  const panning = panLatched || spaceHeld
+  const [fullscreen, setFullscreen] = useState(false)
   // Set while navigating to the clicked file (Files tab load + scroll-to-row
   // takes a moment) - drives the "Locating file..." state on the button.
   const [locating, setLocating] = useState(false)
@@ -424,10 +522,11 @@ export function VisualizeTab({
     return () => observer.disconnect()
   }, [ForceGraph3D])
 
-  // Gentle auto-rotate until the user takes over; frame the graph on load.
-  // Requires controlType="orbit" on the graph: the default trackball controls
-  // have no autoRotate at all. Retries briefly because the graph (and its
-  // controls) mount asynchronously after the module loads.
+  // Everything that lives on the OrbitControls instance, in one place: rotate,
+  // damping and which drag does what. Requires controlType="orbit" on the
+  // graph - the default trackball controls have neither autoRotate nor a
+  // mouseButtons map. Retries briefly because the graph (and its controls)
+  // mount asynchronously after the module loads.
   useEffect(() => {
     let cancelled = false
     const apply = () => {
@@ -440,21 +539,170 @@ export function VisualizeTab({
       const controls = fg.controls() as {
         autoRotate?: boolean
         autoRotateSpeed?: number
+        enableDamping?: boolean
+        dampingFactor?: number
+        mouseButtons?: { LEFT: MOUSE; MIDDLE: MOUSE; RIGHT: MOUSE }
+        touches?: { ONE: TOUCH; TWO: TOUCH }
       }
       controls.autoRotate = rotating
       controls.autoRotateSpeed = 0.9
+      // Inertia. Safe to switch on because the renderer already calls
+      // controls.update(delta) every frame (three-render-objects' tick), which
+      // is what damping needs to keep easing after the pointer is released.
+      controls.enableDamping = true
+      controls.dampingFactor = 0.08
+      // The hand tool. Right-drag pans in BOTH modes, so the muscle memory
+      // that already worked keeps working; only left-drag changes meaning.
+      controls.mouseButtons = {
+        LEFT: panning ? MOUSE.PAN : MOUSE.ROTATE,
+        MIDDLE: MOUSE.DOLLY,
+        RIGHT: MOUSE.PAN,
+      }
+      controls.touches = {
+        ONE: panning ? TOUCH.PAN : TOUCH.ROTATE,
+        TWO: TOUCH.DOLLY_PAN,
+      }
     }
     apply()
     return () => {
       cancelled = true
     }
-  }, [rotating, ForceGraph3D, graphData])
+  }, [rotating, panning, ForceGraph3D, graphData])
+
+  // Space = temporary hand tool, the way every canvas app does it. Ignored
+  // while typing, and cleared on blur: a Space held while the tab loses focus
+  // never sees its keyup, which would otherwise strand the canvas in pan mode.
+  useEffect(() => {
+    const isTyping = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null
+      return (
+        !!el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable)
+      )
+    }
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat || isTyping(e.target)) return
+      e.preventDefault() // Space scrolls the page otherwise
+      setSpaceHeld(true)
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") setSpaceHeld(false)
+    }
+    const clear = () => setSpaceHeld(false)
+    window.addEventListener("keydown", down)
+    window.addEventListener("keyup", up)
+    window.addEventListener("blur", clear)
+    return () => {
+      window.removeEventListener("keydown", down)
+      window.removeEventListener("keyup", up)
+      window.removeEventListener("blur", clear)
+    }
+  }, [])
 
   useEffect(() => {
     if (!graphData.nodes.length) return
     const timer = setTimeout(() => fgRef.current?.zoomToFit(600), 700)
     return () => clearTimeout(timer)
   }, [graphData, ForceGraph3D])
+
+  // The glow. See BLOOM above for why this is dark-mode-only and size-capped.
+  const bloomOn =
+    isDark &&
+    graphData.nodes.length > 0 &&
+    graphData.nodes.length <= BLOOM_MAX_NODES
+  const bloomRef = useRef<UnrealBloomPass | null>(null)
+  useEffect(() => {
+    if (!bloomOn) return
+    let cancelled = false
+    // Captured here rather than re-read from fgRef in the cleanup: by teardown
+    // the ref may already point at a different graph instance, and removing a
+    // pass from the wrong composer leaves the old one rendering a dead pass.
+    let attached: { composer: EffectComposer; pass: UnrealBloomPass } | null =
+      null
+    const apply = () => {
+      if (cancelled) return
+      const composer = fgRef.current?.postProcessingComposer()
+      if (!composer) {
+        setTimeout(apply, 200)
+        return
+      }
+      // The composer already renders every frame with a RenderPass in front,
+      // so this appends to it rather than taking rendering over.
+      const pass = new UnrealBloomPass(
+        new Vector2(size.width || 1, size.height || 1),
+        BLOOM.strength,
+        BLOOM.radius,
+        BLOOM.threshold
+      )
+      composer.addPass(pass)
+      attached = { composer, pass }
+      bloomRef.current = pass
+    }
+    apply()
+    return () => {
+      cancelled = true
+      if (!attached) return
+      // Remove before dispose: a disposed pass left in the chain renders from
+      // freed render targets. Toggling the theme runs exactly this path.
+      attached.composer.removePass(attached.pass)
+      attached.pass.dispose()
+      bloomRef.current = null
+    }
+    // size is deliberately absent - resizing is handled below, and rebuilding
+    // the pass' render targets on every ResizeObserver tick would thrash.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bloomOn, ForceGraph3D, graphData])
+
+  useEffect(() => {
+    if (size.width > 0) bloomRef.current?.setSize(size.width, size.height)
+  }, [size])
+
+  // Full screen is an in-page overlay, not the Fullscreen API: the ask was a
+  // panel floating over a blurred page, which the real API cannot do (it goes
+  // edge to edge on a black backdrop). The graph element itself is only
+  // re-styled, never re-parented, so the WebGL context, the camera and the
+  // settled layout all survive the transition - the ResizeObserver above just
+  // feeds the renderer its new box.
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    const previous = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      document.body.style.overflow = previous
+    }
+  }, [fullscreen])
+
+  /** Dolly the camera along its own view axis, toward whatever the orbit
+   * target currently is - NOT toward the origin, which would drift the framing
+   * sideways every press once the user has panned away from centre. */
+  const dolly = useCallback((factor: number) => {
+    const fg = fgRef.current
+    if (!fg) return
+    const controls = fg.controls() as {
+      target?: { x: number; y: number; z: number }
+    }
+    const target = controls.target ?? { x: 0, y: 0, z: 0 }
+    const camera = fg.camera()
+    const next = {
+      x: target.x + (camera.position.x - target.x) * factor,
+      y: target.y + (camera.position.y - target.y) * factor,
+      z: target.z + (camera.position.z - target.z) * factor,
+    }
+    const distance = Math.hypot(
+      next.x - target.x,
+      next.y - target.y,
+      next.z - target.z
+    )
+    if (distance < MIN_CAMERA_DISTANCE || distance > MAX_CAMERA_DISTANCE) return
+    fg.cameraPosition(next, target, 260)
+  }, [])
 
   function focusNode(node: GNode) {
     setSelected({
@@ -493,30 +741,9 @@ export function VisualizeTab({
               zoom, click a node to inspect it.
             </CardDescription>
           </div>
-          {/* Compact icon buttons on phones; labels appear from sm: up. */}
+          {/* View controls live on the canvas itself now (see the toolbar
+              below), so the header keeps only what is not a canvas action. */}
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label={rotating ? "Stop rotation" : "Auto-rotate"}
-              onClick={() => setRotating((r) => !r)}
-            >
-              <ArrowsClockwise className="size-4" />
-              <span className="hidden sm:inline">
-                {rotating ? "Stop rotation" : "Auto-rotate"}
-              </span>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label="Reset view"
-              onClick={() => fgRef.current?.zoomToFit(600)}
-            >
-              <CornersOut className="size-4" />
-              <span className="hidden sm:inline">Reset view</span>
-            </Button>
             <BestPractices tips={BEST_PRACTICE_TIPS}>
               <div className="space-y-1.5 border-t pt-3">
                 <p className="text-xs font-medium">Dimensions & this space</p>
@@ -553,12 +780,33 @@ export function VisualizeTab({
           )}
         </div>
 
+        {fullscreen && (
+          // The blurred page behind the panel. Clicking it closes, which is
+          // why it sits under the canvas rather than over it.
+          <div
+            className="fixed inset-0 z-40 bg-background/60 backdrop-blur-xl"
+            onClick={() => setFullscreen(false)}
+            aria-hidden
+          />
+        )}
+
         <div
           ref={boxRef}
-          // Desktop: size the canvas to the space left under the page header,
-          // tabs and card chrome (~22.5rem) so the whole tab fits the viewport
-          // with no page scroll; phones keep a fixed height and scroll as usual.
-          className="relative h-[52dvh] min-h-[320px] overflow-hidden rounded-xl border bg-zinc-50 sm:h-[420px] lg:h-[calc(100dvh-26rem)] lg:min-h-[380px] dark:border-zinc-800 dark:bg-[#09090b]"
+          className={cn(
+            "relative overflow-hidden border bg-zinc-50 dark:border-zinc-800 dark:bg-[#09090b]",
+            fullscreen
+              ? // Half an inch of blurred page on every side, per the design.
+                // Only the CSS changes here - the element is never re-parented,
+                // so the WebGL context and the settled layout survive.
+                "fixed inset-[0.5in] z-50 rounded-2xl shadow-2xl"
+              : // Desktop: size the canvas to the space left under the page
+                // header, tabs and card chrome (~22.5rem) so the whole tab fits
+                // the viewport with no page scroll; phones keep a fixed height
+                // and scroll as usual.
+                "h-[52dvh] min-h-[320px] rounded-xl sm:h-[420px] lg:h-[calc(100dvh-26rem)] lg:min-h-[380px]",
+            // Only a hint - the canvas child sets its own cursor while dragging.
+            panning && "cursor-grab active:cursor-grabbing"
+          )}
         >
           {(isLoading || !ForceGraph3D) && <GraphLoader />}
 
@@ -608,6 +856,54 @@ export function VisualizeTab({
               onNodeClick={(node) => focusNode(node as GNode)}
               onBackgroundClick={() => setSelected(null)}
             />
+          )}
+
+          {/* Canvas toolbar. Hidden while there is nothing to steer. */}
+          {ForceGraph3D && data && !isEmpty && (
+            <div className="absolute bottom-3 left-3 z-20 flex items-center gap-0.5 rounded-full border bg-background/80 p-1 shadow-lg backdrop-blur-md">
+              <ToolButton label="Zoom out" onClick={() => dolly(ZOOM_STEP_OUT)}>
+                <Minus className="size-4" />
+              </ToolButton>
+              <ToolButton label="Zoom in" onClick={() => dolly(ZOOM_STEP_IN)}>
+                <Plus className="size-4" />
+              </ToolButton>
+              <ToolButton
+                label="Fit graph to view"
+                onClick={() => fgRef.current?.zoomToFit(600)}
+              >
+                <CornersOut className="size-4" />
+              </ToolButton>
+              <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+              <ToolButton
+                label={
+                  panLatched
+                    ? "Hand tool on - drag to pan (or hold Space)"
+                    : "Hand tool - drag to pan instead of rotate"
+                }
+                active={panning}
+                onClick={() => setPanLatched((on) => !on)}
+              >
+                <Hand className="size-4" />
+              </ToolButton>
+              <ToolButton
+                label={rotating ? "Stop rotation" : "Auto-rotate"}
+                active={rotating}
+                onClick={() => setRotateOverride(!rotating)}
+              >
+                <ArrowsClockwise className="size-4" />
+              </ToolButton>
+              <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+              <ToolButton
+                label={fullscreen ? "Exit full screen (Esc)" : "Full screen"}
+                onClick={() => setFullscreen((on) => !on)}
+              >
+                {fullscreen ? (
+                  <ArrowsIn className="size-4" />
+                ) : (
+                  <ArrowsOut className="size-4" />
+                )}
+              </ToolButton>
+            </div>
           )}
 
           {selected && (
