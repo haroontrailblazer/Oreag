@@ -248,11 +248,67 @@ an OAuth-only user can be offered the code path instead of today's
 
 ---
 
-## Stage C — TOTP two-factor
+## Stage C — Passkeys (the Vercel model)
 
-Supabase-native (`supabase.auth.mfa.*`). No new auth infrastructure.
+The highest-value stage, and it has **no email dependency**, so it can ship
+before SMTP is sorted.
 
-### C1. Enrolment UI
+### C0. Do this first: settle the domain
+A passkey is bound to a **Relying Party ID** — the domain it was created on.
+Passkeys registered on `oreag.vercel.app` **will not work** on a later custom
+domain; every user would have to re-enrol. `vercel.app` is on the Public Suffix
+List, so the RP ID must be the full `oreag.vercel.app` and cannot be widened.
+
+If a custom domain is coming, get it in place **before** shipping passkeys.
+This is the single most expensive ordering mistake available in this phase.
+
+WebAuthn also requires a secure context — HTTPS in production, `localhost` in
+dev. Both already hold.
+
+### C1. Registration (settings)
+In `two-factor-card.tsx`, "Add a passkey" runs the native helper — no
+`@simplewebauthn/browser` dependency, the SDK wraps the ceremony:
+
+```ts
+await supabase.auth.mfa.enroll({ factorType: 'webauthn', friendlyName: 'MacBook' })
+// then the browser ceremony + verify, via supabase.auth.mfa.webauthn.register(...)
+```
+
+Name each credential (`friendlyName`) and list them with `mfa.listFactors()`, so
+a user can see and revoke "iPhone" separately from "Work laptop". Encourage a
+**second** passkey at enrolment — that is what makes lockout a non-event.
+
+### C2. Sign-in
+On the login page's `email` step, offer "Continue with passkey" *before* asking
+for anything else:
+
+```ts
+await supabase.auth.signInWithPasskey()
+```
+
+Because this is a top-level sign-in (not an MFA challenge), a successful passkey
+ends the ceremony — no code, no password, no TOTP prompt.
+
+Gate the button on `PublicKeyCredential.isConditionalMediationAvailable?.()` and
+hide it where unsupported, so no dead button on old browsers. Consider
+conditional UI (autofill-style passkey suggestions on the email field) as a
+follow-up, not for the first cut.
+
+### C3. Verify the assurance level, do not assume it
+`signInWithPasskey` **must** be confirmed to produce `aal2` (or otherwise satisfy
+the gate in Stage E). `AMRMethods` includes `mfa/webauthn`, so this is very
+likely, but if a passkey sign-in lands at `aal1` while the account also has a
+TOTP factor, the user gets prompted for TOTP after a passkey — the exact
+friction this design exists to avoid. Test it before shipping Stage E.
+
+---
+
+## Stage D — TOTP, as the fallback gate
+
+Supabase-native (`supabase.auth.mfa.*`). Only reached by users signing in with a
+password or an emailed code on a device with no passkey.
+
+### D1. Enrolment UI
 New `frontend/src/components/settings/two-factor-card.tsx`, rendered on
 `settings/profile/page.tsx` beside the existing "Change password" card.
 
@@ -268,7 +324,7 @@ A factor stays `unverified` until the first correct code, so a half-finished
 enrolment can never lock anyone out. Disabling calls `mfa.unenroll({ factorId })`
 and must itself be gated behind a fresh TOTP code.
 
-### C2. The gate at login
+### D2. The gate at login
 After any successful sign-in, `mfa.getAuthenticatorAssuranceLevel()` returns
 `{ currentLevel, nextLevel }`. When `nextLevel === 'aal2'` and
 `currentLevel === 'aal1'`, the account has a verified factor and the session
@@ -280,7 +336,14 @@ identically whether the user arrived by password, code, link or OAuth. When no
 factor is enrolled the levels match and nothing is shown — which is the
 "if 2FA is off, don't ask" requirement.
 
-### C3. Server-side enforcement — the part that makes it real
+Because a passkey sign-in already reaches `aal2` (confirm this per C3), the same
+condition naturally skips the prompt for passkey users. No special-casing.
+
+---
+
+## Stage E — Server-side enforcement, the part that makes it real
+
+### E1. Enforce `aal` in the backend
 Migration `0019_mfa_helpers.sql`: a SECURITY DEFINER function
 `user_has_verified_mfa(p_user uuid) returns boolean` reading `auth.mfa_factors`
 where `status = 'verified'`. Same shape and same deny-by-default posture as
@@ -297,21 +360,24 @@ per request. The codebase already has this pattern — see
 `vector_ann_capability_ttl_seconds` in `backend/app/config.py:170` and the
 memoised size probe in `services/retrieval.py`.
 
-### C4. Open decision — lockout recovery
-**Supabase TOTP does not ship backup codes.** With C3 enforcing `aal2`
-server-side, a lost phone means a total lockout from the API, not just the UI.
-This must be answered before C3 ships. Options:
+### E2. Lockout recovery — decide before enforcing
+**Supabase ships no backup codes.** Once Stage E enforces `aal2` server-side, a
+lost authenticator is a total API lockout, not merely a UI one. Answer this
+before turning enforcement on.
 
-- **Allow a second enrolled factor** (a tablet, a password manager). Cheapest,
-  entirely native, no new surface.
-- **Own backup codes** — a `mfa_recovery_codes` table of one-way hashes, single
-  use. More code, and a second credential to store safely.
-- **Support-assisted removal** via `auth.admin.mfa.deleteFactor` behind an
-  identity check. No build cost, but it is a manual process and a social-engineering
-  target.
+Passkeys change the arithmetic here for the better: modern passkeys **sync**
+through iCloud Keychain, Google Password Manager or 1Password, so a lost phone
+usually is not a lost credential. That makes the cheap option genuinely
+sufficient:
 
-Recommended: allow multiple factors now, add backup codes if support load
-appears.
+- **Require a second factor at enrolment** — a second passkey, or a passkey plus
+  TOTP. Native, no new surface, and the recommended path.
+- **Own backup codes** — an `mfa_recovery_codes` table of one-way single-use
+  hashes. Only worth it if support load appears.
+- **Support-assisted removal** via the admin API behind an identity check. Zero
+  build cost, but manual and a social-engineering target.
+
+Recommended: require two factors at enrolment, revisit if users still get stuck.
 
 ---
 
@@ -328,8 +394,27 @@ appears.
 **New**
 
 - `frontend/src/components/auth/otp-field.tsx`
-- `frontend/src/components/settings/two-factor-card.tsx`
+- `frontend/src/components/settings/two-factor-card.tsx` — lists every enrolled
+  factor (passkeys by `friendlyName`, plus TOTP), with add and revoke
 - `supabase/migrations/0019_mfa_helpers.sql`
+
+**No new dependency.** `@supabase/auth-js@2.108.1` already wraps the WebAuthn
+browser ceremony (`supabase.auth.mfa.webauthn.register/authenticate`), so
+`@simplewebauthn/browser` is not needed.
+
+## Suggested build order
+
+Passkeys first: they carry the most security value, have **no email
+dependency**, and can therefore ship while SMTP is still being arranged.
+
+1. **C0** — settle the custom domain question. Everything else is cheap to
+   redo; passkeys enrolled on the wrong RP ID are not.
+2. **Stage C** — passkey registration + `signInWithPasskey`, no enforcement yet.
+3. **Stage A** — codes on signup / reset / password change (needs SMTP).
+4. **Stage B** — emailed code as a login option.
+5. **Stage D** — TOTP for the fallback paths.
+6. **Stage E** — turn on server-side `aal` enforcement, last, once E2's recovery
+   path has actually been exercised.
 
 **Reused, not rewritten**
 
