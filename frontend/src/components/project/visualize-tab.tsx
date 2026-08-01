@@ -11,7 +11,6 @@ import {
   Plus,
   X,
 } from "@phosphor-icons/react/dist/ssr"
-import { useTheme } from "next-themes"
 import {
   useCallback,
   useEffect,
@@ -51,23 +50,21 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-/* Colors / sizes per node kind - files are the anchors, chunks the fine grain.
-   Separate palettes per theme so nodes and edges keep contrast on both
-   canvases. The renderer multiplies edge colors by linkOpacity, so timid
-   values disappear - keep them bright/high-alpha. */
-const NODE_COLORS_DARK: Record<string, string> = {
+/* The canvas is pitch black in BOTH app themes - it is a viewing surface, not
+   a page, and a single constant backdrop is what keeps the graph looking the
+   same everywhere. So there is one palette rather than one per theme: the old
+   light-theme colors (#475569 chunks, #3f3f46 edges) were picked to sit on
+   near-white and would be close to invisible here.
+
+   Files are the anchors, chunks the fine grain. The renderer multiplies edge
+   colors by linkOpacity, so timid values disappear - keep them high-alpha. */
+const CANVAS_BG = "#000000"
+const NODE_COLORS: Record<string, string> = {
   project: "#f59e0b",
   file: "#38bdf8",
   section: "#a78bfa",
   chunk: "#64748b",
   memory: "#34d399",
-}
-const NODE_COLORS_LIGHT: Record<string, string> = {
-  project: "#d97706",
-  file: "#0284c7",
-  section: "#7c3aed",
-  chunk: "#475569",
-  memory: "#059669",
 }
 const NODE_SIZES: Record<string, number> = {
   project: 10,
@@ -76,17 +73,15 @@ const NODE_SIZES: Record<string, number> = {
   chunk: 1.5,
   memory: 3,
 }
-const LINK_COLORS_DARK: Record<string, string> = {
+/* Sphere segments per node. The library default (8) is a visibly faceted
+   lump at file/project size; 16 reads as round without meaningfully changing
+   the triangle count at these radii. */
+const NODE_RESOLUTION = 16
+const LINK_COLORS: Record<string, string> = {
   related: "#38bdf8",
   contains: "rgba(212, 212, 216, 0.75)",
   next: "rgba(161, 161, 170, 0.55)",
   derived_from: "rgba(161, 161, 170, 0.4)",
-}
-const LINK_COLORS_LIGHT: Record<string, string> = {
-  related: "#0284c7",
-  contains: "rgba(63, 63, 70, 0.65)",
-  next: "rgba(82, 82, 91, 0.5)",
-  derived_from: "rgba(82, 82, 91, 0.38)",
 }
 
 const LEGEND = [
@@ -96,12 +91,20 @@ const LEGEND = [
   { type: "memory", label: "Memories" },
 ] as const
 
-/* Bloom (the node glow). threshold 0.1 means "only pixels brighter than this
-   bloom", which is why this is DARK MODE ONLY: the light canvas (#fafafa) is
-   brighter than every node on it, so on light the whole frame would blow out
-   rather than the nodes glowing. Strength stays low - the goal is that nodes
-   read as emitting light, not that the graph turns into a smear. */
-const BLOOM = { strength: 0.85, radius: 0.5, threshold: 0.1 }
+/* Bloom (the node glow), tuned deliberately faint: a suggestion that the nodes
+   emit light, not a halo.
+
+   The two numbers do different jobs and both matter. threshold is the
+   brightness a pixel must clear before it blooms at all - at 0.28 only the lit
+   core of a node qualifies, so edges and dim chunks stay crisp instead of
+   fogging. strength then scales what is left. Turning strength down alone
+   would dim a glow that still covered the whole graph; raising the threshold
+   is what makes it minimal.
+
+   A pitch-black canvas is what allows this in both themes: bloom keys off
+   absolute brightness, so on the old near-white light canvas the backdrop
+   itself cleared any threshold and the whole frame blew out. */
+const BLOOM = { strength: 0.28, radius: 0.55, threshold: 0.28 }
 /* Bloom is one extra full-screen GPU pass per frame. Past this many nodes the
    scene is already the bottleneck, so the glow is dropped rather than making a
    big graph unusable to look prettier. */
@@ -493,13 +496,6 @@ export function VisualizeTab({
   // takes a moment) - drives the "Locating file..." state on the button.
   const [locating, setLocating] = useState(false)
 
-  // Theme-matched canvas: dark scene in dark mode, paper-light in light mode.
-  const { resolvedTheme } = useTheme()
-  const isDark = resolvedTheme !== "light"
-  const nodeColors = isDark ? NODE_COLORS_DARK : NODE_COLORS_LIGHT
-  const linkColors = isDark ? LINK_COLORS_DARK : LINK_COLORS_LIGHT
-  const canvasBg = isDark ? "#09090b" : "#fafafa"
-
   // The library mutates node/link objects (adds coordinates) - feed it clones.
   const graphData = useMemo(
     () => ({
@@ -609,9 +605,7 @@ export function VisualizeTab({
 
   // The glow. See BLOOM above for why this is dark-mode-only and size-capped.
   const bloomOn =
-    isDark &&
-    graphData.nodes.length > 0 &&
-    graphData.nodes.length <= BLOOM_MAX_NODES
+    graphData.nodes.length > 0 && graphData.nodes.length <= BLOOM_MAX_NODES
   const bloomRef = useRef<UnrealBloomPass | null>(null)
   useEffect(() => {
     if (!bloomOn) return
@@ -768,7 +762,7 @@ export function VisualizeTab({
             <span key={entry.type} className="inline-flex items-center gap-1.5">
               <span
                 className="size-2.5 rounded-full"
-                style={{ backgroundColor: nodeColors[entry.type] }}
+                style={{ backgroundColor: NODE_COLORS[entry.type] }}
               />
               {entry.label}
             </span>
@@ -793,7 +787,12 @@ export function VisualizeTab({
         <div
           ref={boxRef}
           className={cn(
-            "relative overflow-hidden border bg-zinc-50 dark:border-zinc-800 dark:bg-[#09090b]",
+            // `dark` is load-bearing, not cosmetic: globals.css defines the
+            // theme tokens under `.dark`, so scoping it here makes everything
+            // inside the panel - loader, toolbar, details popup - render dark
+            // whatever the app theme is. Without it a light-theme user gets a
+            // white popup and a light loader floating on a black canvas.
+            "dark relative overflow-hidden border border-zinc-800 bg-black",
             fullscreen
               ? // Half an inch of blurred page on every side, per the design.
                 // Only the CSS changes here - the element is never re-parented,
@@ -803,7 +802,7 @@ export function VisualizeTab({
                 // header, tabs and card chrome (~22.5rem) so the whole tab fits
                 // the viewport with no page scroll; phones keep a fixed height
                 // and scroll as usual.
-                "h-[52dvh] min-h-[320px] rounded-xl sm:h-[420px] lg:h-[calc(100dvh-26rem)] lg:min-h-[380px]",
+                "h-[52dvh] min-h-[320px] rounded-2xl sm:h-[420px] lg:h-[calc(100dvh-26rem)] lg:min-h-[380px]",
             // Only a hint - the canvas child sets its own cursor while dragging.
             panning && "cursor-grab active:cursor-grabbing"
           )}
@@ -826,28 +825,23 @@ export function VisualizeTab({
               width={size.width}
               height={size.height}
               graphData={graphData}
-              backgroundColor={canvasBg}
+              backgroundColor={CANVAS_BG}
               controlType="orbit"
               showNavInfo={false}
+              // One tooltip treatment, because there is one canvas colour.
               nodeLabel={(node: GNode) =>
-                isDark
-                  ? `<div style="padding:6px 10px;border-radius:8px;background:rgba(24,24,27,.95);border:1px solid rgba(255,255,255,.12);color:#fafafa;font-size:12px;max-width:280px">
-                       <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(node.label)}</div>
-                       <div style="color:#a1a1aa;text-transform:capitalize">${esc(node.type)}</div>
-                     </div>`
-                  : `<div style="padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.97);border:1px solid rgba(0,0,0,.12);color:#18181b;font-size:12px;max-width:280px;box-shadow:0 4px 12px rgba(0,0,0,.08)">
-                       <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(node.label)}</div>
-                       <div style="color:#52525b;text-transform:capitalize">${esc(node.type)}</div>
-                     </div>`
+                `<div style="padding:6px 10px;border-radius:8px;background:rgba(24,24,27,.95);border:1px solid rgba(255,255,255,.12);color:#fafafa;font-size:12px;max-width:280px">
+                   <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(node.label)}</div>
+                   <div style="color:#a1a1aa;text-transform:capitalize">${esc(node.type)}</div>
+                 </div>`
               }
-              nodeColor={(node: GNode) =>
-                nodeColors[node.type] ?? (isDark ? "#e4e4e7" : "#3f3f46")
-              }
+              nodeColor={(node: GNode) => NODE_COLORS[node.type] ?? "#e4e4e7"}
               nodeVal={(node: GNode) => NODE_SIZES[node.type] ?? 2}
+              nodeResolution={NODE_RESOLUTION}
               nodeOpacity={0.92}
               linkColor={(link) =>
-                linkColors[(link as { type?: string }).type ?? ""] ??
-                (isDark ? "rgba(212, 212, 216, 0.6)" : "rgba(63, 63, 70, 0.5)")
+                LINK_COLORS[(link as { type?: string }).type ?? ""] ??
+                "rgba(212, 212, 216, 0.6)"
               }
               linkOpacity={0.9}
               linkWidth={(link) =>
@@ -917,7 +911,7 @@ export function VisualizeTab({
                   <span
                     className="size-2 rounded-full"
                     style={{
-                      backgroundColor: nodeColors[selected.type] ?? "#71717a",
+                      backgroundColor: NODE_COLORS[selected.type] ?? "#71717a",
                     }}
                   />
                   {selected.type}
