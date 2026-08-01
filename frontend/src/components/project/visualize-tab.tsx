@@ -356,6 +356,9 @@ function createNodeGlow(node: GNode) {
   const halo = new Sprite(material)
   halo.scale.setScalar(style.size)
   halo.renderOrder = 1
+  // The halo is visual only. Leaving the Sprite raycast enabled would make
+  // transparent pixels around the sphere behave like an oversized node hitbox.
+  halo.raycast = () => undefined
   return halo
 }
 
@@ -743,8 +746,21 @@ export function VisualizeTab({
   // A brain with just the project node has nothing to show yet.
   const isEmpty = !isLoading && data && data.nodes.length <= 1
 
-  const fileIdOf = (node: MemoryGraphNode) =>
-    node.type === "file" ? node.id.slice("file:".length) : null
+  const fileIdOf = (node: MemoryGraphNode) => {
+    if (node.type === "file") return node.id.slice("file:".length)
+    const metadataFileId = node.metadata?.file_id
+    return typeof metadataFileId === "string" ? metadataFileId : null
+  }
+
+  const selectedFileId = selected ? fileIdOf(selected) : null
+  const selectedFileName = selected
+    ? typeof selected.metadata?.filename === "string"
+      ? selected.metadata.filename
+      : data?.nodes.find(
+          (node) =>
+            node.type === "file" && node.id === `file:${selectedFileId}`
+        )?.label ?? null
+    : null
 
   return (
     <Card>
@@ -864,6 +880,7 @@ export function VisualizeTab({
               nodeOpacity={0.98}
               nodeThreeObject={createNodeGlow}
               nodeThreeObjectExtend
+              enableNodeDrag={false}
               linkColor={(link) =>
                 LINK_COLORS[(link as { type?: string }).type ?? ""] ??
                 "rgba(212, 212, 216, 0.6)"
@@ -873,7 +890,10 @@ export function VisualizeTab({
                 LINK_WIDTHS[(link as { type?: string }).type ?? ""] ?? 1.4
               }
               linkResolution={LINK_RESOLUTION}
-              onNodeClick={(node) => focusNode(node as GNode)}
+              onNodeClick={(node, event) => {
+                event.stopPropagation()
+                focusNode(node as GNode)
+              }}
               onBackgroundClick={() => setSelected(null)}
             />
           )}
@@ -931,7 +951,11 @@ export function VisualizeTab({
             // the middle body scrolls - with the custom scrollbar - so every
             // node popup (file, section, chunk, memory) behaves the same when
             // its text or metadata is long.
-            <div className="absolute right-3 top-3 flex max-h-[calc(100%-1.5rem)] w-72 max-w-[calc(100%-1.5rem)] flex-col rounded-xl border bg-background/95 p-4 text-foreground shadow-xl backdrop-blur">
+            <div
+              className="absolute right-3 top-3 flex max-h-[calc(100%-1.5rem)] w-72 max-w-[calc(100%-1.5rem)] flex-col rounded-xl border bg-background/95 p-4 text-foreground shadow-xl backdrop-blur"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+            >
               <div className="flex shrink-0 items-start justify-between gap-2">
                 <Badge variant="outline" className="capitalize">
                   <span
@@ -954,6 +978,14 @@ export function VisualizeTab({
                 </Button>
               </div>
               <div className="styled-scrollbar mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
+                {selectedFileName && selected.type !== "file" && (
+                  <p className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <FileText className="size-3.5 shrink-0" />
+                    <span className="truncate" title={selectedFileName}>
+                      {selectedFileName}
+                    </span>
+                  </p>
+                )}
                 <p className="break-words text-sm font-medium leading-snug">
                   {selected.label}
                 </p>
@@ -978,7 +1010,7 @@ export function VisualizeTab({
                     ))}
                 </dl>
               </div>
-              {fileIdOf(selected) && (
+              {selectedFileId && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -990,7 +1022,7 @@ export function VisualizeTab({
                     // the second time and stranded this button on
                     // "Locating file...".
                     setLocating(true)
-                    onViewFile(fileIdOf(selected) as string)
+                    onViewFile(selectedFileId)
                   }}
                 >
                   {locating ? (
