@@ -12,7 +12,11 @@ import { useRouter } from "next/navigation"
 import { useCallback, useState } from "react"
 
 import { AuthShell } from "@/components/auth-shell"
-import { OtpField, isCompleteCode } from "@/components/auth/otp-field"
+import {
+  OtpField,
+  TOTP_LENGTH,
+  isCompleteCode,
+} from "@/components/auth/otp-field"
 import { OAuthButtons, OrDivider } from "@/components/auth/oauth-buttons"
 import { SetPasswordForm } from "@/components/set-password-form"
 import { Button } from "@/components/ui/button"
@@ -35,6 +39,15 @@ type AuthMethods = {
   exists: boolean
   has_password: boolean
   providers: Provider[]
+  /**
+   * Whether this account has a login passkey (auth.webauthn_credentials).
+   * Optional because an environment running migration 0017 but not 0020 does
+   * not return it - in which case the passkey button simply stays hidden
+   * rather than appearing and failing.
+   */
+  has_passkey?: boolean
+  /** Whether any verified second factor exists. Informational only. */
+  has_mfa?: boolean
 }
 const PROVIDER_LABEL: Record<Provider, string> = {
   google: "Google",
@@ -163,8 +176,9 @@ export default function LoginPage() {
   async function handlePasskey() {
     setLoading(true)
     try {
-      // Discoverable credential: the authenticator supplies the identity, so
-      // this deliberately runs from the FIRST step with no email typed.
+      // Discoverable credential. signInWithPasskey takes no email - the
+      // authenticator supplies the identity - so the typed address only
+      // decides WHETHER to offer this, never which credential is used.
       const { error } = await supabase.auth.signInWithPasskey()
       if (error) throw error
       await routeAfterSignIn()
@@ -338,6 +352,38 @@ export default function LoginPage() {
     setNotFound(false)
   }
 
+  /**
+   * "Continue with a passkey", offered only once we know the account has one.
+   *
+   * Two conditions, both necessary. `has_passkey` comes from the identifier
+   * lookup (migration 0020, read from auth.webauthn_credentials): showing this
+   * to an account without a passkey opens the system prompt and then fails with
+   * nothing to select, which reads as broken software. `passkeySupported`
+   * covers browsers that cannot do WebAuthn at all.
+   *
+   * Absent on the email step by design - there is nothing to gate on until an
+   * address has been entered.
+   */
+  const passkeyButton =
+    methods?.has_passkey && passkeySupported !== false ? (
+      <Button
+        type="button"
+        variant="outline"
+        className="h-11 w-full gap-2 rounded-xl text-[15px] sm:h-12"
+        disabled={loading || passkeySupported === null}
+        onClick={handlePasskey}
+      >
+        {loading ? (
+          <Spin />
+        ) : (
+          <>
+            <Fingerprint weight="duotone" className="size-5" />
+            Continue with a passkey
+          </>
+        )}
+      </Button>
+    ) : null
+
   // The email, shown as a compact chip on later steps with a "change" affordance.
   const emailChip = (
     <button
@@ -378,31 +424,6 @@ export default function LoginPage() {
       <div key={step} className="space-y-6 animate-[auth-step-in_0.28s_ease-out]">
         {step === "email" && (
           <>
-            {/* Passkeys lead: one tap, no typing, nothing to phish. Hidden
-                rather than disabled where unsupported - a dead button is worse
-                than no button. */}
-            {passkeySupported !== false && (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full gap-2 rounded-xl text-[15px] sm:h-12"
-                  disabled={loading || passkeySupported === null}
-                  onClick={handlePasskey}
-                >
-                  {loading ? (
-                    <Spin />
-                  ) : (
-                    <>
-                      <Fingerprint weight="duotone" className="size-5" />
-                      Continue with a passkey
-                    </>
-                  )}
-                </Button>
-                <OrDivider />
-              </>
-            )}
-
             <form onSubmit={handleContinue} className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="email" className="sr-only">
@@ -498,6 +519,13 @@ export default function LoginPage() {
               </Button>
             </form>
 
+            {passkeyButton && (
+              <>
+                <OrDivider />
+                {passkeyButton}
+              </>
+            )}
+
             <button
               type="button"
               onClick={sendLoginCode}
@@ -528,6 +556,7 @@ export default function LoginPage() {
               . Continue below to sign in.
             </p>
             <OAuthButtons only={methods.providers} />
+            {passkeyButton}
             <p className="text-center text-xs text-muted-foreground">
               Prefer email?{" "}
               <button
@@ -615,11 +644,14 @@ export default function LoginPage() {
               disabled={loading}
               invalid={codeError}
               label="Authentication code"
+              // Authenticator codes are six by RFC 6238, whatever the email
+              // OTP length happens to be set to.
+              length={TOTP_LENGTH}
             />
             <Button
               type="button"
               className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
-              disabled={!isCompleteCode(code) || loading}
+              disabled={!isCompleteCode(code, TOTP_LENGTH) || loading}
               onClick={() => verifyMfa(code)}
             >
               {loading ? <Spin /> : "Verify"}

@@ -25,6 +25,20 @@ export const OTP_LENGTH =
     : 6
 
 /**
+ * Authenticator-app codes are ALWAYS six digits.
+ *
+ * TOTP is six by specification (RFC 6238 / RFC 4226 default) and every
+ * mainstream authenticator - Google Authenticator, 1Password, Authy - emits
+ * six. It is a separate mechanism from the emailed OTP above and is completely
+ * unaffected by the project's email OTP length setting.
+ *
+ * So this is a constant, not configuration. Letting OTP_LENGTH drive a TOTP
+ * field would render eight boxes for a six-digit code the moment someone
+ * changed an unrelated email setting.
+ */
+export const TOTP_LENGTH = 6
+
+/**
  * Verification code input, one box per digit.
  *
  * Behaviours that matter and are easy to get wrong:

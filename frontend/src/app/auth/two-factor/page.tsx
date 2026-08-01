@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
 
 import { AuthShell } from "@/components/auth-shell"
-import { OtpField, isCompleteCode } from "@/components/auth/otp-field"
+import {
+  OtpField,
+  TOTP_LENGTH,
+  isCompleteCode,
+} from "@/components/auth/otp-field"
 import { Button } from "@/components/ui/button"
 import { Spin } from "@/components/ui/loader"
 import { authErrorMessage } from "@/lib/auth-errors"
@@ -126,11 +130,12 @@ export default function TwoFactorPage() {
               disabled={loading}
               invalid={invalid}
               label="Authentication code"
+              length={TOTP_LENGTH}
             />
             <Button
               type="button"
               className="h-11 w-full rounded-xl text-[15px] sm:h-12"
-              disabled={!isCompleteCode(code) || loading}
+              disabled={!isCompleteCode(code, TOTP_LENGTH) || loading}
               onClick={() => verify(code)}
             >
               {loading ? <Spin /> : "Verify"}

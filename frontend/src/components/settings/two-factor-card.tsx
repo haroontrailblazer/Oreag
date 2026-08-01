@@ -12,7 +12,11 @@ import Image from "next/image"
 import { useCallback, useState } from "react"
 import useSWR from "swr"
 
-import { OtpField, isCompleteCode } from "@/components/auth/otp-field"
+import {
+  OtpField,
+  TOTP_LENGTH,
+  isCompleteCode,
+} from "@/components/auth/otp-field"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -420,6 +424,7 @@ export function TwoFactorCard() {
                 onComplete={confirmTotp}
                 disabled={verifying}
                 invalid={totpError}
+                length={TOTP_LENGTH}
               />
             </div>
           </div>
@@ -430,7 +435,7 @@ export function TwoFactorCard() {
             </Button>
             <Button
               type="button"
-              disabled={!isCompleteCode(totpCode) || verifying}
+              disabled={!isCompleteCode(totpCode, TOTP_LENGTH) || verifying}
               onClick={() => confirmTotp(totpCode)}
             >
               {verifying ? <Spin /> : "Verify and enable"}
