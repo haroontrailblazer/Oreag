@@ -125,14 +125,17 @@ export function TwoFactorCard() {
     try {
       const { data, error } = await supabase.auth.registerPasskey({})
       if (error) throw error
-      await passkeys.mutate()
-      // Name it immediately - the id comes back from registration, and asking
-      // now is the only moment the user knows which device this is.
+
+      // React the instant the ceremony returns. The naming dialog and the
+      // toast used to sit behind `await passkeys.mutate()` - a full refetch -
+      // so the UI froze for a beat after the fingerprint with nothing to show
+      // for it. The refetch still happens, it just no longer blocks feedback.
       if (data?.id) {
         setNamingId(data.id)
         setNameDraft(suggestPasskeyName())
       }
       toast.success("Passkey added")
+      void passkeys.mutate()
     } catch (err) {
       if (isPasskeyCancellation(err)) return
       toast.error(authErrorMessage(err, "Could not add that passkey."))

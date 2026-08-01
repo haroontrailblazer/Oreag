@@ -99,6 +99,10 @@ export default function LoginPage() {
   const [recovered, setRecovered] = useState(false)
   const resend = useResendCooldown()
 
+  // NOTE: do NOT prefetch /dashboard from here. It is behind the middleware,
+  // so a prefetch issued while still signed out is answered with a redirect to
+  // /login - and Next caches that. The push after a successful sign-in would
+  // then replay the cached redirect and bounce the user back to this page.
   const finish = useCallback(() => {
     router.push("/dashboard")
     router.refresh()
@@ -390,7 +394,10 @@ export default function LoginPage() {
         onClick={handlePasskey}
       >
         {loading ? (
-          <Spin />
+          <span className="inline-flex items-center gap-2">
+            Signing you in
+            <Spin />
+          </span>
         ) : (
           <>
             <Fingerprint weight="duotone" className="size-5" />
