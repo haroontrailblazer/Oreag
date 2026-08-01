@@ -22,9 +22,17 @@ import {
 import type ForceGraph3DComponent from "react-force-graph-3d"
 import type { ForceGraphMethods, NodeObject } from "react-force-graph-3d"
 import useSWR from "swr"
-import { MOUSE, TOUCH, Vector2 } from "three"
-import type { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js"
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js"
+import {
+  AdditiveBlending,
+  DataTexture,
+  LinearFilter,
+  MOUSE,
+  RGBAFormat,
+  Sprite,
+  SpriteMaterial,
+  TOUCH,
+  UnsignedByteType,
+} from "three"
 
 import { Badge } from "@/components/ui/badge"
 import { BestPractices } from "@/components/ui/best-practices"
@@ -83,6 +91,16 @@ const LINK_COLORS: Record<string, string> = {
   next: "rgba(161, 161, 170, 0.55)",
   derived_from: "rgba(161, 161, 170, 0.4)",
 }
+/* Every non-zero width becomes real cylinder geometry in three-forcegraph.
+   Relationship strength is expressed through diameter, while the higher
+   radial resolution keeps the silhouette round instead of hexagonal. */
+const LINK_WIDTHS: Record<string, number> = {
+  related: 2.6,
+  contains: 1.8,
+  next: 1.2,
+  derived_from: 1.1,
+}
+const LINK_RESOLUTION = 12
 
 const LEGEND = [
   { type: "file", label: "Files" },
@@ -91,24 +109,69 @@ const LEGEND = [
   { type: "memory", label: "Memories" },
 ] as const
 
-/* Bloom (the node glow), tuned deliberately faint: a suggestion that the nodes
-   emit light, not a halo.
+/* A small camera-facing halo per node keeps the glow centred instead of letting
+   directional sphere lighting bloom only one side of the graph. Anchor nodes
+   carry the cluster glow; tiny chunks stay deliberately restrained so dense
+   document groups remain sharp rather than merging into coloured fog. */
+const NODE_GLOW: Record<string, { opacity: number; size: number }> = {
+  project: { opacity: 0.4, size: 40 },
+  file: { opacity: 0.32, size: 30 },
+  section: { opacity: 0.24, size: 22 },
+  chunk: { opacity: 0.1, size: 16 },
+  memory: { opacity: 0.28, size: 22 },
+}
 
-   The two numbers do different jobs and both matter. threshold is the
-   brightness a pixel must clear before it blooms at all - at 0.28 only the lit
-   core of a node qualifies, so edges and dim chunks stay crisp instead of
-   fogging. strength then scales what is left. Turning strength down alone
-   would dim a glow that still covered the whole graph; raising the threshold
-   is what makes it minimal.
+const GLOW_TEXTURE_SIZE = 64
 
-   A pitch-black canvas is what allows this in both themes: bloom keys off
-   absolute brightness, so on the old near-white light canvas the backdrop
-   itself cleared any threshold and the whole frame blew out. */
-const BLOOM = { strength: 0.28, radius: 0.55, threshold: 0.28 }
-/* Bloom is one extra full-screen GPU pass per frame. Past this many nodes the
-   scene is already the bottleneck, so the glow is dropped rather than making a
-   big graph unusable to look prettier. */
-const BLOOM_MAX_NODES = 4000
+/** Soft radial alpha with a clean edge. The colour is supplied by each
+ * SpriteMaterial, so every node type can reuse the same tiny GPU texture. */
+function createGlowTexture() {
+  const data = new Uint8Array(GLOW_TEXTURE_SIZE * GLOW_TEXTURE_SIZE * 4)
+  const center = (GLOW_TEXTURE_SIZE - 1) / 2
+
+  for (let y = 0; y < GLOW_TEXTURE_SIZE; y += 1) {
+    for (let x = 0; x < GLOW_TEXTURE_SIZE; x += 1) {
+      const distance = Math.hypot(x - center, y - center) / center
+      const falloff = Math.pow(Math.max(0, 1 - distance), 1.65)
+      const offset = (y * GLOW_TEXTURE_SIZE + x) * 4
+      data[offset] = 255
+      data[offset + 1] = 255
+      data[offset + 2] = 255
+      data[offset + 3] = Math.round(falloff * 255)
+    }
+  }
+
+  const texture = new DataTexture(
+    data,
+    GLOW_TEXTURE_SIZE,
+    GLOW_TEXTURE_SIZE,
+    RGBAFormat,
+    UnsignedByteType
+  )
+  texture.minFilter = LinearFilter
+  texture.magFilter = LinearFilter
+  texture.generateMipmaps = false
+  texture.needsUpdate = true
+  return texture
+}
+
+const GLOW_TEXTURE = createGlowTexture()
+const NODE_GLOW_MATERIALS = Object.fromEntries(
+  Object.entries(NODE_GLOW).map(([type, style]) => [
+    type,
+    new SpriteMaterial({
+      map: GLOW_TEXTURE,
+      color: NODE_COLORS[type],
+      opacity: style.opacity,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthTest: true,
+      depthWrite: false,
+      alphaTest: 0.01,
+      toneMapped: false,
+    }),
+  ])
+) as Record<string, SpriteMaterial>
 
 /* Camera dolly per +/- press, and the distance band it may not leave: too
    close and the camera ends up inside the graph with nothing on screen, too
@@ -285,6 +348,16 @@ function DimensionsIllustration() {
 }
 
 type GNode = NodeObject<MemoryGraphNode>
+
+function createNodeGlow(node: GNode) {
+  const style = NODE_GLOW[node.type] ?? NODE_GLOW.section
+  const material = NODE_GLOW_MATERIALS[node.type] ?? NODE_GLOW_MATERIALS.section
+
+  const halo = new Sprite(material)
+  halo.scale.setScalar(style.size)
+  halo.renderOrder = 1
+  return halo
+}
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -603,56 +676,6 @@ export function VisualizeTab({
     return () => clearTimeout(timer)
   }, [graphData, ForceGraph3D])
 
-  // The glow. See BLOOM above for why this is dark-mode-only and size-capped.
-  const bloomOn =
-    graphData.nodes.length > 0 && graphData.nodes.length <= BLOOM_MAX_NODES
-  const bloomRef = useRef<UnrealBloomPass | null>(null)
-  useEffect(() => {
-    if (!bloomOn) return
-    let cancelled = false
-    // Captured here rather than re-read from fgRef in the cleanup: by teardown
-    // the ref may already point at a different graph instance, and removing a
-    // pass from the wrong composer leaves the old one rendering a dead pass.
-    let attached: { composer: EffectComposer; pass: UnrealBloomPass } | null =
-      null
-    const apply = () => {
-      if (cancelled) return
-      const composer = fgRef.current?.postProcessingComposer()
-      if (!composer) {
-        setTimeout(apply, 200)
-        return
-      }
-      // The composer already renders every frame with a RenderPass in front,
-      // so this appends to it rather than taking rendering over.
-      const pass = new UnrealBloomPass(
-        new Vector2(size.width || 1, size.height || 1),
-        BLOOM.strength,
-        BLOOM.radius,
-        BLOOM.threshold
-      )
-      composer.addPass(pass)
-      attached = { composer, pass }
-      bloomRef.current = pass
-    }
-    apply()
-    return () => {
-      cancelled = true
-      if (!attached) return
-      // Remove before dispose: a disposed pass left in the chain renders from
-      // freed render targets. Toggling the theme runs exactly this path.
-      attached.composer.removePass(attached.pass)
-      attached.pass.dispose()
-      bloomRef.current = null
-    }
-    // size is deliberately absent - resizing is handled below, and rebuilding
-    // the pass' render targets on every ResizeObserver tick would thrash.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bloomOn, ForceGraph3D, graphData])
-
-  useEffect(() => {
-    if (size.width > 0) bloomRef.current?.setSize(size.width, size.height)
-  }, [size])
-
   // Full screen is an in-page overlay, not the Fullscreen API: the ask was a
   // panel floating over a blurred page, which the real API cannot do (it goes
   // edge to edge on a black backdrop). The graph element itself is only
@@ -838,15 +861,18 @@ export function VisualizeTab({
               nodeColor={(node: GNode) => NODE_COLORS[node.type] ?? "#e4e4e7"}
               nodeVal={(node: GNode) => NODE_SIZES[node.type] ?? 2}
               nodeResolution={NODE_RESOLUTION}
-              nodeOpacity={0.92}
+              nodeOpacity={0.98}
+              nodeThreeObject={createNodeGlow}
+              nodeThreeObjectExtend
               linkColor={(link) =>
                 LINK_COLORS[(link as { type?: string }).type ?? ""] ??
                 "rgba(212, 212, 216, 0.6)"
               }
-              linkOpacity={0.9}
+              linkOpacity={0.78}
               linkWidth={(link) =>
-                (link as { type?: string }).type === "related" ? 1.8 : 0.7
+                LINK_WIDTHS[(link as { type?: string }).type ?? ""] ?? 1.4
               }
+              linkResolution={LINK_RESOLUTION}
               onNodeClick={(node) => focusNode(node as GNode)}
               onBackgroundClick={() => setSelected(null)}
             />
