@@ -356,7 +356,7 @@ export function FilesTab({
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <BestPractices
-            className="order-last ml-auto"
+            className="order-last ml-auto sm:order-none sm:ml-0"
             tips={[
               {
                 visual: <DocTypesViz />,

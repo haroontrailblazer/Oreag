@@ -456,7 +456,10 @@ print(data["answer"])`
               </CardDescription>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              <BestPractices className="order-last ml-auto" tips={BEST_PRACTICE_TIPS} />
+              <BestPractices
+                className="order-last ml-auto sm:order-none sm:ml-0"
+                tips={BEST_PRACTICE_TIPS}
+              />
               <Button
                 onClick={handleCreate}
                 disabled={creating}
