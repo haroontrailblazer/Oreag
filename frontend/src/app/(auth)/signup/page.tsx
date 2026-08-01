@@ -3,16 +3,19 @@
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { toast } from "@/lib/toast"
 
 import { AuthShell } from "@/components/auth-shell"
+import { OtpField, isCompleteCode } from "@/components/auth/otp-field"
 import { OAuthButtons, OrDivider } from "@/components/auth/oauth-buttons"
 import { ConfirmPasswordField, PasswordField } from "@/components/password-field"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spin } from "@/components/ui/loader"
+import { authErrorMessage } from "@/lib/auth-errors"
+import { useResendCooldown } from "@/lib/auth-hooks"
 import { passwordFailures } from "@/lib/password"
 import { createClient } from "@/lib/supabase/client"
 
@@ -27,8 +30,57 @@ export default function SignupPage() {
   const [attempted, setAttempted] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
   const [existing, setExisting] = useState(false)
+  const [code, setCode] = useState("")
+  const [codeError, setCodeError] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const resend = useResendCooldown()
 
   const failing = passwordFailures(password)
+
+  /**
+   * Confirm the account with the emailed code.
+   *
+   * `verifyOtp` with `token` is the same call the link handler at
+   * /auth/confirm makes with `token_hash` - one code path, two carriers - so
+   * whichever the user reaches for, the outcome is identical.
+   */
+  const verifyCode = useCallback(
+    async (value: string) => {
+      if (verifying) return
+      setVerifying(true)
+      setCodeError(false)
+      const { error } = await createClient().auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token: value,
+        type: "signup",
+      })
+      setVerifying(false)
+      if (error) {
+        setCodeError(true)
+        setCode("")
+        toast.error(authErrorMessage(error, "That code isn't right."))
+        return
+      }
+      toast.success("Email confirmed - welcome to Oreag")
+      router.push("/dashboard")
+      router.refresh()
+    },
+    [email, verifying, router]
+  )
+
+  async function resendCode() {
+    await resend.send(async () => {
+      const { error } = await createClient().auth.resend({
+        type: "signup",
+        email: email.trim().toLowerCase(),
+      })
+      if (error) {
+        toast.error(authErrorMessage(error))
+        return false
+      }
+      return true
+    })
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -42,11 +94,14 @@ export default function SignupPage() {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${location.origin}/auth/callback` },
+      // /auth/confirm rather than /auth/callback: the token_hash route works
+      // regardless of which browser opens the link, which the PKCE ?code=
+      // route cannot guarantee. The same email also carries a typeable code.
+      options: { emailRedirectTo: `${location.origin}/auth/confirm` },
     })
     setLoading(false)
     if (error) {
-      toast.error(error.message)
+      toast.error(authErrorMessage(error))
       return
     }
     // Supabase hides already-registered emails (enumeration protection): instead
@@ -71,10 +126,38 @@ export default function SignupPage() {
       subtitle="Start building RAG APIs over your documents"
     >
       {emailSent ? (
-        <p className="text-sm">
-          Check your inbox - we sent a confirmation link to{" "}
-          <span className="font-medium">{email}</span>.
-        </p>
+        <div className="space-y-4">
+          <p className="text-center text-sm text-muted-foreground">
+            We sent a 6-digit code to{" "}
+            <span className="font-medium text-foreground">{email}</span>. Enter
+            it below, or use the link in the same email.
+          </p>
+          <OtpField
+            value={code}
+            onChange={setCode}
+            onComplete={verifyCode}
+            disabled={verifying}
+            invalid={codeError}
+          />
+          <Button
+            type="button"
+            className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
+            disabled={!isCompleteCode(code) || verifying}
+            onClick={() => verifyCode(code)}
+          >
+            {verifying ? <Spin /> : "Confirm email"}
+          </Button>
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={resendCode}
+              disabled={resend.blocked}
+              className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline disabled:hover:text-muted-foreground"
+            >
+              {resend.label}
+            </button>
+          </div>
+        </div>
       ) : (
         <>
           <form onSubmit={handleSubmit} className="space-y-3">

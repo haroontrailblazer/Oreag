@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     supabase_jwt_aud: str = "authenticated"
 
+    # Two-factor enforcement. On, an access token below aal2 is refused (403)
+    # for any user who has a VERIFIED factor - which is what stops someone
+    # lifting an aal1 token out of the browser and skipping the prompt with
+    # curl. Users with no factor are unaffected, so this is safe to leave on
+    # from day one; it only starts biting an account the moment that account
+    # opts in. MFA_ENFORCE_AAL2=false disables it with a restart and no
+    # redeploy, for the case where a bad enrolment locks people out.
+    mfa_enforce_aal2: bool = True
+    # How long "does this user have a factor?" is memoised per process. Short,
+    # because it bounds how long a freshly enrolled factor takes to start being
+    # enforced and how long a removed one keeps being demanded.
+    mfa_cache_ttl_seconds: int = 60
+
     # BYOK: users supply their own provider keys; no shared server key is used.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     app_encryption_key: str = ""

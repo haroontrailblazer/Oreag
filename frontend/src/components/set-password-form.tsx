@@ -7,19 +7,28 @@ import { ConfirmPasswordField, PasswordField } from "@/components/password-field
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Spin } from "@/components/ui/loader"
+import { authErrorMessage } from "@/lib/auth-errors"
 import { passwordFailures } from "@/lib/password"
 import { createClient } from "@/lib/supabase/client"
 
 /**
  * New-password + confirm form with strength rules. Used by the password-reset
- * page and the Profile "Change password" card. Requires an active session
+ * flow and the Profile "Change password" card. Requires an active session
  * (recovery session or a signed-in user); calls supabase.auth.updateUser.
+ *
+ * `nonce` is the reauthentication code from `supabase.auth.reauthenticate()`.
+ * Supplying it is what lets a SIGNED-IN user change their password: without it
+ * a stolen live session is enough to take an account over permanently. The
+ * reset flow omits it, because verifying the emailed recovery code already
+ * proved control of the inbox moments earlier.
  */
 export function SetPasswordForm({
   submitLabel = "Update password",
+  nonce,
   onSuccess,
 }: {
   submitLabel?: string
+  nonce?: string
   onSuccess?: () => void
 }) {
   const [password, setPassword] = useState("")
@@ -37,10 +46,12 @@ export function SetPasswordForm({
       return
     }
     setLoading(true)
-    const { error } = await createClient().auth.updateUser({ password })
+    const { error } = await createClient().auth.updateUser(
+      nonce ? { password, nonce } : { password }
+    )
     setLoading(false)
     if (error) {
-      toast.error(error.message)
+      toast.error(authErrorMessage(error))
       return
     }
     setPassword("")

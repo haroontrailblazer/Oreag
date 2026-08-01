@@ -44,10 +44,37 @@ export const API_BASE =
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  /** The API refused this session until a second factor is cleared. */
+  mfaRequired: boolean
+  constructor(status: number, message: string, mfaRequired = false) {
     super(message)
     this.status = status
+    this.mfaRequired = mfaRequired
   }
+}
+
+/**
+ * Sent by the backend with a 403 when the session is below aal2 and the
+ * account has a verified factor. Read from a header rather than by matching
+ * the message, so rewording the message can never break the redirect.
+ */
+const MFA_REQUIRED_HEADER = "x-mfa-required"
+
+/**
+ * Bounce to the two-factor step, once.
+ *
+ * A session in this state is valid but unusable, and every in-flight SWR
+ * request will hit the same 403 - so without the guard the user gets a burst
+ * of redirects. `location.assign` rather than the router: this can fire from
+ * anywhere, including outside a React tree.
+ */
+let redirectingForMfa = false
+function redirectToMfa() {
+  if (redirectingForMfa || typeof window === "undefined") return
+  // Already there - redirecting would reload the page under the user mid-typing.
+  if (window.location.pathname === "/auth/two-factor") return
+  redirectingForMfa = true
+  window.location.assign("/auth/two-factor")
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -76,7 +103,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // non-JSON error body
     }
-    throw new ApiError(res.status, detail)
+    const mfaRequired = res.headers.get(MFA_REQUIRED_HEADER) === "1"
+    if (mfaRequired) redirectToMfa()
+    throw new ApiError(res.status, detail, mfaRequired)
   }
   if (res.status === 204) return undefined as T
   return res.json()

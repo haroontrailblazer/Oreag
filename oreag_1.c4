@@ -331,6 +331,20 @@ model {
         usage = component 'Usage Metering' 'One usage_events row per public request. Best-effort, never fails the request. The prerequisite for billing.' {
           #guard
         }
+        mfa = component 'Two-Factor Enforcement' 'Decides whether an access token that has not cleared a second factor may be used. The prompt in the browser is a courtesy; this is the control.' {
+          #guard
+          technology 'services/mfa.py · reads the aal claim · 60 s memoised probe · fails open'
+          metadata {
+            why 'a token below aal2 is NOT enough on its own to reject, because aal1 is also the correct level for an account with no second factor. The missing fact - does this user have one at all - is in auth.mfa_factors, which the app role cannot read.'
+            how 'migration 0019 adds SECURITY DEFINER public.user_has_verified_mfa(uuid), returning one boolean and nothing else about the factors. Same shape as auth_methods_for_email in 0017.'
+            enforced-in 'get_current_user in auth/jwt.py, so every authenticated route is covered by construction and a new route cannot forget it. FastAPI dependency caching means it shares the request session and costs no extra connection.'
+            response '403 plus an X-MFA-Required header, never 401. A 401 reads as signed-out to every client and triggers a re-login that lands in the same state.'
+            api-keys 'public /v1 traffic authenticates with API keys through a different dependency and is untouched: a key is not a person and has no second factor to present.'
+            fail-open 'a missing function (0019 unapplied) or a query error lets the request through. Failing closed would turn one bad migration into a silent total lockout of every account that enabled 2FA.'
+            kill-switch 'MFA_ENFORCE_AAL2=false disables it with a restart and no redeploy.'
+            cache 'per user, 60 s. Bounds how long a newly enrolled factor takes to be enforced and how long a removed one keeps being demanded.'
+          }
+        }
         contentVersion = component 'Content Version' 'Monotonic counter bumped on every chunk or memory write. It IS the cache signature, so invalidation is a single integer compare rather than two COUNT(*) probes.'
         maintenance = worker 'Maintenance Sweep' 'Prunes query_logs, usage_events and expired semantic-cache rows' {
           #background

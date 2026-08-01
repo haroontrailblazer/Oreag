@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/api/auth/methods", // pre-auth identifier-first login lookup
 ]
 
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
 
@@ -45,6 +46,11 @@ export async function proxy(request: NextRequest) {
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL("/login", request.url))
   }
+  // Signed-in users have no business on the entry pages. NOTE: never add
+  // /auth/two-factor here. That page is reached BY a signed-in user whose
+  // session has not yet cleared its second factor; bouncing it to /dashboard
+  // deadlocks the app, because the dashboard's first API call returns the 403
+  // that sent them there in the first place.
   if (user && (path === "/login" || path === "/signup")) {
     return NextResponse.redirect(new URL("/dashboard", request.url))
   }

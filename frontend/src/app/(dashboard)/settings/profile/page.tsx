@@ -17,7 +17,8 @@ import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
-import { SetPasswordForm } from "@/components/set-password-form"
+import { ChangePasswordCard } from "@/components/settings/change-password-card"
+import { TwoFactorCard } from "@/components/settings/two-factor-card"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { UserAvatar } from "@/components/user-avatar"
 import { Button } from "@/components/ui/button"
@@ -396,23 +397,14 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
 
+        {/* Full width: this is the most consequential security control on the
+            page, and its factor lists need the room. */}
+        <TwoFactorCard />
+
         {/* Two balanced rows of paired cards, like the project Settings tab. */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Security */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Change password</CardTitle>
-              <CardDescription>
-                Min 12 characters, one uppercase, one special character.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <SetPasswordForm
-                submitLabel="Update password"
-                onSuccess={() => toast.success("Password updated")}
-              />
-            </CardContent>
-          </Card>
+          {/* Security - reauthentication-gated, see the card's own notes. */}
+          <ChangePasswordCard />
 
           {/* Sessions */}
           <Card>

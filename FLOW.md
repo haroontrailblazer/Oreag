@@ -42,6 +42,7 @@ GitLab, VS Code, Obsidian, and most Markdown viewers.
 | 7 | [Streaming answers · SSE](#7-streaming-answers--sse) | sequence |
 | 8 | [Admission control](#8-admission-control--rate-limits-quotas-metering) | decision tree |
 | 9 | [Structural scale](#9-structural-scale--indexes-pooling-fleet-wide-locks) | decision tree |
+| 10 | [Passkeys, codes and two-factor](#10-passkeys-codes-and-two-factor) | decision tree + sequence |
 
 ---
 
@@ -617,6 +618,94 @@ forever. If Redis is unreachable the lock **fails open** to the in-process one.
 The lock key is the cache key, and `project.id` is its first element - so
 single-flight is scoped **per project**, and two projects (or two accounts)
 asking the identical question never share a lock or an answer.
+
+---
+
+## 10. Passkeys, codes and two-factor
+
+Authentication methods are **layered by strength, not stacked**: the strongest
+method that succeeds ends the ceremony.
+
+```mermaid
+flowchart TD
+    Start(["Sign in"]) --> Pick{"method"}
+    Pick -- passkey --> PK["signInWithPasskey()<br/>possession + biometric,<br/>phishing-resistant"]
+    Pick -- password --> PW["signInWithPassword()"]
+    Pick -- emailed code --> OTP["signInWithOtp()<br/>shouldCreateUser: false"]
+    Pick -- Google / GitHub --> OA["OAuth callback"]
+    PK --> AAL2["session at aal2"]
+    PW --> Gate
+    OTP --> Gate
+    OA --> Gate
+    Gate{"account has a<br/>verified factor?"}
+    Gate -- no --> Done(["dashboard"])
+    Gate -- yes --> TOTP["authenticator code"]
+    TOTP --> AAL2
+    AAL2 --> Done
+```
+
+A passkey needs no second factor: it **is** two factors, and unlike a typed
+code it cannot be replayed on a lookalike domain. Asking for a code after one
+would add friction and no security.
+
+### 10.1 Why the gate must be server-side
+
+`getAuthenticatorAssuranceLevel()` in the browser decides whether to *show* the
+prompt. That is a courtesy. An `aal1` access token lifted from the browser works
+against the API with curl unless the API checks too.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client (aal1 token)
+    participant J as jwt.py
+    participant M as mfa.py
+    participant D as Postgres
+
+    C->>J: Authorization: Bearer <aal1>
+    J->>J: signature + audience OK, aal = aal1
+    J->>M: has_verified_factor(user)
+    M->>D: public.user_has_verified_mfa(uuid)  [SECURITY DEFINER]
+    D-->>M: true
+    M-->>J: true (memoised 60 s)
+    J-->>C: 403 + X-MFA-Required: 1
+```
+
+`aal1` alone is **not** grounds to reject - it is also the correct level for an
+account with no second factor. The missing fact lives in `auth.mfa_factors`,
+which the application role cannot read, so migration 0019 exposes exactly one
+boolean through a `SECURITY DEFINER` function and nothing else about the
+factors.
+
+Three details that are load-bearing:
+
+- **403, never 401.** The session is real; it just has not stepped up. A 401
+  reads as signed-out to every client and triggers a re-login that lands in the
+  identical state.
+- **`X-MFA-Required` is a header, not a message.** Clients branch on it, so
+  rewording the human text can never break the redirect.
+- **It fails open.** A missing function (0019 unapplied) or a query error lets
+  the request through. Failing closed would turn one bad migration into a
+  silent, total lockout of every account that enabled two-factor.
+
+Public `/v1` traffic authenticates with API keys through a different dependency
+and is untouched - a key is not a person and has no second factor to present.
+
+### 10.2 Codes alongside links
+
+Every auth email carries `{{ .Token }}` **and** `{{ .ConfirmationURL }}`. The
+code is typed; the link still works. Codes exist because links break when the
+email is opened in a different browser from the one that started the flow, and
+because scanners sometimes consume a one-time link before the human clicks it.
+
+`verifyOtp` is one call with two carriers - `token_hash` from the link handler,
+`token` from the six-digit field - so both paths converge on identical
+behaviour.
+
+Changing a password while signed in now requires `reauthenticate()` first and
+passes the emailed nonce to `updateUser({ password, nonce })`. Before this, a
+stolen live session could set a new password with no re-check at all, which
+turned session theft into permanent account takeover.
 
 ---
 

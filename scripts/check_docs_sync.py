@@ -418,6 +418,10 @@ def check_feature_surfaces(rep: Report) -> None:
         ("approximate vector search", ["hnsw"], False),
         ("fleet-wide single-flight", ["single-flight", "single flight"], False),
         ("connection release / pooling", ["transaction pooler", "release_connection"], False),
+        # Two-factor is different from the three above: it CHANGES what a user
+        # has to do to sign in, so it belongs on the user-facing docs too, not
+        # only on the architecture surfaces.
+        ("passkeys / two-factor", ["passkey", "two-factor"], True),
     ]
     for feature, markers, needs_user_docs in features:
         surfaces = dict(internal)
