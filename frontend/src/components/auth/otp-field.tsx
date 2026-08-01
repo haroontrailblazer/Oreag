@@ -4,11 +4,28 @@ import { useEffect, useRef } from "react"
 
 import { cn } from "@/lib/utils"
 
-const LENGTH = 6
 const DIGITS = /^\d+$/
 
 /**
- * Six-box verification code input.
+ * How many digits Supabase actually sends.
+ *
+ * This is a PROJECT setting (Authentication -> Emails -> OTP length), not a
+ * constant - it is adjustable from 6 to 10 and applies to every email OTP:
+ * signup confirmation, recovery, magic link and the reauthentication nonce.
+ * Hardcoding 6 makes an 8-digit code physically impossible to type, so the
+ * value lives in the environment and must match the dashboard.
+ *
+ * Clamped rather than trusted: a typo in the env var would otherwise render
+ * zero boxes, or two hundred.
+ */
+const CONFIGURED = Number(process.env.NEXT_PUBLIC_OTP_LENGTH)
+export const OTP_LENGTH =
+  Number.isFinite(CONFIGURED) && CONFIGURED >= 6 && CONFIGURED <= 10
+    ? Math.trunc(CONFIGURED)
+    : 6
+
+/**
+ * Verification code input, one box per digit.
  *
  * Behaviours that matter and are easy to get wrong:
  *
@@ -20,8 +37,10 @@ const DIGITS = /^\d+$/
  *   code from the Mail app; a single input with letter-spacing does not get it.
  * - **Backspace on an empty box moves back and clears.** Without this, fixing a
  *   typo means clicking the box you want, which nobody does.
- * - **Auto-submit on the last digit.** Typing six digits and then hunting for a
+ * - **Auto-submit on the last digit.** Typing the code and then hunting for a
  *   button is the single most common complaint about code entry.
+ * - **Boxes shrink past six digits.** Ten boxes at the six-digit size overflow
+ *   a phone; the field stays on one line instead of wrapping mid-code.
  *
  * Controlled: the parent owns `value` so it can clear the field after a failed
  * attempt without remounting (which would drop focus).
@@ -34,6 +53,7 @@ export function OtpField({
   invalid,
   autoFocus = true,
   label = "Verification code",
+  length = OTP_LENGTH,
 }: {
   value: string
   onChange: (next: string) => void
@@ -42,7 +62,10 @@ export function OtpField({
   invalid?: boolean
   autoFocus?: boolean
   label?: string
+  /** Digits to render. Defaults to the project's configured OTP length. */
+  length?: number
 }) {
+  const LENGTH = length
   const inputs = useRef<Array<HTMLInputElement | null>>([])
   // Guards against firing onComplete twice for the same code - React can
   // re-render between the state update and the effect on a fast paste.
@@ -58,7 +81,7 @@ export function OtpField({
       onComplete?.(value)
     }
     if (value.length < LENGTH) submitted.current = null
-  }, [value, onComplete])
+  }, [value, onComplete, LENGTH])
 
   function focusBox(index: number) {
     const clamped = Math.max(0, Math.min(LENGTH - 1, index))
@@ -127,7 +150,10 @@ export function OtpField({
     <div
       role="group"
       aria-label={label}
-      className="flex items-center justify-center gap-2 sm:gap-2.5"
+      className={cn(
+        "flex items-center justify-center",
+        LENGTH > 6 ? "gap-1 sm:gap-1.5" : "gap-2 sm:gap-2.5"
+      )}
     >
       {Array.from({ length: LENGTH }, (_, i) => (
         <input
@@ -143,7 +169,7 @@ export function OtpField({
           pattern="\d*"
           maxLength={LENGTH}
           // Only the first box advertises one-time-code; repeating it makes
-          // iOS offer the same autofill six times.
+          // iOS offer the same autofill once per box.
           autoComplete={i === 0 ? "one-time-code" : "off"}
           aria-label={`${label}, digit ${i + 1} of ${LENGTH}`}
           aria-invalid={invalid || undefined}
@@ -154,7 +180,10 @@ export function OtpField({
           onPaste={handlePaste}
           onFocus={(e) => e.currentTarget.select()}
           className={cn(
-            "size-11 rounded-xl border bg-muted/50 text-center font-mono text-lg tabular-nums transition-colors sm:size-12 sm:text-xl",
+            "rounded-xl border bg-muted/50 text-center font-mono tabular-nums transition-colors",
+            LENGTH > 6
+              ? "size-9 text-base sm:size-11 sm:text-lg"
+              : "size-11 text-lg sm:size-12 sm:text-xl",
             "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
             "disabled:cursor-not-allowed disabled:opacity-60",
             invalid && "border-destructive text-destructive focus-visible:ring-destructive/40"
@@ -166,8 +195,6 @@ export function OtpField({
 }
 
 /** True when a string is a complete, well-formed code. */
-export function isCompleteCode(value: string): boolean {
-  return value.length === LENGTH && DIGITS.test(value)
+export function isCompleteCode(value: string, length = OTP_LENGTH): boolean {
+  return value.length === length && DIGITS.test(value)
 }
-
-export const OTP_LENGTH = LENGTH

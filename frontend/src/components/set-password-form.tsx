@@ -13,22 +13,18 @@ import { createClient } from "@/lib/supabase/client"
 
 /**
  * New-password + confirm form with strength rules. Used by the password-reset
- * flow and the Profile "Change password" card. Requires an active session
- * (recovery session or a signed-in user); calls supabase.auth.updateUser.
+ * flow and the Profile "Change password" card.
  *
- * `nonce` is the reauthentication code from `supabase.auth.reauthenticate()`.
- * Supplying it is what lets a SIGNED-IN user change their password: without it
- * a stolen live session is enough to take an account over permanently. The
- * reset flow omits it, because verifying the emailed recovery code already
- * proved control of the inbox moments earlier.
+ * Requires an already-proven session. Both callers establish one by verifying
+ * an emailed recovery code first (`verifyOtp({ type: 'recovery' })`), so this
+ * form itself carries no re-authentication - by the time it renders, control
+ * of the inbox has been demonstrated moments earlier.
  */
 export function SetPasswordForm({
   submitLabel = "Update password",
-  nonce,
   onSuccess,
 }: {
   submitLabel?: string
-  nonce?: string
   onSuccess?: () => void
 }) {
   const [password, setPassword] = useState("")
@@ -46,9 +42,7 @@ export function SetPasswordForm({
       return
     }
     setLoading(true)
-    const { error } = await createClient().auth.updateUser(
-      nonce ? { password, nonce } : { password }
-    )
+    const { error } = await createClient().auth.updateUser({ password })
     setLoading(false)
     if (error) {
       toast.error(authErrorMessage(error))
