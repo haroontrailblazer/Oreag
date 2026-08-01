@@ -7,10 +7,10 @@ export default function ApiKeysPage() {
   // md:h-full (no hardcoded offset); mobile subtracts the sticky top bar +
   // padding (~6.25rem).
   return (
-    <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-6 overflow-hidden md:h-full">
+    <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-3 overflow-hidden sm:gap-6 md:h-full">
       <div className="shrink-0">
         <h1 className="text-2xl font-semibold">API keys</h1>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">
           Your own provider keys (OpenAI, Gemini, Anthropic), shared across all
           your projects.
         </p>

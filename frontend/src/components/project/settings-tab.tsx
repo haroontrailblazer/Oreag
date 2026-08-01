@@ -430,7 +430,7 @@ export function SettingsTab({
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1.5">
+            <div className="min-w-0 flex-1 space-y-1.5">
               <CardTitle className="flex items-center gap-2">
                 <GearSix className="size-4 text-muted-foreground" />
                 General
@@ -438,6 +438,7 @@ export function SettingsTab({
               <CardDescription>These take effect immediately.</CardDescription>
             </div>
             <BestPractices
+              className="ml-auto"
               tips={[
                 {
                   visual: <CostViz />,

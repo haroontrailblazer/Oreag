@@ -448,15 +448,15 @@ print(data["answer"])`
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
               <CardTitle>API keys</CardTitle>
               <CardDescription>
                 Keys are shown once at creation - store them securely.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <BestPractices tips={BEST_PRACTICE_TIPS} />
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <BestPractices className="order-last ml-auto" tips={BEST_PRACTICE_TIPS} />
               <Button
                 onClick={handleCreate}
                 disabled={creating}

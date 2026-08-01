@@ -84,15 +84,15 @@ export function MemoryTab({ project }: { project: Project }) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <CardTitle>Agent memory</CardTitle>
             <CardDescription>
               Notes your connected agents (via the MCP server) have saved for
               this project.
             </CardDescription>
           </div>
-          <BestPractices tips={BEST_PRACTICE_TIPS} />
+          <BestPractices className="ml-auto" tips={BEST_PRACTICE_TIPS} />
         </div>
       </CardHeader>
       <CardContent className="space-y-3">

@@ -765,8 +765,8 @@ export function VisualizeTab({
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <CardTitle>Knowledge graph</CardTitle>
             <CardDescription>
               Your project&apos;s brain in 3D - files, sections, chunks and
@@ -776,8 +776,8 @@ export function VisualizeTab({
           </div>
           {/* View controls live on the canvas itself now (see the toolbar
               below), so the header keeps only what is not a canvas action. */}
-          <div className="flex items-center gap-2">
-            <BestPractices tips={BEST_PRACTICE_TIPS}>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <BestPractices className="ml-auto" tips={BEST_PRACTICE_TIPS}>
               <div className="space-y-1.5 border-t pt-3">
                 <p className="text-xs font-medium">Dimensions & this space</p>
                 <DimensionsIllustration />

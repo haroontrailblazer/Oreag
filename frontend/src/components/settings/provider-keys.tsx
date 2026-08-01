@@ -76,6 +76,50 @@ const PROVIDERS: { id: ProviderId; label: string; hint: string }[] = [
   { id: "sarvam", label: "Sarvam AI", hint: "Chat only (Indic LLMs)" },
 ]
 
+function ProviderKeyActions({
+  provider,
+  existing,
+  onEdit,
+  onRemove,
+}: {
+  provider: (typeof PROVIDERS)[number]
+  existing?: ProviderKey
+  onEdit: (provider: ProviderId) => void
+  onRemove: (provider: ProviderId) => void
+}) {
+  return existing ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`${provider.label} key actions`}
+        >
+          <MoreHorizontal className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => onEdit(provider.id)}>
+          <ArrowsClockwise className="size-4" />
+          Replace
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          variant="destructive"
+          onSelect={() => onRemove(provider.id)}
+        >
+          <Trash className="size-4" />
+          Remove
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : (
+    <Button variant="outline" size="sm" onClick={() => onEdit(provider.id)}>
+      Add
+    </Button>
+  )
+}
+
 export function ProviderKeys() {
   const { data: keys, mutate } = useSWR<ProviderKey[]>(
     "/api/provider-keys",
@@ -156,10 +200,10 @@ export function ProviderKeys() {
   return (
     // Fills the page's leftover height; only the table rows scroll (the card
     // title and the table header row stay pinned).
-    <Card className="flex min-h-0 flex-1 flex-col">
-      <CardHeader className="shrink-0">
+    <Card className="flex min-h-0 flex-1 flex-col gap-3 py-4 sm:gap-6 sm:py-6">
+      <CardHeader className="shrink-0 gap-1.5 px-4 sm:gap-2 sm:px-6">
         <CardTitle>Provider API keys</CardTitle>
-        <CardDescription>
+        <CardDescription className="text-xs leading-relaxed sm:text-sm">
           Bring your own keys. They&apos;re encrypted at rest and used for this
           account&apos;s projects. A project can override these with its own key.
           Prefer not to use a key? Run a local Ollama model instead.{" "}
@@ -172,74 +216,77 @@ export function ProviderKeys() {
         </CardDescription>
       </CardHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
-        <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <TableHead className="pl-6">Provider</TableHead>
-              <TableHead>Key</TableHead>
-              <TableHead className="w-20 pr-6" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {PROVIDERS.map((provider) => {
-              const existing = byProvider.get(provider.id)
-              return (
-                <TableRow key={provider.id}>
-                  <TableCell className="pl-6">
-                    <div className="font-medium">{provider.label}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {provider.hint}
-                    </div>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {existing ? (
-                      <span>••••••••{existing.last4}</span>
-                    ) : (
-                      <span className="text-muted-foreground">Not set</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="w-20 pr-6 text-right">
-                    {existing ? (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`${provider.label} key actions`}
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => openEditor(provider.id)}>
-                            <ArrowsClockwise className="size-4" />
-                            Replace
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => setRemoveTarget(provider.id)}
-                          >
-                            <Trash className="size-4" />
-                            Remove
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openEditor(provider.id)}
-                      >
-                        Add
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
+        <div className="sm:hidden">
+          {PROVIDERS.map((provider) => {
+            const existing = byProvider.get(provider.id)
+            return (
+              <div
+                key={provider.id}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b px-4 py-3 last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{provider.label}</div>
+                  <div className="mt-0.5 text-xs leading-snug text-muted-foreground">
+                    {provider.hint}
+                  </div>
+                </div>
+                <div className="flex min-w-20 shrink-0 flex-col items-end gap-1.5">
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {existing ? `••••${existing.last4}` : "Not set"}
+                  </span>
+                  <ProviderKeyActions
+                    provider={provider}
+                    existing={existing}
+                    onEdit={openEditor}
+                    onRemove={setRemoveTarget}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="hidden sm:block">
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-card">
+              <TableRow>
+                <TableHead className="pl-6">Provider</TableHead>
+                <TableHead>Key</TableHead>
+                <TableHead className="w-20 pr-6" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {PROVIDERS.map((provider) => {
+                const existing = byProvider.get(provider.id)
+                return (
+                  <TableRow key={provider.id}>
+                    <TableCell className="pl-6">
+                      <div className="font-medium">{provider.label}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {provider.hint}
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {existing ? (
+                        <span>••••••••{existing.last4}</span>
+                      ) : (
+                        <span className="text-muted-foreground">Not set</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="w-20 pr-6 text-right">
+                      <ProviderKeyActions
+                        provider={provider}
+                        existing={existing}
+                        onEdit={openEditor}
+                        onRemove={setRemoveTarget}
+                      />
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
 
       <Dialog

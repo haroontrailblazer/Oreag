@@ -478,15 +478,16 @@ export function PlaygroundTab({ project }: { project: Project }) {
     <Card className="flex h-full min-h-0 flex-col gap-3 py-3 sm:gap-6 sm:py-6">
       <CardHeader className="shrink-0">
         <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1.5">
+          <div className="min-w-0 flex-1 space-y-1.5">
             <CardTitle>Test your RAG</CardTitle>
             <CardDescription className="hidden sm:block">
               Ask a question with the same pipeline your API consumers will use.
               Follow-ups remember the conversation.
             </CardDescription>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <BestPractices
+              className="order-last ml-auto"
               tips={[
                 {
                   visual: <ConversationViz />,

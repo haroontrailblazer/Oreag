@@ -343,8 +343,8 @@ export function FilesTab({
 
   return (
     <Card className="gap-0 overflow-hidden p-0">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
-        <div className="space-y-0.5">
+      <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+        <div className="min-w-0 flex-1 space-y-0.5">
           <h3 className="text-sm font-semibold">Files</h3>
           <p className="text-xs text-muted-foreground">
             {fileCount === 0
@@ -354,8 +354,9 @@ export function FilesTab({
                 }`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <BestPractices
+            className="order-last ml-auto"
             tips={[
               {
                 visual: <DocTypesViz />,
