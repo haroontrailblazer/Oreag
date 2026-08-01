@@ -33,6 +33,8 @@ import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
 const FIELD = "h-11 sm:h-12 rounded-xl bg-muted/50"
+const ALTERNATE_METHOD =
+  "h-10 min-w-32 flex-1 basis-[calc(50%-0.25rem)] rounded-xl bg-card px-3 text-sm"
 
 type Provider = "google" | "github"
 type AuthMethods = {
@@ -384,6 +386,26 @@ export default function LoginPage() {
       </Button>
     ) : null
 
+  const compactPasskeyButton =
+    methods?.has_passkey && passkeySupported !== false ? (
+      <Button
+        type="button"
+        variant="outline"
+        className={ALTERNATE_METHOD}
+        disabled={loading || passkeySupported === null}
+        onClick={handlePasskey}
+      >
+        {loading ? (
+          <Spin />
+        ) : (
+          <>
+            <Fingerprint weight="duotone" className="size-4" />
+            Passkey
+          </>
+        )}
+      </Button>
+    ) : null
+
   // The email, shown as a compact chip on later steps with a "change" affordance.
   const emailChip = (
     <button
@@ -519,29 +541,38 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            {passkeyButton && (
-              <>
-                <OrDivider />
-                {passkeyButton}
-              </>
-            )}
-
-            <button
-              type="button"
-              onClick={sendLoginCode}
-              disabled={resend.blocked}
-              className="flex w-full items-center justify-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <EnvelopeSimple className="size-4" />
-              {resend.sending ? "Sending…" : "Email me a code instead"}
-            </button>
-
-            {methods && methods.providers.length > 0 && (
-              <>
-                <OrDivider label="or login with" />
-                <OAuthButtons only={methods.providers} />
-              </>
-            )}
+            <div className="space-y-3">
+              <OrDivider label="Other ways to sign in" />
+              <div className="flex flex-wrap gap-2">
+                {compactPasskeyButton}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={sendLoginCode}
+                  disabled={resend.blocked}
+                  className={ALTERNATE_METHOD}
+                >
+                  {resend.sending ? (
+                    <>
+                      <Spin />
+                      Sending
+                    </>
+                  ) : (
+                    <>
+                      <EnvelopeSimple className="size-4" />
+                      Email code
+                    </>
+                  )}
+                </Button>
+                {methods && methods.providers.length > 0 && (
+                  <OAuthButtons
+                    only={methods.providers}
+                    className="contents"
+                    buttonClassName={ALTERNATE_METHOD}
+                  />
+                )}
+              </div>
+            </div>
           </>
         )}
 

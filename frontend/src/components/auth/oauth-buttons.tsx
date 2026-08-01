@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import { Spin } from "@/components/ui/loader"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 
 type Provider = "google" | "github"
 
@@ -52,7 +53,15 @@ function GitHubIcon() {
  * deliberately no success-path state reset. The existing /auth/callback route
  * exchanges the code for a session when the user lands back.
  */
-export function OAuthButtons({ only }: { only?: Provider[] } = {}) {
+export function OAuthButtons({
+  only,
+  className,
+  buttonClassName,
+}: {
+  only?: Provider[]
+  className?: string
+  buttonClassName?: string
+} = {}) {
   const [redirecting, setRedirecting] = useState<Provider | null>(null)
   const providers: Provider[] = only ?? ["google", "github"]
 
@@ -77,11 +86,13 @@ export function OAuthButtons({ only }: { only?: Provider[] } = {}) {
     }
   }
 
-  const btn =
-    "flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border bg-card text-sm font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-60"
+  const btn = cn(
+    "flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border bg-card text-sm font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-60",
+    buttonClassName
+  )
 
   return (
-    <div className="flex items-center gap-3">
+    <div className={cn("flex items-center gap-3", className)}>
       {providers.includes("google") && (
         <button
           type="button"
