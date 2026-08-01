@@ -64,11 +64,24 @@ export default function TwoFactorPage() {
         factorId,
         code: value,
       })
-      setLoading(false)
       if (error) {
+        setLoading(false)
         setInvalid(true)
         setCode("")
         toast.error(authErrorMessage(error, "That code isn't right."))
+        return
+      }
+
+      // Verify the outcome. Navigating on a session that did not actually
+      // reach aal2 sends the user to a dashboard that 403s and redirects
+      // right back here - an invisible loop rather than an error.
+      const { data: level } =
+        await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+      setLoading(false)
+      if (level && level.currentLevel !== "aal2") {
+        setInvalid(true)
+        setCode("")
+        toast.error("Could not complete two-factor. Please try again.")
         return
       }
       // The session is aal2 now. A hard navigation rather than router.push:

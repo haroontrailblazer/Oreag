@@ -329,15 +329,29 @@ export default function LoginPage() {
         toast.error("No authenticator app is set up for this account.")
         return
       }
+      // Supabase recomputes the TOTP HMAC server-side; nothing here can
+      // approve a code.
       const { error } = await supabase.auth.mfa.challengeAndVerify({
         factorId: factor.id,
         code: value,
       })
-      setLoading(false)
       if (error) {
+        setLoading(false)
         setCodeError(true)
         setCode("")
         toast.error(authErrorMessage(error, "That code isn't right."))
+        return
+      }
+
+      // Confirm the session actually reached aal2 rather than trusting the
+      // absence of an error. If it did not, the dashboard would load and then
+      // 403 on its first request, bouncing the user straight back here.
+      const { data: level } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+      setLoading(false)
+      if (level && level.currentLevel !== "aal2") {
+        setCodeError(true)
+        setCode("")
+        toast.error("Could not complete two-factor. Please try again.")
         return
       }
       finish()

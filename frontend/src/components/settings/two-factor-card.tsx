@@ -160,9 +160,51 @@ export function TwoFactorCard() {
   async function beginTotp() {
     setBusy("totp")
     try {
+      // Read every factor, verified or not. Two things depend on it:
+      const { data: existing } = await supabase.auth.mfa.listFactors()
+      const all = (existing?.all ?? []) as {
+        id: string
+        friendly_name?: string
+        factor_type: string
+        status: string
+      }[]
+
+      // 1. Sweep abandoned enrolments. Closing the tab mid-setup leaves an
+      //    `unverified` factor behind - useless (it cannot sign anyone in and
+      //    does not raise the assurance level) but it still holds its name,
+      //    and GoTrue rejects a second factor with a name already in use. So
+      //    without this, one abandoned attempt blocks all future ones.
+      const stale = all.filter(
+        (f) => f.factor_type === "totp" && f.status === "unverified"
+      )
+      const removed = new Set<string>()
+      for (const f of stale) {
+        const { error: sweepError } = await supabase.auth.mfa
+          .unenroll({ factorId: f.id })
+          .catch(() => ({ error: new Error("unenroll failed") }))
+        if (!sweepError) removed.add(f.id)
+      }
+
+      // 2. Pick a name nothing else is using. The old default embedded the
+      //    date, so a second setup on the same day collided every time.
+      //    Only names we CONFIRMED were removed count as free - assuming a
+      //    failed sweep succeeded would pick a name still in use and fail the
+      //    enrol for the same reason we are trying to avoid.
+      const taken = new Set(
+        all
+          .filter((f) => !removed.has(f.id))
+          .map((f) => f.friendly_name)
+          .filter(Boolean)
+      )
+      const base = "Authenticator app"
+      let friendlyName = base
+      for (let n = 2; taken.has(friendlyName); n += 1) {
+        friendlyName = `${base} ${n}`
+      }
+
       const { data, error } = await supabase.auth.mfa.enroll({
         factorType: "totp",
-        friendlyName: `Authenticator app · ${new Date().toLocaleDateString()}`,
+        friendlyName,
       })
       if (error) throw error
       setTotpFactorId(data.id)
@@ -183,17 +225,40 @@ export function TwoFactorCard() {
       if (!totpFactorId || verifying) return
       setVerifying(true)
       setTotpError(false)
+      // The code is checked by Supabase, not here: challengeAndVerify recomputes
+      // the HMAC from the shared secret server-side. The browser cannot approve
+      // a code, and there is no client-side branch that could be edited to
+      // accept one - failure comes back as an error from the server.
       const { error } = await supabase.auth.mfa.challengeAndVerify({
         factorId: totpFactorId,
         code,
       })
-      setVerifying(false)
       if (error) {
+        setVerifying(false)
         setTotpError(true)
         setTotpCode("")
         toast.error(authErrorMessage(error, "That code isn't right."))
         return
       }
+
+      // Trust the OUTCOME, not the absence of an error. Re-read the factor
+      // list and require this factor to actually appear as verified before
+      // telling anyone two-factor is on. Without this, any future SDK or
+      // gateway change that returned success without promoting the factor
+      // would leave the user believing they are protected when they are not -
+      // the worst possible failure mode for a security control.
+      const { data: after } = await supabase.auth.mfa.listFactors()
+      const confirmed = (after?.totp ?? []).some((f) => f.id === totpFactorId)
+      setVerifying(false)
+      if (!confirmed) {
+        setTotpError(true)
+        setTotpCode("")
+        toast.error(
+          "Could not confirm the app was linked. Please try setting it up again."
+        )
+        return
+      }
+
       setTotpOpen(false)
       setTotpFactorId(null)
       toast.success("Authenticator app added")

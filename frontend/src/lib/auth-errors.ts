@@ -68,6 +68,13 @@ const MESSAGES: Record<string, string> = {
   weak_password: "Pick a stronger password.",
   mfa_verification_failed: "That code isn't right. Check your app and retry.",
   mfa_challenge_expired: "That took too long - start again.",
+  // GoTrue enforces friendly-name uniqueness per user. The UI picks a free
+  // name automatically, so reaching this means something raced or an old
+  // factor is holding the name.
+  mfa_factor_name_conflict:
+    "You already have a method with that name. Remove it first, or try again.",
+  too_many_enrolled_mfa_factors:
+    "You've reached the limit for authentication methods. Remove one first.",
   insufficient_aal: "Finish two-factor authentication to continue.",
   reauthentication_needed: "Confirm it's you before changing this.",
   reauthentication_not_valid: "That code isn't right. Request a new one.",
