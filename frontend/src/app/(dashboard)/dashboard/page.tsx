@@ -2,8 +2,8 @@
 
 import { FileText, Plus } from "@phosphor-icons/react/dist/ssr"
 import Link, { useLinkStatus } from "next/link"
-import { useEffect, type CSSProperties } from "react"
-import useSWR, { preload } from "swr"
+import { type CSSProperties } from "react"
+import useSWR from "swr"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -107,12 +107,9 @@ export default function DashboardPage() {
     fetcher
   )
 
-  // Warm the Settings → API keys page in the background so opening it is
-  // instant instead of fetching on click. Its other dataset (/api/projects) is
-  // already loaded above; only the provider keys still need fetching.
-  useEffect(() => {
-    preload("/api/provider-keys", fetcher)
-  }, [])
+  // Settings warming moved to the sidebar (see lib/settings-data.ts): it is
+  // mounted on EVERY signed-in page, so the Profile page's data gets warmed
+  // too, not just API keys, and only from one place.
 
   // Fixed frame like the project and API keys pages: the heading row never
   // moves, only the cards area scrolls (mobile chrome ~6.25rem, desktop

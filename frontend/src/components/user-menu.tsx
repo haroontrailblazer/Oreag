@@ -2,7 +2,6 @@
 
 import { SignOut as LogOut, User as UserIcon } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import { UserAvatar } from "@/components/user-avatar"
@@ -20,7 +19,6 @@ import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
 export function UserMenu({ compact = false }: { compact?: boolean }) {
-  const router = useRouter()
   const [email, setEmail] = useState<string | null>(null)
   const [name, setName] = useState<string | null>(null)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
@@ -50,8 +48,13 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
   async function handleSignOut() {
     setSigningOut(true)
     await createClient().auth.signOut()
-    router.push("/login")
-    router.refresh()
+    // HARD navigation, not router.push. SWR's cache and its preload map are
+    // module-level and survive a soft navigation, so signing out and signing
+    // back in as a DIFFERENT account in the same tab would serve the previous
+    // account's cached projects, provider keys and passkeys. A full document
+    // load is the only thing that reliably destroys that state.
+    // Same reasoning as the recovery-code form, which already does this.
+    window.location.replace("/login")
   }
 
   const displayName = name || email?.split("@")[0] || "Account"

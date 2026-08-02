@@ -34,6 +34,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { fetcher } from "@/lib/api"
+import { warmSettingsData } from "@/lib/settings-data"
 import { useProjectNavPending } from "@/lib/nav-pending"
 import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -257,6 +258,19 @@ function SidebarBody() {
     const timer = setTimeout(() => setLoadingFileId(null), 1100)
     return () => clearTimeout(timer)
   }, [loadingFileId])
+
+  // Fill the Settings caches while the user is still looking at the dashboard.
+  //
+  // The sidebar is the one component mounted on every signed-in page, and it is
+  // also where the links to those pages live - so by the time one is clicked
+  // the data has been sitting in cache for a while and the page renders
+  // populated instead of spinning through a loading state.
+  //
+  // Runs once per mount, after paint, so it never competes with the first
+  // render. Each fetcher swallows its own errors (see lib/settings-data).
+  useEffect(() => {
+    warmSettingsData()
+  }, [])
 
   const filteredProjects = useMemo(() => {
     const term = query.trim().toLowerCase()

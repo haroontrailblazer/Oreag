@@ -39,17 +39,21 @@ import { Label } from "@/components/ui/label"
 import { Spin } from "@/components/ui/loader"
 import { api } from "@/lib/api"
 import { authErrorMessage, isPasskeyCancellation } from "@/lib/auth-errors"
+import {
+  PASSKEYS_KEY,
+  RECOVERY_KEY,
+  TOTP_KEY,
+  fetchPasskeys,
+  fetchRecoveryCount,
+  fetchTotpFactors,
+  type Passkey,
+  type TotpFactor,
+} from "@/lib/settings-data"
 import { usePasskeySupport } from "@/lib/auth-hooks"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
-type Passkey = {
-  id: string
-  friendly_name?: string
-  created_at: string
-  last_used_at?: string
-}
-type TotpFactor = { id: string; friendly_name?: string; created_at: string }
+// Types live with the fetchers in lib/settings-data so both consumers agree.
 
 /** Line break for the copied / downloaded recovery-code list. */
 const NEWLINE = "\n"
@@ -89,16 +93,13 @@ export function TwoFactorCard() {
 
   // SWR rather than an effect: this is a fetch, and the codebase already reads
   // remote state this way everywhere else.
-  const passkeys = useSWR<Passkey[]>("auth:passkeys", async () => {
-    const { data, error } = await supabase.auth.passkey.list()
-    if (error) return []
-    return (data ?? []) as Passkey[]
-  })
-  const totp = useSWR<TotpFactor[]>("auth:totp", async () => {
-    const { data, error } = await supabase.auth.mfa.listFactors()
-    if (error) return []
-    return (data?.totp ?? []) as TotpFactor[]
-  })
+  //
+  // Key AND fetcher both come from lib/settings-data so the dashboard can warm
+  // these on entry. An inline closure here would be a different function for
+  // the same key, so the preloaded value would be ignored and this page would
+  // still open cold - which is the whole point of hoisting them.
+  const passkeys = useSWR<Passkey[]>(PASSKEYS_KEY, fetchPasskeys)
+  const totp = useSWR<TotpFactor[]>(TOTP_KEY, fetchTotpFactors)
 
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -124,8 +125,9 @@ export function TwoFactorCard() {
     { kind: "passkey" | "totp"; id: string; label: string } | null
   >(null)
 
-  const recovery = useSWR<{ remaining: number }>("auth:recovery", () =>
-    api<{ remaining: number }>("/api/account/recovery-codes")
+  const recovery = useSWR<{ remaining: number }>(
+    RECOVERY_KEY,
+    fetchRecoveryCount
   )
   const passkeyList = passkeys.data ?? []
   const totpList = totp.data ?? []

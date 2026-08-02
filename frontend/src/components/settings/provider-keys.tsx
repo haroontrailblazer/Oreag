@@ -285,13 +285,6 @@ export function ProviderKeys() {
                   <span className="font-mono text-[11px] text-muted-foreground">
                     {existing ? `••••${existing.last4}` : "Not set"}
                   </span>
-                  {existing && (
-                    <span className="text-[11px] text-muted-foreground">
-                      {existing.models_available !== null
-                        ? `${existing.models_available} models`
-                        : "Not checked"}
-                    </span>
-                  )}
                   <ProviderKeyActions
                     provider={provider}
                     existing={existing}
@@ -328,18 +321,7 @@ export function ProviderKeys() {
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {existing ? (
-                        <>
-                          <span>••••••••{existing.last4}</span>
-                          {/* Says plainly whether the pickers are filtered for
-                              this key or still showing everything - otherwise
-                              "no models were hidden" and "we never checked"
-                              look identical from the outside. */}
-                          <div className="mt-0.5 font-sans text-[11px] text-muted-foreground">
-                            {existing.models_available !== null
-                              ? `${existing.models_available} models available`
-                              : "Model list not checked yet"}
-                          </div>
-                        </>
+                        <span>••••••••{existing.last4}</span>
                       ) : (
                         <span className="text-muted-foreground">Not set</span>
                       )}

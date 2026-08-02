@@ -100,6 +100,56 @@ export function SettingsTab({
   const [confirmReindex, setConfirmReindex] = useState(false)
   const [reindexing, setReindexing] = useState(false)
 
+  // Re-sync the form when the PROJECT changes underneath it.
+  //
+  // Every field above is a useState seeded once, at mount - and this tab is
+  // force-mounted 150ms after the page loads, whether or not it is ever opened.
+  // Meanwhile the project can be rewritten from elsewhere: the Playground's
+  // model dropdown PATCHes llm_provider/llm_model project-wide, and a re-index
+  // rewrites the embedding config. Without this, the tab kept rendering
+  // page-load values, so the Overview card and the input directly beneath it
+  // showed different numbers - and pressing Save wrote the stale value back,
+  // silently reverting the change made elsewhere.
+  //
+  // A THREE-WAY MERGE, not a reset. A field is adopted only when the local
+  // value still equals what the server last told us; if the user has edited it,
+  // their edit wins and is left untouched. A blunt reset would wipe whatever
+  // someone was halfway through typing every time the project list revalidated
+  // - which, while a file is indexing, is every 3 seconds.
+  //
+  // Adjusted during render (same pattern as projects/[id]/page.tsx:56) rather
+  // than in an effect: an effect would render the stale value first, then
+  // correct it, which is a visible flicker. Remounting via a changing `key`
+  // was the other option and is worse - it refetches everything and destroys
+  // in-progress edits unconditionally.
+  const modelValue = (provider: string, model: string) => `${provider}/${model}`
+  const [synced, setSynced] = useState(project)
+  if (project !== synced) {
+    setSynced(project)
+    setName((v) => (v === synced.name ? project.name : v))
+    setDescription((v) =>
+      v === (synced.description ?? "") ? project.description ?? "" : v
+    )
+    setTopK((v) => (v === synced.top_k ? project.top_k : v))
+    setLlm((v) =>
+      v === modelValue(synced.llm_provider, synced.llm_model)
+        ? modelValue(project.llm_provider, project.llm_model)
+        : v
+    )
+    setChunkSize((v) => (v === synced.chunk_size ? project.chunk_size : v))
+    setChunkOverlap((v) =>
+      v === synced.chunk_overlap ? project.chunk_overlap : v
+    )
+    setEmbedding((v) =>
+      v === modelValue(synced.embedding_provider, synced.embedding_model)
+        ? modelValue(project.embedding_provider, project.embedding_model)
+        : v
+    )
+    setEmbDimensions((v) =>
+      v === synced.embedding_dimensions ? project.embedding_dimensions : v
+    )
+  }
+
   const [confirmSuspend, setConfirmSuspend] = useState(false)
   const [suspending, setSuspending] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -313,9 +363,26 @@ export function SettingsTab({
     }
     setReindexing(true)
     try {
-      await api(`/api/projects/${project.id}/reindex`, {
-        method: "POST",
-        body: JSON.stringify(body),
+      const requeued = await api<unknown[]>(
+        `/api/projects/${project.id}/reindex`,
+        { method: "POST", body: JSON.stringify(body) }
+      )
+      // Push the server's own updated file list straight into the Files tab's
+      // cache. Two reasons this is not just an optimisation:
+      //
+      // 1. The Files tab polls only while its CACHED list already contains a
+      //    pending/processing row (its refreshInterval is a function of the
+      //    data). Re-indexing from over here left that cache showing
+      //    "indexed", so the interval stayed 0, nothing ever refetched, and
+      //    the tab sat frozen until a full page reload - the reported bug.
+      // 2. Seeding rather than revalidating means the rows flip to "queued"
+      //    on the same tick, with no request and no empty frame.
+      //
+      // Deliberately NOT added to onChanged(): files-tab's useSWR has
+      // onSuccess -> onChanged, so invalidating this key from there would make
+      // every refetch trigger another one, for ever.
+      globalMutate(`/api/projects/${project.id}/files`, requeued, {
+        revalidate: false,
       })
       toast.success(
         !hasFiles

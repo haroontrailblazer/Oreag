@@ -298,12 +298,16 @@ export function FilesTab({
 
   async function handleReindexAll() {
     try {
-      await api(`/api/projects/${project.id}/reindex`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      })
+      // The endpoint answers with the full re-queued list, so adopt it as the
+      // new cache value instead of firing a second request to ask what we were
+      // just told. The rows flip to "queued" immediately, and because the
+      // seeded data contains pending files the 3s poll starts on its own.
+      const requeued = await api<FileRecord[]>(
+        `/api/projects/${project.id}/reindex`,
+        { method: "POST", body: JSON.stringify({}) }
+      )
       toast.success("Re-indexing started")
-      mutate()
+      mutate(requeued, { revalidate: false })
       onChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Re-index failed")

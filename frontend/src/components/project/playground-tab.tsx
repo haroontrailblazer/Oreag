@@ -15,7 +15,7 @@ import {
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
-import useSWR from "swr"
+import useSWR, { mutate as globalMutate } from "swr"
 
 import { BestPractices } from "@/components/ui/best-practices"
 import { Button } from "@/components/ui/button"
@@ -368,11 +368,21 @@ export function PlaygroundTab({ project }: { project: Project }) {
     }
     setUploading(true)
     try {
-      await api(`/api/projects/${project.id}/files`, {
+      const created = await api<unknown[]>(`/api/projects/${project.id}/files`, {
         method: "POST",
         body: form,
       })
       toast.success("Upload complete. Indexing started.")
+      // Nothing here used to be revalidated at all, so a file uploaded from the
+      // Playground never appeared in the Files tab or the sidebar - not while
+      // indexing, not after it finished - until a full page reload. Seeding the
+      // files key with the server's response also arms that tab's poll, which
+      // only starts once its cached list contains a pending row.
+      globalMutate(`/api/projects/${project.id}/files`, created, {
+        revalidate: false,
+      })
+      globalMutate(`/api/projects/${project.id}`)
+      globalMutate("/api/projects")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed")
     } finally {
@@ -394,6 +404,12 @@ export function PlaygroundTab({ project }: { project: Project }) {
         }),
       })
       toast.success("Playground model updated")
+      // This PATCH changes the model for the whole PROJECT, not just this tab.
+      // Without revalidating, the Settings tab keeps rendering the old value -
+      // and pressing Save there then writes that stale value back, silently
+      // undoing the change just made here.
+      globalMutate(`/api/projects/${project.id}`)
+      globalMutate("/api/projects")
     } catch (err) {
       setModel(previous)
       toast.error(err instanceof Error ? err.message : "Model update failed")

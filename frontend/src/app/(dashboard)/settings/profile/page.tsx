@@ -246,8 +246,10 @@ export default function ProfilePage() {
       setter(false)
       return
     }
-    router.push("/login")
-    router.refresh()
+    // Hard navigation - SWR's cache and preload map are module-level and would
+    // otherwise survive into the next account signed in to this tab. See
+    // components/user-menu.tsx for the full reasoning.
+    window.location.replace("/login")
   }
 
   async function handleDelete() {
@@ -256,8 +258,9 @@ export default function ProfilePage() {
       await api("/api/account", { method: "DELETE" })
       await createClient().auth.signOut()
       toast.success("Your account has been deleted")
-      router.push("/signup")
-      router.refresh()
+      // Hard navigation for the same reason, and more urgently here: every
+      // cached row belongs to an account that no longer exists.
+      window.location.replace("/signup")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete account")
       setDeleting(false)
