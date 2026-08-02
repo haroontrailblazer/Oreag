@@ -18,6 +18,7 @@ import {
   isCompleteCode,
 } from "@/components/auth/otp-field"
 import { OAuthButtons, OrDivider } from "@/components/auth/oauth-buttons"
+import { RecoveryCodeForm } from "@/components/auth/recovery-code-form"
 import { SetPasswordForm } from "@/components/set-password-form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -742,9 +743,15 @@ export default function LoginPage() {
                 "Verify"
               )}
             </Button>
-            <p className="text-center text-xs text-muted-foreground">
-              Lost your device? Sign in with a passkey, or contact support.
-            </p>
+            {/* The same escape hatch as the step-up page. Without it, anyone
+                who lost their phone mid-sign-in had no way forward from here -
+                the option existed only on a page they had no reason to visit. */}
+            <RecoveryCodeForm
+              onSignOut={async () => {
+                await supabase.auth.signOut()
+                backToEmail()
+              }}
+            />
           </div>
         )}
       </div>

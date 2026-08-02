@@ -1,19 +1,18 @@
 "use client"
 
-import { Key, ShieldCheck, SignOut } from "@phosphor-icons/react/dist/ssr"
+import { ShieldCheck } from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
 
 import { AuthShell } from "@/components/auth-shell"
+import { RecoveryCodeForm } from "@/components/auth/recovery-code-form"
 import {
   OtpField,
   TOTP_LENGTH,
   isCompleteCode,
 } from "@/components/auth/otp-field"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Spin } from "@/components/ui/loader"
-import { api } from "@/lib/api"
 import { authErrorMessage } from "@/lib/auth-errors"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
@@ -39,12 +38,6 @@ export default function TwoFactorPage() {
   const [loading, setLoading] = useState(false)
   const [factorId, setFactorId] = useState<string | null>(null)
   const [state, setState] = useState<"loading" | "ready" | "none">("loading")
-  // Lost-device path. Kept behind a link rather than shown up front: a recovery
-  // code is single-use and burns a factor, so it should not be the obvious
-  // choice when the phone is simply in another room.
-  const [recovering, setRecovering] = useState(false)
-  const [recoveryCode, setRecoveryCode] = useState("")
-  const [recoveryBusy, setRecoveryBusy] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -100,32 +93,6 @@ export default function TwoFactorPage() {
     },
     [supabase, factorId, loading]
   )
-
-  async function redeemRecoveryCode() {
-    const value = recoveryCode.trim()
-    if (!value || recoveryBusy) return
-    setRecoveryBusy(true)
-    try {
-      // Consuming a code REMOVES the account's second factors - a code cannot
-      // grant aal2, only Supabase can. Afterwards the account genuinely has no
-      // factor, so the session's aal1 becomes correct and the gate opens.
-      await api("/api/account/recovery-codes/consume", {
-        method: "POST",
-        body: JSON.stringify({ code: value }),
-      })
-      toast.success("Recovery code accepted", {
-        description: "Two-factor is now off. Set it up again from Settings.",
-      })
-      // Hard navigation: every SWR cache in the app is holding a 403 from
-      // before this moment.
-      window.location.replace("/settings/profile")
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "That recovery code isn't valid."
-      )
-      setRecoveryBusy(false)
-    }
-  }
 
   async function signOut() {
     await supabase.auth.signOut()
@@ -195,60 +162,7 @@ export default function TwoFactorPage() {
                 "Verify"
               )}
             </Button>
-            {recovering ? (
-              <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
-                <p className="text-xs text-muted-foreground">
-                  Enter one of the recovery codes you saved when you set up
-                  two-factor. It can only be used once, and it will turn
-                  two-factor off so you can set it up again.
-                </p>
-                <Input
-                  value={recoveryCode}
-                  onChange={(e) => setRecoveryCode(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && redeemRecoveryCode()}
-                  placeholder="XXXXXXXXXX"
-                  autoComplete="off"
-                  autoCapitalize="characters"
-                  className="text-center font-mono tracking-widest"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="flex-1"
-                    onClick={() => setRecovering(false)}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    type="button"
-                    className="flex-1"
-                    disabled={!recoveryCode.trim() || recoveryBusy}
-                    onClick={redeemRecoveryCode}
-                  >
-                    {recoveryBusy ? <Spin /> : "Use code"}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setRecovering(true)}
-                className="flex w-full items-center justify-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-              >
-                <Key className="size-3.5" />
-                Lost your device? Use a recovery code
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={signOut}
-              className="flex w-full items-center justify-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            >
-              <SignOut className="size-3.5" />
-              Sign out instead
-            </button>
+            <RecoveryCodeForm onSignOut={signOut} />
           </>
         )}
       </div>
