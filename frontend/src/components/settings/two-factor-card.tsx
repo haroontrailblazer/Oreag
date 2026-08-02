@@ -37,6 +37,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spin } from "@/components/ui/loader"
+import { api } from "@/lib/api"
 import { authErrorMessage, isPasskeyCancellation } from "@/lib/auth-errors"
 import { usePasskeySupport } from "@/lib/auth-hooks"
 import { createClient } from "@/lib/supabase/client"
@@ -49,6 +50,9 @@ type Passkey = {
   last_used_at?: string
 }
 type TotpFactor = { id: string; friendly_name?: string; created_at: string }
+
+/** Line break for the copied / downloaded recovery-code list. */
+const NEWLINE = "\n"
 
 /** A recognisable default name, so the list never reads "Unnamed". */
 function suggestPasskeyName(): string {
@@ -111,10 +115,18 @@ export function TwoFactorCard() {
   const [namingId, setNamingId] = useState<string | null>(null)
   const [nameDraft, setNameDraft] = useState("")
 
+  // Recovery codes, shown exactly once. Supabase has no backup codes of its
+  // own, so without these a lost authenticator is a permanent lockout.
+  const [codes, setCodes] = useState<string[] | null>(null)
+  const [issuing, setIssuing] = useState(false)
+
   const [removal, setRemoval] = useState<
     { kind: "passkey" | "totp"; id: string; label: string } | null
   >(null)
 
+  const recovery = useSWR<{ remaining: number }>("auth:recovery", () =>
+    api<{ remaining: number }>("/api/account/recovery-codes")
+  )
   const passkeyList = passkeys.data ?? []
   const totpList = totp.data ?? []
   const total = passkeyList.length + totpList.length
@@ -223,6 +235,23 @@ export function TwoFactorCard() {
     }
   }
 
+  const issueRecoveryCodes = useCallback(async () => {
+    setIssuing(true)
+    try {
+      const res = await api<{ codes: string[] }>("/api/account/recovery-codes", {
+        method: "POST",
+      })
+      setCodes(res.codes)
+      void recovery.mutate()
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not create recovery codes."
+      )
+    } finally {
+      setIssuing(false)
+    }
+  }, [recovery])
+
   const confirmTotp = useCallback(
     async (code: string) => {
       if (!totpFactorId || verifying) return
@@ -266,8 +295,11 @@ export function TwoFactorCard() {
       setTotpFactorId(null)
       toast.success("Authenticator app added")
       await totp.mutate()
+      // Straight into the codes: this is the only moment the user is thinking
+      // about recovery, and the only time the codes can ever be displayed.
+      if ((recovery.data?.remaining ?? 0) === 0) void issueRecoveryCodes()
     },
-    [supabase, totpFactorId, verifying, totp]
+    [supabase, totpFactorId, verifying, totp, recovery, issueRecoveryCodes]
   )
 
   /**
@@ -285,6 +317,7 @@ export function TwoFactorCard() {
       await totp.mutate()
     }
   }, [supabase, totpFactorId, totp])
+
 
   async function confirmRemoval() {
     if (!removal) return
@@ -384,6 +417,32 @@ export function TwoFactorCard() {
                 )
               }
             />
+
+            {total > 0 && (
+              <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border bg-muted/30 p-3">
+                <div className="flex gap-2.5">
+                  <Key weight="duotone" className="mt-0.5 size-5 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm font-medium">Recovery codes</p>
+                    <p className="text-xs text-muted-foreground">
+                      {recovery.data
+                        ? `${recovery.data.remaining} unused - your way back in if you lose a device`
+                        : "Your way back in if you lose a device"}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={issuing}
+                  onClick={issueRecoveryCodes}
+                >
+                  {issuing ? <Spin /> : null}
+                  {(recovery.data?.remaining ?? 0) > 0 ? "Regenerate" : "Generate"}
+                </Button>
+              </div>
+            )}
 
             <Group
               icon={<DeviceMobile weight="duotone" className="size-5" />}
@@ -513,6 +572,69 @@ export function TwoFactorCard() {
               onClick={() => confirmTotp(totpCode)}
             >
               {verifying ? <Spin /> : "Verify and enable"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Recovery codes - shown once, never retrievable afterwards. */}
+      <Dialog open={!!codes} onOpenChange={(open) => !open && setCodes(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save your recovery codes</DialogTitle>
+            <DialogDescription>
+              Each code works once. Keep them somewhere you can reach without
+              this device - they are the only way back in if you lose your
+              authenticator.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-2 rounded-xl border bg-muted/40 p-3 font-mono text-sm">
+            {(codes ?? []).map((c) => (
+              <span key={c} className="tracking-widest">
+                {c}
+              </span>
+            ))}
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            This is the only time they are shown. Only a one-way hash is stored,
+            so they cannot be looked up later - regenerate if you lose them.
+          </p>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard.writeText((codes ?? []).join(NEWLINE))
+                toast.success("Copied")
+              }}
+            >
+              Copy
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                const blob = new Blob(
+                  [
+                    `Oreag recovery codes${NEWLINE}`,
+                    `Each code can be used once.${NEWLINE}${NEWLINE}`,
+                    (codes ?? []).join(NEWLINE),
+                    NEWLINE,
+                  ],
+                  { type: "text/plain" }
+                )
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement("a")
+                a.href = url
+                a.download = "oreag-recovery-codes.txt"
+                a.click()
+                URL.revokeObjectURL(url)
+                setCodes(null)
+              }}
+            >
+              Download and close
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -32,6 +32,52 @@ def _get_jwk_client() -> PyJWKClient:
     return _jwk_client
 
 
+def _decode(creds: HTTPAuthorizationCredentials | None) -> dict:
+    """Validate the bearer token's signature and audience, or 401."""
+    if creds is None:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = creds.credentials
+    try:
+        if settings.jwt_mode == "hs256":
+            return pyjwt.decode(
+                token,
+                settings.supabase_jwt_secret,
+                algorithms=["HS256"],
+                audience=settings.supabase_jwt_aud,
+            )
+        signing_key = _get_jwk_client().get_signing_key_from_jwt(token)
+        return pyjwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["ES256", "RS256"],
+            audience=settings.supabase_jwt_aud,
+        )
+    except pyjwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
+
+
+def get_user_pending_mfa(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> uuid.UUID:
+    """Authenticate WITHOUT the two-factor gate.
+
+    Exists for exactly one thing: the recovery-code endpoint. A user who has
+    lost their authenticator is stuck at aal1 by definition, so every route
+    behind ``get_current_user`` answers 403 - including the one route that
+    could get them unstuck. This is the chicken-and-egg the recovery flow has
+    to break.
+
+    The token is still fully verified: signature, audience, expiry. All that is
+    skipped is the aal check. Do NOT reuse this anywhere else - it is a hole in
+    the gate, kept honest by having a single caller whose own rate limit and
+    single-use codes are the real protection.
+    """
+    payload = _decode(creds)
+    user_id = uuid.UUID(payload["sub"])
+    enforce_user_rate_limit(user_id, heavy=True)
+    return user_id
+
+
 def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -53,28 +99,7 @@ def get_current_user(
     dependency and is deliberately untouched: an API key is not a person and
     has no second factor to present.
     """
-    if creds is None:
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-    token = creds.credentials
-    try:
-        if settings.jwt_mode == "hs256":
-            payload = pyjwt.decode(
-                token,
-                settings.supabase_jwt_secret,
-                algorithms=["HS256"],
-                audience=settings.supabase_jwt_aud,
-            )
-        else:
-            signing_key = _get_jwk_client().get_signing_key_from_jwt(token)
-            payload = pyjwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["ES256", "RS256"],
-                audience=settings.supabase_jwt_aud,
-            )
-    except pyjwt.PyJWTError as exc:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
-
+    payload = _decode(creds)
     user_id = uuid.UUID(payload["sub"])
 
     # 403, never 401: the token is valid and the session is real, it just has

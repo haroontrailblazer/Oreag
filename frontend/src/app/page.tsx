@@ -11,8 +11,19 @@ export default async function Home() {
   // (session cookie), swap the sign-in CTAs for a dashboard link.
   const supabase = await createClient()
   const {
-    data: { user },
+    data: { user: rawUser },
   } = await supabase.auth.getUser()
+
+  // A session that still owes a second factor is NOT usable, so it must not be
+  // offered a dashboard link. Backing out of the two-factor prompt leaves
+  // exactly that state: signed in as far as the cookie is concerned, but every
+  // API call returns 403. Showing "Go to dashboard" there walks the user into
+  // a dead end - they land inside the app and it immediately fails to load.
+  // Treat it as signed out, which is also what it effectively is.
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+  const owesSecondFactor =
+    aal?.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel
+  const user = owesSecondFactor ? null : rawUser
 
   return (
     <main className="grid min-h-dvh bg-background lg:grid-cols-2">

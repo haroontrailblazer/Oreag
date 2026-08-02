@@ -83,7 +83,15 @@ class Settings(BaseSettings):
     cors_allow_local_network: bool = True
     # Access-Control-Expose-Headers (comma-separated). Retry-After is part of
     # the documented 429 contract but is unreadable by cross-origin JS today.
-    cors_expose_headers: str = "Retry-After"
+    # Access-Control-Expose-Headers. A custom response header is INVISIBLE to
+    # cross-origin JS unless it is listed here - the browser strips it before
+    # the fetch() promise resolves. Both of these are part of a documented
+    # contract and were unreadable without this:
+    #   Retry-After     - the 429 back-off
+    #   X-MFA-Required  - the 403 that means "finish two-factor", which the
+    #                     client uses to redirect instead of showing a raw
+    #                     "two-factor authentication required" error.
+    cors_expose_headers: str = "Retry-After,X-MFA-Required"
     # Access-Control-Allow-Credentials. False is what makes a mistakenly
     # allowed origin harmless, because the preview regex over the shared
     # *.vercel.app namespace is a SHAPE filter and cannot prove ownership.

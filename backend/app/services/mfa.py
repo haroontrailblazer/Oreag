@@ -23,7 +23,10 @@ Design notes:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
+import secrets
 import threading
 import time
 import uuid
@@ -111,6 +114,115 @@ def has_verified_factor(db: Session, user_id: uuid.UUID) -> bool:
 
     _store(user_id, value)
     return value
+
+
+# ── recovery codes ──────────────────────────────────────────────────────────
+#
+# The way back in when the authenticator is lost. A code does NOT raise the
+# assurance level - only Supabase can issue an aal2 session - it REMOVES the
+# user's factors. The account then genuinely has no second factor, so aal1 is
+# correct for it and the gate in auth/jwt.py opens by itself. See migration
+# 0021 for the full reasoning.
+
+RECOVERY_CODE_COUNT = 10
+# 10 chars from an unambiguous alphabet ~= 51 bits. Brute force is bounded by
+# the login rate limit long before the keyspace matters, and the alphabet omits
+# 0/O/1/I/L so a code read off paper is not mistyped.
+_RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+RECOVERY_CODE_LENGTH = 10
+
+
+def _hash_code(code: str) -> str:
+    """Normalised so formatting never decides whether a code works."""
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", code).upper()
+    return hashlib.sha256(cleaned.encode()).hexdigest()
+
+
+def generate_recovery_codes(db: Session, user_id: uuid.UUID) -> list[str]:
+    """Replace this user's codes with a fresh set. Returns them in PLAINTEXT.
+
+    The only time they can ever be read: nothing but the hash is stored, so a
+    caller that loses this response cannot recover it and must regenerate.
+
+    Regenerating invalidates the old set on purpose - a printed sheet that is
+    no longer valid must not keep working.
+    """
+    codes = [
+        "".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(RECOVERY_CODE_LENGTH))
+        for _ in range(RECOVERY_CODE_COUNT)
+    ]
+    db.execute(
+        text("delete from public.mfa_recovery_codes where user_id = :uid"),
+        {"uid": str(user_id)},
+    )
+    for code in codes:
+        db.execute(
+            text(
+                "insert into public.mfa_recovery_codes (user_id, code_hash)"
+                " values (:uid, :hash)"
+            ),
+            {"uid": str(user_id), "hash": _hash_code(code)},
+        )
+    db.commit()
+    return codes
+
+
+def unused_recovery_code_count(db: Session, user_id: uuid.UUID) -> int:
+    try:
+        return int(
+            db.execute(
+                text(
+                    "select count(*) from public.mfa_recovery_codes"
+                    " where user_id = :uid and used_at is null"
+                ),
+                {"uid": str(user_id)},
+            ).scalar()
+            or 0
+        )
+    except Exception:  # noqa: BLE001 - table may not exist yet (0021 unapplied)
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return 0
+
+
+def consume_recovery_code(db: Session, user_id: uuid.UUID, code: str) -> bool:
+    """Spend one code and strip the user's second factors.
+
+    Returns False for an unknown, already-used or malformed code - the caller
+    must not distinguish between those in what it tells the user, since the
+    difference is only useful to somebody guessing.
+
+    The UPDATE ... WHERE used_at IS NULL RETURNING is what makes it single-use
+    under concurrency: two simultaneous submissions of the same code cannot
+    both match, because the first one's write makes the second's predicate
+    false.
+    """
+    row = db.execute(
+        text(
+            "update public.mfa_recovery_codes set used_at = now()"
+            " where user_id = :uid and code_hash = :hash and used_at is null"
+            " returning id"
+        ),
+        {"uid": str(user_id), "hash": _hash_code(code)},
+    ).first()
+    if row is None:
+        db.rollback()
+        return False
+
+    # Only now, and in the same transaction, so a failure here cannot leave a
+    # code burned with the factor still in place.
+    db.execute(
+        text("select public.remove_mfa_factors(:uid)"), {"uid": str(user_id)}
+    )
+    db.commit()
+
+    # The gate memoises "does this user have a factor" for 60 s; without this
+    # the user would keep getting 403 for up to a minute after recovering.
+    with _lock:
+        _cache.pop(user_id, None)
+    return True
 
 
 def reset_cache() -> None:
