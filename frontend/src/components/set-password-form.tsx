@@ -15,17 +15,29 @@ import { createClient } from "@/lib/supabase/client"
  * New-password + confirm form with strength rules. Used by the password-reset
  * flow and the Profile "Change password" card.
  *
- * Requires an already-proven session. Both callers establish one by verifying
- * an emailed recovery code first (`verifyOtp({ type: 'recovery' })`), so this
- * form itself carries no re-authentication - by the time it renders, control
- * of the inbox has been demonstrated moments earlier.
+ * Two callers, two ways of proving the person is who they say:
+ *
+ * - The reset flow verifies an emailed recovery code first, which establishes a
+ *   recovery session. No `nonce` needed - control of the inbox was proven
+ *   moments earlier.
+ * - The signed-in profile card passes a `nonce` from
+ *   `supabase.auth.reauthenticate()`. That deliberately does NOT create a new
+ *   session, so an existing aal2 session survives the password change intact.
+ *
+ * `onError` exists because a wrong nonce is only detectable here: Supabase has
+ * no standalone "check this nonce" call, so `updateUser` is where it surfaces
+ * and the caller needs to know in order to send the user back to the code step.
  */
 export function SetPasswordForm({
   submitLabel = "Update password",
+  nonce,
   onSuccess,
+  onError,
 }: {
   submitLabel?: string
+  nonce?: string
   onSuccess?: () => void
+  onError?: (error: unknown) => void
 }) {
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
@@ -42,10 +54,13 @@ export function SetPasswordForm({
       return
     }
     setLoading(true)
-    const { error } = await createClient().auth.updateUser({ password })
+    const { error } = await createClient().auth.updateUser(
+      nonce ? { password, nonce } : { password }
+    )
     setLoading(false)
     if (error) {
       toast.error(authErrorMessage(error))
+      onError?.(error)
       return
     }
     setPassword("")

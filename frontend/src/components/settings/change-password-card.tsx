@@ -1,7 +1,7 @@
 "use client"
 
-import { CheckCircle, LockKey } from "@phosphor-icons/react/dist/ssr"
-import { useCallback, useEffect, useState } from "react"
+import { LockKey } from "@phosphor-icons/react/dist/ssr"
+import { useCallback, useState } from "react"
 
 import { OtpField, isCompleteCode } from "@/components/auth/otp-field"
 import { SetPasswordForm } from "@/components/set-password-form"
@@ -19,53 +19,46 @@ import { useResendCooldown } from "@/lib/auth-hooks"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
-type Stage = "idle" | "code" | "verified"
-
 /**
- * Change password, gated behind an emailed code that is **verified before the
- * password fields appear**.
+ * Change password while signed in, gated behind an emailed code.
  *
  * Why the gate exists: before it, a live session could change the password
  * with no re-check at all, so a stolen session became permanent account
  * takeover - the attacker sets a new password and the real owner is locked out.
  *
- * Why this uses the RECOVERY code rather than `auth.reauthenticate()`:
- * reauthentication issues a nonce that Supabase will only validate as part of
- * `updateUser({ password, nonce })`. There is no "is this nonce correct?" call,
- * so a reauth-based flow can only reveal a wrong code *after* the user has
- * chosen and typed a new password twice - which is exactly the dead end this
- * component is meant to avoid. `verifyOtp({ type: 'recovery' })` validates on
- * its own and establishes a recovery session, so the form below can be shown
- * only once the code is genuinely correct, and `updateUser` then needs no nonce.
+ * Why `reauthenticate()` and NOT the recovery code:
+ *
+ * `verifyOtp({ type: 'recovery' })` establishes a NEW session, and a new
+ * session starts at aal1. For an account with two-factor enabled that silently
+ * downgrades an aal2 session, so the moment the password was changed the next
+ * API call returned 403 and threw the user onto the step-up screen - being
+ * asked for an authenticator code purely as a side effect of changing a
+ * password. `reauthenticate()` issues a nonce against the CURRENT session and
+ * creates nothing, so an aal2 session survives untouched and no second factor
+ * is ever demanded here.
+ *
+ * It also sends Supabase's Reauthentication template, which is code-only with
+ * no link - so this flow cannot be short-circuited by clicking through an
+ * email, unlike the recovery one.
+ *
+ * The trade-off, stated plainly: Supabase exposes no way to validate a nonce on
+ * its own (`EmailOtpType` has no 'reauthentication'), so a wrong code can only
+ * be reported by `updateUser`. The password fields therefore stay hidden until
+ * a full-length code is present, and a rejected code returns here with the
+ * field cleared - nobody is left staring at a form that cannot succeed.
  */
 export function ChangePasswordCard() {
   const supabase = createClient()
-  const [stage, setStage] = useState<Stage>("idle")
-  const [email, setEmail] = useState<string | null>(null)
+  const [sent, setSent] = useState(false)
   const [code, setCode] = useState("")
   const [invalid, setInvalid] = useState(false)
-  const [verifying, setVerifying] = useState(false)
   const resend = useResendCooldown()
 
-  useEffect(() => {
-    let alive = true
-    supabase.auth.getUser().then(({ data }) => {
-      if (alive) setEmail(data.user?.email ?? null)
-    })
-    return () => {
-      alive = false
-    }
-  }, [supabase])
-
   const sendCode = useCallback(async () => {
-    if (!email) {
-      toast.error("No email address on this account.")
-      return
-    }
     const ok = await resend.send(async () => {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${location.origin}/auth/confirm?next=/auth/reset-password`,
-      })
+      // Emails a one-time nonce to the signed-in user's confirmed address.
+      // Does not touch the session.
+      const { error } = await supabase.auth.reauthenticate()
       if (error) {
         toast.error(authErrorMessage(error, "Could not send the code."))
         return false
@@ -75,44 +68,12 @@ export function ChangePasswordCard() {
     if (ok) {
       setCode("")
       setInvalid(false)
-      setStage("code")
+      setSent(true)
     }
-  }, [supabase, email, resend])
-
-  const verify = useCallback(
-    async (value: string) => {
-      if (!email || verifying) return
-      setVerifying(true)
-      setInvalid(false)
-      const { error } = await supabase.auth.verifyOtp({
-        email,
-        token: value,
-        type: "recovery",
-      })
-      if (error) {
-        setVerifying(false)
-        setInvalid(true)
-        setCode("")
-        toast.error(authErrorMessage(error, "That code isn't right."))
-        return
-      }
-      // Confirm a session actually exists rather than trusting the absence of
-      // an error - the password form is useless without one.
-      const { data } = await supabase.auth.getSession()
-      setVerifying(false)
-      if (!data.session) {
-        setInvalid(true)
-        setCode("")
-        toast.error("Could not confirm it's you. Request a new code.")
-        return
-      }
-      setStage("verified")
-    },
-    [supabase, email, verifying]
-  )
+  }, [supabase, resend])
 
   function reset() {
-    setStage("idle")
+    setSent(false)
     setCode("")
     setInvalid(false)
   }
@@ -128,7 +89,7 @@ export function ChangePasswordCard() {
       </CardHeader>
 
       <CardContent>
-        {stage === "idle" && (
+        {!sent ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               For your security, changing your password needs a code from your
@@ -137,7 +98,7 @@ export function ChangePasswordCard() {
             <Button
               type="button"
               className="w-full"
-              disabled={resend.blocked || !email}
+              disabled={resend.blocked}
               onClick={sendCode}
             >
               {resend.sending ? (
@@ -150,30 +111,43 @@ export function ChangePasswordCard() {
               )}
             </Button>
           </div>
-        )}
-
-        {stage === "code" && (
+        ) : (
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Enter the code we sent to{" "}
-              <span className="font-medium text-foreground">{email}</span>.
-            </p>
-            <OtpField
-              value={code}
-              onChange={setCode}
-              onComplete={verify}
-              disabled={verifying}
-              invalid={invalid}
-              autoFocus={false}
-            />
-            <Button
-              type="button"
-              className="w-full"
-              disabled={!isCompleteCode(code) || verifying}
-              onClick={() => verify(code)}
-            >
-              {verifying ? <Spin /> : "Verify code"}
-            </Button>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Enter the code we just emailed you.
+              </p>
+              <OtpField
+                value={code}
+                onChange={(next) => {
+                  setCode(next)
+                  if (invalid) setInvalid(false)
+                }}
+                invalid={invalid}
+                autoFocus={false}
+              />
+            </div>
+
+            {/* Held back until the code is complete, so nobody picks a new
+                password only to be told to go and find an email. */}
+            {isCompleteCode(code) && (
+              <SetPasswordForm
+                submitLabel="Update password"
+                nonce={code}
+                onSuccess={() => {
+                  toast.success("Password updated")
+                  reset()
+                }}
+                onError={() => {
+                  // Almost always a wrong or expired nonce. Clear the code and
+                  // send them back to the field rather than leaving a password
+                  // form on screen that will keep failing.
+                  setInvalid(true)
+                  setCode("")
+                }}
+              />
+            )}
+
             <div className="flex items-center justify-between">
               <button
                 type="button"
@@ -191,24 +165,6 @@ export function ChangePasswordCard() {
                 {resend.label}
               </button>
             </div>
-          </div>
-        )}
-
-        {/* Only reachable once the code was accepted, so nobody fills in a
-            password and is then told to go find an email. */}
-        {stage === "verified" && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
-              <CheckCircle weight="fill" className="size-4 shrink-0" />
-              <p>Code confirmed. Choose your new password.</p>
-            </div>
-            <SetPasswordForm
-              submitLabel="Update password"
-              onSuccess={() => {
-                toast.success("Password updated")
-                reset()
-              }}
-            />
           </div>
         )}
       </CardContent>
