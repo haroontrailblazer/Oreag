@@ -159,7 +159,11 @@ def update_project(
             )
         project.name = body.name
     if body.description is not None:
-        project.description = body.description
+        # Blank collapses to NULL so "no description" has exactly one
+        # representation in the column, matching what create stores. Callers
+        # clear the field by sending "" - null means "leave it alone", so it
+        # cannot double as the clear signal.
+        project.description = body.description.strip() or None
     if body.top_k is not None:
         project.top_k = body.top_k
     _set_key_override(project, "embedding", body.embedding_api_key)

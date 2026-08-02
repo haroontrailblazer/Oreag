@@ -1,4 +1,5 @@
 import base64
+import datetime
 import hashlib
 import uuid
 
@@ -22,7 +23,7 @@ from app.providers.registry import (
     resolve_embedding_dimensions,
     validate_llm,
 )
-from app.schemas import ProjectCreate, ProjectOut, ProviderKeyOut
+from app.schemas import ProjectCreate, ProjectOut, ProjectUpdate, ProviderKeyOut
 from app.services.conversion import (
     convert_to_markdown,
     is_ingestable,
@@ -908,6 +909,90 @@ class TestSchemas:
         assert "llm_key_encrypted" not in project_fields
         assert "embedding_key_last4" in project_fields
         assert "llm_key_last4" in project_fields
+
+
+class TestProjectDescriptionEdit:
+    """Editing the description from project Settings.
+
+    The interesting case is CLEARING it. `ProjectUpdate.description` is
+    `str | None`, and the router skips the field when it is None - so null
+    cannot double as "erase this", or the one edit the user asked for would
+    silently no-op. Blank string is the clear signal, and it must land in the
+    column as NULL so "no description" has a single representation shared with
+    freshly-created projects.
+    """
+
+    class _DB:
+        """Enough Session for update_project: no name clash, no counts."""
+
+        def scalar(self, *args, **kwargs):  # _name_taken
+            return None
+
+        def execute(self, *args, **kwargs):  # _counts
+            return self
+
+        def all(self):
+            return []
+
+        def commit(self):
+            pass
+
+    def _update(self, project, **fields):
+        from app.routers.projects import update_project
+
+        return update_project(ProjectUpdate(**fields), project, self._DB())
+
+    def _project(self, description="Original text"):
+        # status/suspended/timestamps are server-side column defaults, so an
+        # unsaved instance leaves them None and ProjectOut validation trips.
+        now = datetime.datetime.now(datetime.timezone.utc)
+        return Project(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="proj",
+            description=description,
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+            llm_provider="openai",
+            llm_model="gpt-4o-mini",
+            chunk_size=1000,
+            chunk_overlap=200,
+            top_k=5,
+            status="ready",
+            suspended=False,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def test_description_is_updated(self):
+        project = self._project()
+        self._update(project, description="Rewritten")
+        assert project.description == "Rewritten"
+
+    def test_blank_clears_it_to_null(self):
+        project = self._project()
+        self._update(project, description="")
+        assert project.description is None
+
+    def test_whitespace_only_also_clears(self):
+        """Otherwise the card renders a blank line instead of collapsing."""
+        project = self._project()
+        self._update(project, description="   \n  ")
+        assert project.description is None
+
+    def test_omitting_the_field_leaves_it_alone(self):
+        """A PATCH that only touches top_k must not wipe the description."""
+        project = self._project()
+        self._update(project, top_k=9)
+        assert project.description == "Original text"
+        assert project.top_k == 9
+
+    def test_description_survives_a_rename(self):
+        project = self._project()
+        self._update(project, name="renamed", description="Original text")
+        assert project.name == "renamed"
+        assert project.description == "Original text"
 
 
 class TestGeneration:

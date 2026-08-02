@@ -42,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher } from "@/lib/api"
 import {
   CostViz,
@@ -67,6 +68,7 @@ export function SettingsTab({
 
   // General
   const [name, setName] = useState(project.name)
+  const [description, setDescription] = useState(project.description ?? "")
   const [topK, setTopK] = useState(project.top_k)
   const [saving, setSaving] = useState(false)
 
@@ -178,7 +180,11 @@ export function SettingsTab({
     try {
       await api(`/api/projects/${project.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ name, top_k: topK }),
+        // Empty string - not null - is how "clear the description" travels:
+        // ProjectUpdate treats null as "field omitted, leave it alone", so a
+        // null here would silently no-op the one edit the user meant to make.
+        // The router normalises blank back to NULL on the way in.
+        body: JSON.stringify({ name, description: description.trim(), top_k: topK }),
       })
       toast.success("Settings saved")
       onChanged()
@@ -492,6 +498,18 @@ export function SettingsTab({
             >
               {name.length}/20
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-description">Description (optional)</Label>
+            <Textarea
+              id="settings-description"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Shown on the project card and searched from the sidebar.
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="settings-topk">Top-K results</Label>
