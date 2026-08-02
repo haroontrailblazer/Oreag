@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Spin } from "@/components/ui/loader"
 import { createClient } from "@/lib/supabase/client"
@@ -48,10 +49,19 @@ function GitHubIcon() {
 /**
  * "Continue with Google / GitHub" buttons for the auth pages.
  *
- * signInWithOAuth navigates the browser away to the provider; the button
- * keeps its "Redirecting…" state until that navigation happens, so there is
- * deliberately no success-path state reset. The existing /auth/callback route
- * exchanges the code for a session when the user lands back.
+ * The consent flow runs in a POPUP, not by navigating this tab away. The reason
+ * is the Back button: a full redirect puts the provider's account-chooser and
+ * consent screens into THIS tab's history, and no code on our side can remove a
+ * cross-origin entry - so after signing in, one press of Back landed the user
+ * back on Google's account picker. Run in a popup, those pages live and die in
+ * the popup's history, and the main tab goes straight from the login page to
+ * the dashboard.
+ *
+ * Popup blockers are handled rather than ignored: the window is opened
+ * SYNCHRONOUSLY inside the click handler (a popup opened after an await is
+ * blocked by every browser), and if it is blocked anyway the code falls back to
+ * the old full-page redirect. Signing in always works; only the Back-button
+ * polish is lost.
  */
 export function OAuthButtons({
   only,
@@ -62,8 +72,34 @@ export function OAuthButtons({
   className?: string
   buttonClassName?: string
 } = {}) {
+  const router = useRouter()
   const [redirecting, setRedirecting] = useState<Provider | null>(null)
+  const popupRef = useRef<Window | null>(null)
   const providers: Provider[] = only ?? ["google", "github"]
+
+  const finish = useCallback(() => {
+    // replace, so the login page is not left behind for Back to return to.
+    router.replace("/dashboard")
+    router.refresh()
+  }, [router])
+
+  // The popup reports back here when /auth/callback has exchanged the code.
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      // Same-origin only. Without this check any page could post a fake
+      // success and navigate the user into the dashboard shell.
+      if (event.origin !== window.location.origin) return
+      const payload = event.data as { type?: string; ok?: boolean } | null
+      if (payload?.type !== "oreag-oauth") return
+      popupRef.current?.close()
+      popupRef.current = null
+      setRedirecting(null)
+      if (payload.ok) finish()
+      else toast.error("Sign-in was not completed.")
+    }
+    window.addEventListener("message", onMessage)
+    return () => window.removeEventListener("message", onMessage)
+  }, [finish])
 
   // Clear the spinner if the user comes BACK to this page (e.g. presses back
   // from the Google/GitHub screen). Browsers restore the page from bfcache with
@@ -76,14 +112,48 @@ export function OAuthButtons({
 
   async function handleOAuth(provider: Provider) {
     setRedirecting(provider)
-    const { error } = await createClient().auth.signInWithOAuth({
+
+    // Opened BEFORE the await. A window.open() that happens after an async hop
+    // has lost the user-gesture context and is blocked by every browser.
+    const popup = window.open(
+      "about:blank",
+      "oreag-oauth",
+      "width=520,height=680,menubar=no,toolbar=no"
+    )
+
+    const { data, error } = await createClient().auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${location.origin}/auth/callback${popup ? "?popup=1" : ""}`,
+        skipBrowserRedirect: true,
+      },
     })
-    if (error) {
+
+    if (error || !data?.url) {
+      popup?.close()
       setRedirecting(null)
-      toast.error(error.message)
+      toast.error(error?.message ?? "Could not start sign-in.")
+      return
     }
+
+    if (!popup || popup.closed) {
+      // Blocked. Fall back to the classic redirect so sign-in still works.
+      window.location.assign(data.url)
+      return
+    }
+
+    popup.location.replace(data.url)
+    popupRef.current = popup
+
+    // The user may simply close the window. Without this the button would spin
+    // for ever with no way back.
+    const watch = window.setInterval(() => {
+      if (popupRef.current?.closed) {
+        window.clearInterval(watch)
+        popupRef.current = null
+        setRedirecting((current) => (current === provider ? null : current))
+      }
+    }, 500)
   }
 
   const btn = cn(
