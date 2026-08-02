@@ -74,17 +74,17 @@ export async function proxy(request: NextRequest) {
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL("/login", request.url))
   }
-  // Signed-in users have no business on the entry pages - including the
-  // marketing landing page. This is what makes the Back button behave after a
-  // sign-in: the auth pages themselves are removed from history by
-  // router.replace, and this catches "/" so Back lands on the dashboard rather
-  // than dropping the user back out to the marketing site.
+  // Signed-in users have no business on the SIGN-IN pages. "/" is deliberately
+  // NOT in this list: the marketing page stays readable when signed in, and
+  // swaps its call to action to "Go to dashboard" instead (see app/page.tsx).
+  // Redirecting it would mean a logged-in user could never read their own
+  // landing page, and Back after a sign-in would have nowhere sensible to go.
   //
   // NOTE: never add /auth/two-factor here. That page is reached BY a signed-in
   // user whose session has not yet cleared its second factor; bouncing it to
   // /dashboard deadlocks the app, because the dashboard's first API call
   // returns the 403 that sent them there in the first place.
-  if (user && (path === "/" || path === "/login" || path === "/signup")) {
+  if (user && (path === "/login" || path === "/signup")) {
     return NextResponse.redirect(new URL("/dashboard", request.url))
   }
   return response
