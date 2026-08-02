@@ -62,7 +62,7 @@ export default function SignupPage() {
         return
       }
       toast.success("Email confirmed - welcome to Oreag")
-      router.push("/dashboard")
+      router.replace("/dashboard")  // see login/page.tsx: never leave signup in history
       router.refresh()
     },
     [email, verifying, router]
@@ -113,7 +113,7 @@ export default function SignupPage() {
     }
     if (data.session) {
       // email confirmation disabled - signed in immediately
-      router.push("/dashboard")
+      router.replace("/dashboard")  // see login/page.tsx: never leave signup in history
       router.refresh()
     } else {
       setEmailSent(true)

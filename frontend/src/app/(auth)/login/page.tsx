@@ -108,7 +108,11 @@ export default function LoginPage() {
   // /login - and Next caches that. The push after a successful sign-in would
   // then replay the cached redirect and bounce the user back to this page.
   const finish = useCallback(() => {
-    router.push("/dashboard")
+    // replace, NOT push: the sign-in page must not stay in history. With push,
+    // one tap of Back re-opens the email / code / password screens of an
+    // already-completed sign-in, which looks broken and invites people to
+    // re-enter a code that has been consumed.
+    router.replace("/dashboard")
     router.refresh()
   }, [router])
 

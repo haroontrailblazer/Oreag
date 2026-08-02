@@ -87,7 +87,8 @@ export default function TwoFactorPage() {
       // The session is aal2 now. A hard navigation rather than router.push:
       // SWR caches across the app are holding 403s from before the step-up,
       // and a full load is the simplest way to be sure nothing stale survives.
-      window.location.assign("/dashboard")
+      // replace, not assign: Back must not return to the code prompt.
+      window.location.replace("/dashboard")
     },
     [supabase, factorId, loading]
   )

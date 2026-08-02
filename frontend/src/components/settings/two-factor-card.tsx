@@ -361,8 +361,12 @@ export function TwoFactorCard() {
               }))}
               busy={busy}
               onRemove={(id, label) => setRemoval({ kind: "passkey", id, label })}
+              // Once one is enrolled the button goes away: this method is
+              // set up, and the card should read as done rather than as an
+              // open invitation to keep adding. Remove the passkey and it
+              // comes back.
               action={
-                passkeySupported === false ? (
+                passkeyList.length > 0 ? null : passkeySupported === false ? (
                   <p className="text-xs text-muted-foreground">
                     Not supported in this browser
                   </p>
@@ -393,20 +397,22 @@ export function TwoFactorCard() {
               busy={busy}
               onRemove={(id, label) => setRemoval({ kind: "totp", id, label })}
               action={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={busy === "totp"}
-                  onClick={beginTotp}
-                >
-                  {busy === "totp" ? (
-                    <Spin />
-                  ) : (
-                    <DeviceMobile className="size-4" />
-                  )}
-                  Add app
-                </Button>
+                totpList.length > 0 ? null : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy === "totp"}
+                    onClick={beginTotp}
+                  >
+                    {busy === "totp" ? (
+                      <Spin />
+                    ) : (
+                      <DeviceMobile className="size-4" />
+                    )}
+                    Add app
+                  </Button>
+                )
               }
             />
           </>

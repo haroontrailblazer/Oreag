@@ -45,7 +45,7 @@ export default function ResetPasswordPage() {
           submitLabel="Update password"
           onSuccess={() => {
             toast.success("Password updated - you're signed in")
-            router.push("/dashboard")
+            router.replace("/dashboard")
             router.refresh()
           }}
         />
