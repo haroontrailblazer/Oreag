@@ -326,6 +326,7 @@ model {
           metadata {
             algorithm 'fixed window: INCR then EXPIRE 60 on first hit; 429 carries Retry-After = seconds left in the window'
             buckets 'std for query/stream/retrieve/memory; heavy for explore and memory-graph'
+            dashboard 'the signed-in /api surface is limited PER USER, not per key: 240/min standard and 30/min heavy. Enforced inside get_current_user so every authenticated route is covered by construction, with heavy_dashboard_limit added as an explicit dependency on the routes that call a provider. Before this /api had no limit at all, which mattered because that is where the LLM calls live - a stolen JWT or a retry loop could spend BYOK credit unbounded.'
           }
         }
         usage = component 'Usage Metering' 'One usage_events row per public request. Best-effort, never fails the request. The prerequisite for billing.' {

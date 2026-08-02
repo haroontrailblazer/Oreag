@@ -6,6 +6,25 @@ from sqlalchemy.orm import Session
 from ..auth.jwt import get_current_user
 from ..db import get_db
 from ..models import Project
+from ..services.rate_limit import enforce_user_rate_limit
+
+
+def heavy_dashboard_limit(
+    user_id: uuid.UUID = Depends(get_current_user),
+) -> uuid.UUID:
+    """Second, much smaller budget for the dashboard's expensive endpoints.
+
+    Add this to any route that calls a provider or walks the graph - the
+    playground query and stream, explore, memory-graph. It stacks on top of the
+    standard per-user budget already applied in ``get_current_user``: a burst of
+    cheap CRUD cannot exhaust the expensive allowance, and a burst of expensive
+    calls is stopped long before the standard one would notice.
+
+    Declared as a dependency rather than called inline so it is visible in the
+    route signature and in the generated OpenAPI, instead of buried mid-handler.
+    """
+    enforce_user_rate_limit(user_id, heavy=True)
+    return user_id
 
 
 def get_owned_project(

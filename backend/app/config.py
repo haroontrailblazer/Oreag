@@ -109,6 +109,16 @@ class Settings(BaseSettings):
     query_rate_per_minute_per_project: int = 300
     heavy_rate_per_minute_per_key: int = 10
     heavy_rate_per_minute_per_project: int = 20
+    # Dashboard (/api/*) budgets, per SIGNED-IN USER per minute. The public /v1
+    # surface has been limited since Phase 2; /api had nothing, which mattered
+    # because that is where the LLM-calling endpoints live - a stolen JWT or a
+    # runaway retry loop could spend BYOK credit unbounded. Deliberately roomier
+    # than the API-key budgets: a human clicking around a dashboard is bursty,
+    # and a limit that fires during normal use is worse than no limit at all.
+    dashboard_rate_per_minute_per_user: int = 240
+    # The expensive routes: playground query/stream, explore, memory-graph.
+    dashboard_heavy_rate_per_minute_per_user: int = 30
+
     # /explore hop budget for API-key callers (each hop multiplies exact
     # vector scans; the dashboard is not clamped).
     explore_max_hops_api: int = 1

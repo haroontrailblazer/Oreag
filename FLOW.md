@@ -621,6 +621,28 @@ asking the identical question never share a lock or an answer.
 
 ---
 
+### 8.1 Two surfaces, two budgets
+
+The public API is metered per **API key** and per **project**. The signed-in
+dashboard is metered per **user** - a person may own many projects, and the
+thing worth bounding is what one account can spend per minute.
+
+| Surface | Scope | Standard | Heavy |
+|---|---|---|---|
+| `/v1/*` (API key) | key + project | 120 / 300 | 10 / 20 |
+| `/api/*` (dashboard) | user | 240 | 30 |
+
+The dashboard budget is applied inside `get_current_user`, so every
+authenticated route is covered by construction and one added tomorrow cannot
+forget it. The provider-calling routes - playground query and stream,
+memory-graph - additionally take `heavy_dashboard_limit`, so a burst of cheap
+CRUD can never exhaust the expensive allowance.
+
+Both fail **open**: if the counter store is unreachable the request proceeds. A
+throttle that becomes an outage is worse than no throttle.
+
+---
+
 ## 10. Passkeys, codes and two-factor
 
 Authentication methods are **layered by strength, not stacked**: the strongest

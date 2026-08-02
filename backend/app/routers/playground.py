@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
@@ -8,7 +10,7 @@ from ..models import Project, QueryLog
 from ..schemas import QueryRequest, QueryResponse
 from ..sse import sse_response
 from ..services.query import run_query, run_query_stream
-from .deps import get_owned_project
+from .deps import get_owned_project, heavy_dashboard_limit
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["playground"])
 
@@ -50,6 +52,9 @@ def playground_query(
     body: QueryRequest,
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
+    # Calls a provider, so it takes the small per-user budget on top of the
+    # standard one applied in get_current_user.
+    _: uuid.UUID = Depends(heavy_dashboard_limit),
 ):
     return run_query(
         db,
@@ -66,6 +71,9 @@ def playground_query_stream(
     body: QueryRequest,
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
+    # Calls a provider, so it takes the small per-user budget on top of the
+    # standard one applied in get_current_user.
+    _: uuid.UUID = Depends(heavy_dashboard_limit),
 ) -> StreamingResponse:
     """Same answer as /query, streamed token by token over SSE."""
     return sse_response(

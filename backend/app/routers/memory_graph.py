@@ -10,7 +10,7 @@ from ..schemas import MemoryGraphResponse
 from ..services.memory_graph import build_memory_graph
 from ..services.rate_limit import enforce_rate_limit
 from ..services.usage import record_usage
-from .deps import get_owned_project
+from .deps import get_owned_project, heavy_dashboard_limit
 from ..db import get_db
 from .rag_v1 import _get_project
 
@@ -22,6 +22,8 @@ public_router = APIRouter(prefix="/v1/projects/{project_id}", tags=["public-api"
 def owner_memory_graph(
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
+    # Walking every file + chunk makes this the dashboard's priciest GET.
+    _: uuid.UUID = Depends(heavy_dashboard_limit),
 ):
     return build_memory_graph(db, project)
 

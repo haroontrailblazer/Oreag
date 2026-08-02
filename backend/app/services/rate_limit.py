@@ -73,6 +73,39 @@ class RateLimiter:
 limiter = RateLimiter(settings.redis_url)
 
 
+def enforce_user_rate_limit(user_id, heavy: bool = False) -> None:
+    """Per-user budget for the signed-in dashboard API.
+
+    The public /v1 surface has been throttled since Phase 2, but /api/* had no
+    limit at all - and /api/* is where the LLM-calling endpoints live. A stolen
+    JWT, a runaway retry loop in a browser tab, or a script pointed at the
+    dashboard could spend BYOK credit without ever meeting a budget.
+
+    Scoped to the USER, not the project: a person can own many projects, and
+    the thing worth bounding is what one account can spend per minute, not how
+    it is spread across their own projects.
+
+    Same fail-open contract as the API-key limiter above - if the counter store
+    is unreachable the request proceeds, because a throttle must never become
+    the outage.
+    """
+    if not settings.rate_limit_enabled:
+        return
+    kind = "uheavy" if heavy else "ustd"
+    limit = (
+        settings.dashboard_heavy_rate_per_minute_per_user
+        if heavy
+        else settings.dashboard_rate_per_minute_per_user
+    )
+    allowed, retry_after = limiter.hit(f"{kind}:user:{user_id}", limit)
+    if not allowed:
+        raise HTTPException(
+            429,
+            "You're going too fast - please wait a moment and try again.",
+            headers={"Retry-After": str(max(retry_after, 1))},
+        )
+
+
 def enforce_rate_limit(api_key_id, project_id, heavy: bool = False) -> None:
     """Raise 429 (with Retry-After) when either the key's or the project's
     per-minute budget is spent. ``heavy`` selects the small budget used for

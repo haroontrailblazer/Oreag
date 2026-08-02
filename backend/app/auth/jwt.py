@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..services.mfa import has_verified_factor
+from ..services.rate_limit import enforce_user_rate_limit
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -86,5 +87,11 @@ def get_current_user(
                 detail="Two-factor authentication required for this session.",
                 headers={MFA_REQUIRED_HEADER: "1"},
             )
+
+    # Per-user budget for the whole dashboard API. Applied here for the same
+    # reason as the check above: every authenticated route is covered by
+    # construction, and a route added tomorrow cannot forget it. The expensive
+    # endpoints additionally take `heavy_dashboard_limit` (see routers/deps.py).
+    enforce_user_rate_limit(user_id)
 
     return user_id
