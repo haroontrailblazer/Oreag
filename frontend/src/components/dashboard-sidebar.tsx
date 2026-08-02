@@ -235,7 +235,27 @@ function SidebarBody() {
   const {
     data: projects,
     isLoading: projectsLoading,
-  } = useSWR<Project[]>("/api/projects", fetcher)
+  } = useSWR<Project[]>("/api/projects", fetcher, {
+    // Keep the project list live while anything is indexing.
+    //
+    // The project DETAIL page already polls its own key and pushes the result
+    // into this list - but only while that page is mounted. Navigate to the
+    // dashboard mid-index and the detail page unmounts, its poll dies with it,
+    // and nothing refreshes the list again: the card sat on "Indexing" for ever
+    // even after the work finished, until a full page reload.
+    //
+    // Declared HERE rather than on the dashboard page because the sidebar is
+    // mounted on every signed-in page and shows the same statuses, so this one
+    // interval keeps the cards, the sidebar badges and the settings pages
+    // correct together. Both surfaces share this SWR key, so a single poll
+    // updates all of them - putting a second interval on the dashboard's own
+    // hook would just duplicate the requests.
+    //
+    // Self-limiting: the moment the last project leaves "indexing" the
+    // condition is false and polling stops, so a quiet account pays nothing.
+    refreshInterval: (latest) =>
+      latest?.some((p) => p.status === "indexing") ? 3000 : 0,
+  })
   const {
     data: files,
     isLoading: filesLoading,
