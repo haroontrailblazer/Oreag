@@ -26,6 +26,14 @@ const PUBLIC_PATHS = [
   "/api/auth/methods", // pre-auth identifier-first login lookup
 ]
 
+/**
+ * Where a session that still owes a second factor is sent.
+ *
+ * Excluded from the pending-2FA redirect below for the obvious reason: sending
+ * the step-up page to itself is an infinite loop.
+ */
+const STEP_UP_PATH = "/auth/two-factor"
+
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -73,6 +81,31 @@ export async function proxy(request: NextRequest) {
 
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL("/login", request.url))
+  }
+
+  // Send a session that still owes a second factor straight to the step-up
+  // page, BEFORE any protected page renders.
+  //
+  // Without this the dashboard loaded, its first API call came back 403, and
+  // the user read "could not load projects: two-factor authentication
+  // required" before being bounced - an error for something they had done
+  // nothing wrong to cause. The client-side redirect in lib/api.ts still
+  // exists as a backstop for a session that lapses mid-visit, but it should
+  // never be what a user actually sees.
+  //
+  // `aal` comes from the verified claims; whether a factor EXISTS does not,
+  // so it is read from the session's user object. getSession() is a local
+  // cookie read - no network - so this costs nothing on the hot path.
+  if (user && !isPublic && path !== STEP_UP_PATH && claimsData?.claims?.aal !== "aal2") {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    const owesSecondFactor = (session?.user?.factors ?? []).some(
+      (factor) => factor.status === "verified"
+    )
+    if (owesSecondFactor) {
+      return NextResponse.redirect(new URL(STEP_UP_PATH, request.url))
+    }
   }
   // Signed-in users have no business on the SIGN-IN pages. "/" is deliberately
   // NOT in this list: the marketing page stays readable when signed in, and

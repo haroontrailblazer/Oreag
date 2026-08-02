@@ -98,6 +98,13 @@ export default function LoginPage() {
   // inside this one is a new type on every render, so React would remount it
   // and lose exactly this flag.
   const [recovered, setRecovered] = useState(false)
+  // A recovery code establishes an aal1 session. Supabase REFUSES to change the
+  // password of an account with a verified factor from aal1
+  // (401 insufficient_aal), so a 2FA account has to clear its second factor
+  // between entering the emailed code and choosing a new password. Without this
+  // step, Forgot password was a dead end for exactly those accounts: the fields
+  // appeared and the update always failed.
+  const [resetNeedsMfa, setResetNeedsMfa] = useState(false)
   // Loaded while the user is typing their code, not when they press Verify.
   // listFactors() is a network round trip; doing it on the click put three
   // sequential auth requests between the button and any visible progress.
@@ -322,11 +329,26 @@ export default function LoginPage() {
         return
       }
       const { data } = await supabase.auth.getSession()
-      setLoading(false)
       if (data.session) {
+        const { data: level } =
+          await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+        setLoading(false)
+        if (level?.nextLevel === "aal2" && level.nextLevel !== level.currentLevel) {
+          // Ask for the authenticator BEFORE showing the password fields, so
+          // the update cannot fail after the password has been typed twice.
+          setCode("")
+          setCodeError(false)
+          setResetNeedsMfa(true)
+          void supabase.auth.mfa.listFactors().then(({ data: list }) => {
+            const factor = list?.totp?.[0]
+            if (factor) setMfaFactorId(factor.id)
+          })
+          return
+        }
         setRecovered(true)
         return
       }
+      setLoading(false)
       // Verified but no session: nothing useful can happen next, so say so
       // instead of showing a password form that would fail on submit.
       setCodeError(true)
@@ -377,13 +399,23 @@ export default function LoginPage() {
         toast.error("Could not complete two-factor. Please try again.")
         return
       }
+      // Reached from a password reset: the point of the step-up was to make
+      // updateUser legal, so continue to the password form rather than the
+      // dashboard.
+      if (resetNeedsMfa) {
+        setResetNeedsMfa(false)
+        setRecovered(true)
+        return
+      }
       finish()
     },
-    [supabase, loading, finish, mfaFactorId]
+    [supabase, loading, finish, mfaFactorId, resetNeedsMfa]
   )
 
   function backToEmail() {
     setStep("email")
+    setResetNeedsMfa(false)
+    setRecovered(false)
     setPassword("")
     setCode("")
     setCodeError(false)
@@ -672,7 +704,53 @@ export default function LoginPage() {
           </div>
         )}
 
-        {step === "reset" &&
+        {step === "reset" && resetNeedsMfa && (
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <span className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <ShieldCheck weight="duotone" className="size-6" />
+              </span>
+            </div>
+            <p className="text-center text-sm text-muted-foreground">
+              Your code checked out. Enter the code from your authenticator app
+              to finish resetting your password.
+            </p>
+            <OtpField
+              value={code}
+              onChange={setCode}
+              onComplete={verifyMfa}
+              disabled={loading}
+              invalid={codeError}
+              label="Authentication code"
+              length={TOTP_LENGTH}
+            />
+            <Button
+              type="button"
+              className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
+              disabled={!isCompleteCode(code, TOTP_LENGTH) || loading}
+              onClick={() => verifyMfa(code)}
+            >
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  Verifying
+                  <Spin />
+                </span>
+              ) : (
+                "Verify"
+              )}
+            </Button>
+            {/* Lost the authenticator too? Spending a recovery code removes the
+                factor, after which aal1 is acceptable and the reset completes. */}
+            <RecoveryCodeForm
+              onSignOut={async () => {
+                await supabase.auth.signOut()
+                backToEmail()
+              }}
+            />
+          </div>
+        )}
+
+        {step === "reset" && !resetNeedsMfa &&
           (recovered ? (
             <SetPasswordForm
               submitLabel="Update password"
