@@ -48,10 +48,12 @@ def vision_llm_for(project: Project, api_key: str | None):
         client = OpenAI(api_key=api_key, timeout=GENERATE_TIMEOUT, max_retries=MAX_RETRIES)
         return client, project.llm_model
     if project.llm_provider == "gemini":
-        from ..providers.gemini_provider import is_vertex_express_key
-
-        if is_vertex_express_key(api_key):
-            return None, None  # express keys only work on the Vertex backend
+        # No key-prefix skip here. "AQ." keys used to be refused captioning
+        # outright on the belief they were Vertex-only; they are ordinary AI
+        # Studio keys and authenticate fine against this endpoint, so the skip
+        # was a pure false negative - it silently disabled image captioning
+        # for every user with a modern Gemini key, and conversion.py then
+        # reported "No text could be extracted".
         from ..providers.openai_provider import GENERATE_TIMEOUT, MAX_RETRIES
 
         from openai import OpenAI

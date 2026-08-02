@@ -46,6 +46,11 @@ export interface ProviderKey {
   provider: ProviderId
   label: string
   last4: string
+  // When this key's reachable-model list was last read, and how many models it
+  // saw. null = never read, in which case the pickers show the full static
+  // catalog rather than hiding anything.
+  models_fetched_at: string | null
+  models_available: number | null
   created_at: string
   updated_at: string
 }
@@ -149,6 +154,25 @@ export interface EmbeddingModelEntry {
   // Matryoshka (MRL) models can serve these smaller prefix sizes too; the
   // backend truncates stored vectors in place when shrinking within a model.
   dimension_options?: number[]
+  // Retired upstream: the provider no longer serves it, so it must not be
+  // offered to a new project. Still present in the catalog (and so still
+  // resolvable) because projects that already chose it would otherwise error
+  // on every read - they keep seeing it, marked, so the breakage is legible.
+  deprecated?: boolean
+}
+
+/**
+ * Retired model ids, per role and provider.
+ *
+ * Reported separately from the catalog rather than removed from it: the backend
+ * still has to RESOLVE these for projects that already store them (validate_llm
+ * runs on every query), so the only safe way to retire one is to stop offering
+ * it. LLM entries are bare strings and cannot carry a flag of their own, which
+ * is why this is a lookup rather than a property on the entry.
+ */
+export interface DeprecatedModels {
+  llm: Record<string, string[] | undefined>
+  embedding: Record<string, string[] | undefined>
 }
 
 export interface ModelsResponse {
@@ -156,5 +180,7 @@ export interface ModelsResponse {
     embedding: Record<string, EmbeddingModelEntry[]>
     llm: Record<string, string[]>
   }
+  // Optional: a backend older than this field simply hides nothing.
+  deprecated?: DeprecatedModels
   availability: Record<string, boolean>
 }

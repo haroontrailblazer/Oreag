@@ -3,6 +3,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ARRAY, BigInteger, Boolean, DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -77,6 +78,33 @@ class File(Base):
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class NulSafeText(TypeDecorator):
+    """Text that drops NUL (0x00) bytes on the way into PostgreSQL.
+
+    PostgreSQL text columns cannot hold 0x00, and psycopg raises DataError for
+    the whole statement - so one stray byte fails an entire batch INSERT and
+    reports it as a database error about a document that reads perfectly.
+
+    Applied to the three columns that hold arbitrary EXTERNAL text: extracted
+    document content, agent-written memories, and inbound questions. The primary
+    fix lives upstream in services/conversion.py, which cleans extraction output
+    before it is both chunked AND written to storage; this is the backstop for
+    every other way text arrives - the MCP memory tools and the public /v1 query
+    API among them - so the same opaque failure cannot reappear through a path
+    nobody thought to sanitise.
+
+    Bind-side only: existing rows are untouched and reads are unaffected.
+    """
+
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if isinstance(value, str) and "\x00" in value:
+            return value.replace("\x00", "")
+        return value
+
+
 class Chunk(Base):
     __tablename__ = "chunks"
 
@@ -89,7 +117,7 @@ class Chunk(Base):
     )
     chunk_index: Mapped[int] = mapped_column(Integer)
     page_number: Mapped[int | None] = mapped_column(Integer)
-    content: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(NulSafeText)
     embedding = mapped_column(Vector)  # dimension varies per project
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -123,10 +151,25 @@ class ProviderKey(Base):
     label: Mapped[str] = mapped_column(Text, default="default")
     encrypted_key: Mapped[str] = mapped_column(Text)
     last4: Mapped[str] = mapped_column(Text)
+    # What this key can actually reach, fetched when the key is saved (see
+    # migration 0022). NULL = never fetched, which readers treat as "no opinion"
+    # and fall back to the full static catalog - so a vendor that is down, or
+    # one that serves no models endpoint, can never empty a picker.
+    models_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    models_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    @property
+    def models_available(self) -> int | None:
+        """How many models this key was last seen to reach (None = unknown)."""
+        if not self.models_json:
+            return None
+        return len(self.models_json.get("models") or ())
 
 
 class Memory(Base):
@@ -138,7 +181,7 @@ class Memory(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
-    content: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(NulSafeText)
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(Text, default="mcp")
@@ -160,7 +203,7 @@ class SemanticQueryCache(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
-    question: Mapped[str] = mapped_column(Text)
+    question: Mapped[str] = mapped_column(NulSafeText)
     embedding = mapped_column(Vector)  # dimension varies per project
     content_signature: Mapped[str] = mapped_column(Text)
     embedding_provider: Mapped[str] = mapped_column(Text)
@@ -183,7 +226,7 @@ class QueryLog(Base):
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL")
     )
-    question: Mapped[str] = mapped_column(Text)
+    question: Mapped[str] = mapped_column(NulSafeText)
     top_k: Mapped[int | None] = mapped_column(Integer)
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     # Which cache served this query: "l1" (exact), "l2" (semantic), or NULL when

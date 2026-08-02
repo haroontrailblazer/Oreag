@@ -156,6 +156,15 @@ class ProviderKeyOut(BaseModel):
     provider: str
     label: str
     last4: str
+    # When this key's reachable-model list was last read from the provider, and
+    # how many it saw. None means never read - the pickers then show the full
+    # static catalog. The model NAMES are deliberately not serialised: the UI
+    # only needs to say whether the list is known and how fresh it is, and the
+    # merged catalog already arrives via /api/models.
+    # NB "models_available", not "model_count" - a `model_` prefix collides with
+    # Pydantic's protected namespace.
+    models_fetched_at: datetime | None = None
+    models_available: int | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # enforced and how long a removed one keeps being demanded.
     mfa_cache_ttl_seconds: int = 60
 
+    # Probe a BYOK key against its provider once, when it is saved, and refuse
+    # one the provider explicitly rejects instead of storing it and failing at
+    # first query. The probe is fail-open by design (see providers/validation.py)
+    # so this switch is only for the case where a vendor starts 401-ing the
+    # probe path itself and turns a good key unsaveable.
+    provider_key_validation_enabled: bool = True
+
     # BYOK: users supply their own provider keys; no shared server key is used.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     app_encryption_key: str = ""

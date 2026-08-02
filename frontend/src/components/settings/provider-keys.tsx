@@ -46,7 +46,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { api, fetcher } from "@/lib/api"
+import { ApiError, api, fetcher } from "@/lib/api"
 import type { ProviderId, ProviderKey } from "@/lib/types"
 
 const PROVIDERS: { id: ProviderId; label: string; hint: string }[] = [
@@ -80,11 +80,15 @@ function ProviderKeyActions({
   provider,
   existing,
   onEdit,
+  onRefresh,
+  refreshing,
   onRemove,
 }: {
   provider: (typeof PROVIDERS)[number]
   existing?: ProviderKey
   onEdit: (provider: ProviderId) => void
+  onRefresh: (provider: ProviderId) => void
+  refreshing: boolean
   onRemove: (provider: ProviderId) => void
 }) {
   return existing ? (
@@ -102,6 +106,18 @@ function ProviderKeyActions({
         <DropdownMenuItem onSelect={() => onEdit(provider.id)}>
           <ArrowsClockwise className="size-4" />
           Replace
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={refreshing}
+          onSelect={(e) => {
+            // Keep the menu open while the vendor call is in flight, so the
+            // disabled//"Checking" state is actually visible.
+            e.preventDefault()
+            onRefresh(provider.id)
+          }}
+        >
+          <ArrowsClockwise className="size-4" />
+          {refreshing ? "Checking…" : "Refresh model list"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -131,13 +147,38 @@ export function ProviderKeys() {
   const [value, setValue] = useState("")
   const [endpoint, setEndpoint] = useState("")
   const [saving, setSaving] = useState(false)
+  // A key the provider REFUSED is a problem with the field, not an event: it
+  // belongs beside the input, staying put while the user fetches the right
+  // credential. The 340px toast auto-dismisses in 3s, which is not enough to
+  // read "this is an OAuth token, you need an API key" and act on it.
+  const [keyError, setKeyError] = useState<string | null>(null)
   const [removeTarget, setRemoveTarget] = useState<ProviderId | null>(null)
   const [removing, setRemoving] = useState(false)
+  const [refreshing, setRefreshing] = useState<ProviderId | null>(null)
   const removeDone = useRef(false)
+
+  async function refreshModels(provider: ProviderId) {
+    setRefreshing(provider)
+    try {
+      await api(`/api/provider-keys/${provider}/refresh`, { method: "POST" })
+      toast.success("Model list updated")
+      mutate()
+      // The merged catalog lives in /api/models, so the pickers only narrow
+      // once that is revalidated too.
+      globalMutate("/api/models")
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not refresh the model list"
+      )
+    } finally {
+      setRefreshing(null)
+    }
+  }
 
   function openEditor(provider: ProviderId) {
     setValue("")
     setEndpoint("")
+    setKeyError(null)
     setEditing(provider)
   }
 
@@ -145,6 +186,7 @@ export function ProviderKeys() {
     if (!editing || !value.trim()) return
     if (editing === "azure" && !endpoint.trim()) return
     setSaving(true)
+    setKeyError(null)
     try {
       const body: Record<string, unknown> = {
         provider: editing,
@@ -165,7 +207,16 @@ export function ProviderKeys() {
       // availability is per-user, so refresh the wizard/settings catalog too
       globalMutate("/api/models")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save key")
+      // 422 is the provider itself refusing the credential - keep the dialog
+      // open with the reason attached to the field so the key can be corrected
+      // without retyping the rest. Everything else (network, 5xx) is a
+      // transient event and stays a toast.
+      const message = err instanceof Error ? err.message : "Failed to save key"
+      if (err instanceof ApiError && err.status === 422) {
+        setKeyError(message)
+      } else {
+        toast.error(message)
+      }
     } finally {
       setSaving(false)
     }
@@ -234,10 +285,19 @@ export function ProviderKeys() {
                   <span className="font-mono text-[11px] text-muted-foreground">
                     {existing ? `••••${existing.last4}` : "Not set"}
                   </span>
+                  {existing && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {existing.models_available !== null
+                        ? `${existing.models_available} models`
+                        : "Not checked"}
+                    </span>
+                  )}
                   <ProviderKeyActions
                     provider={provider}
                     existing={existing}
                     onEdit={openEditor}
+                    onRefresh={refreshModels}
+                    refreshing={refreshing === provider.id}
                     onRemove={setRemoveTarget}
                   />
                 </div>
@@ -268,7 +328,18 @@ export function ProviderKeys() {
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {existing ? (
-                        <span>••••••••{existing.last4}</span>
+                        <>
+                          <span>••••••••{existing.last4}</span>
+                          {/* Says plainly whether the pickers are filtered for
+                              this key or still showing everything - otherwise
+                              "no models were hidden" and "we never checked"
+                              look identical from the outside. */}
+                          <div className="mt-0.5 font-sans text-[11px] text-muted-foreground">
+                            {existing.models_available !== null
+                              ? `${existing.models_available} models available`
+                              : "Model list not checked yet"}
+                          </div>
+                        </>
                       ) : (
                         <span className="text-muted-foreground">Not set</span>
                       )}
@@ -278,6 +349,8 @@ export function ProviderKeys() {
                         provider={provider}
                         existing={existing}
                         onEdit={openEditor}
+                        onRefresh={refreshModels}
+                        refreshing={refreshing === provider.id}
                         onRemove={setRemoveTarget}
                       />
                     </TableCell>
@@ -302,8 +375,8 @@ export function ProviderKeys() {
               {editingProvider?.label} API key
             </DialogTitle>
             <DialogDescription>
-              Pasted keys are encrypted before they&apos;re stored. We only keep
-              the last 4 characters for display.
+              The key is checked with the provider before it&apos;s saved, then
+              encrypted. We only keep the last 4 characters for display.
             </DialogDescription>
           </DialogHeader>
           {saving ? (
@@ -334,11 +407,27 @@ export function ProviderKeys() {
                   autoComplete="off"
                   placeholder="Paste your key"
                   value={value}
-                  onChange={(e) => setValue(e.target.value)}
+                  aria-invalid={keyError !== null}
+                  aria-describedby={keyError ? "provider-key-error" : undefined}
+                  onChange={(e) => {
+                    setValue(e.target.value)
+                    // Clear on edit: a stale rejection sitting under a key the
+                    // user has already replaced reads as a fresh failure.
+                    if (keyError) setKeyError(null)
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleSave()
                   }}
                 />
+                {keyError && (
+                  <p
+                    id="provider-key-error"
+                    role="alert"
+                    className="text-xs leading-relaxed text-destructive"
+                  >
+                    {keyError}
+                  </p>
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setEditing(null)}>

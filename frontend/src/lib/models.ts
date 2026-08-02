@@ -1,4 +1,35 @@
-import type { EmbeddingModelEntry, Project } from "@/lib/types"
+import type {
+  DeprecatedModels,
+  EmbeddingModelEntry,
+  ModelsResponse,
+  Project,
+} from "@/lib/types"
+
+/**
+ * Is this model retired by its provider?
+ *
+ * One helper for both roles because there are two declaration sites - an inline
+ * flag on embedding entries, a lookup for LLMs - and a picker that consulted
+ * only one of them would keep offering half the dead models. Callers must still
+ * exempt the CURRENT selection: a project already on a retired model has to be
+ * able to see what it is in order to move off it.
+ */
+export function isDeprecated(
+  models: ModelsResponse | undefined,
+  role: ModelRole,
+  provider: string,
+  model: string
+): boolean {
+  const listed = (models?.deprecated as DeprecatedModels | undefined)?.[role]?.[
+    provider
+  ]
+  if (listed?.includes(model)) return true
+  if (role !== "embedding") return false
+  return Boolean(
+    models?.catalog.embedding[provider]?.find((e) => e.model === model)
+      ?.deprecated
+  )
+}
 
 export type Availability = Record<string, boolean>
 export type ModelRole = "llm" | "embedding"

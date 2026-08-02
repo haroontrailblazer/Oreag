@@ -20,7 +20,7 @@ from ..services.content_version import bump_content_version
 from ..services.conversion import content_type_for, is_ingestable, source_extension
 from ..services.ingestion import recompute_project_status
 from ..services.memory import reembed_project_memories
-from .deps import get_owned_project
+from .deps import ensure_valid_provider_key, get_owned_project
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,13 @@ async def upload_files(
     effective_size = chunk_size if chunk_size is not None else project.chunk_size
     if chunk_overlap is not None and chunk_overlap >= effective_size:
         raise HTTPException(422, "chunk_overlap must be smaller than chunk_size")
+
+    # Up here with the other input validation, not down beside apply_override:
+    # a key the provider rejects must stop the request before the embedding
+    # columns move or a single file reaches storage.
+    ensure_valid_provider_key(
+        embedding_provider or project.embedding_provider, embedding_api_key
+    )
 
     # embedding config is project-wide (uniform vector dimension). A model
     # switch re-embeds every existing file (and memories); shrinking the same
@@ -316,6 +323,16 @@ def reindex_project(
     chunking_changed = (
         effective_size != project.chunk_size
         or effective_overlap != project.chunk_overlap
+    )
+
+    # Before _truncate_vectors_in_place, which is the request's first write.
+    # A key rejected after that point would 422 having already rewritten every
+    # vector in the project - and re-embedding the whole corpus with a key that
+    # cannot authenticate is precisely the expensive failure this check exists
+    # to prevent.
+    ensure_valid_provider_key(
+        body.embedding_provider or project.embedding_provider,
+        body.embedding_api_key,
     )
 
     provider, model, dims, plan = _plan_embedding_change(

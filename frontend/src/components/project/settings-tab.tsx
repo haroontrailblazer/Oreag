@@ -51,7 +51,12 @@ import {
   OverrideViz,
   TopKViz,
 } from "@/components/ui/best-practice-visuals"
-import { dimensionOptions, providerOf, providerUsable } from "@/lib/models"
+import {
+  dimensionOptions,
+  isDeprecated,
+  providerOf,
+  providerUsable,
+} from "@/lib/models"
 import { cn } from "@/lib/utils"
 import type { ModelsResponse, Project } from "@/lib/types"
 
@@ -554,11 +559,16 @@ export function SettingsTab({
                 {models ? (
                   Object.entries(models.catalog.llm).flatMap(([provider, names]) =>
                     names
-                      .filter(
-                        (model) =>
-                          providerUsable(provider, "llm", availability, project) ||
-                          `${provider}/${model}` === llm
-                      )
+                      .filter((model) => {
+                        if (`${provider}/${model}` === llm) return true
+                        // Retired by the vendor. Kept resolvable so existing
+                        // projects keep answering, but never offered again -
+                        // some of these now silently redirect to a different,
+                        // differently-priced model.
+                        if (isDeprecated(models, "llm", provider, model))
+                          return false
+                        return providerUsable(provider, "llm", availability, project)
+                      })
                       .map((model) => {
                         const usable = providerUsable(
                           provider,
@@ -566,16 +576,22 @@ export function SettingsTab({
                           availability,
                           project
                         )
+                        const retired = isDeprecated(models, "llm", provider, model)
                         return (
                           <SelectItem
                             key={`${provider}/${model}`}
                             value={`${provider}/${model}`}
                             className={cn(
-                              !usable && "text-muted-foreground opacity-70"
+                              (!usable || retired) &&
+                                "text-muted-foreground opacity-70"
                             )}
                           >
                             {provider} / {model}
-                            {!usable ? " · key removed" : ""}
+                            {retired
+                              ? " · retired - switch model"
+                              : !usable
+                                ? " · key removed"
+                                : ""}
                           </SelectItem>
                         )
                       })
@@ -668,15 +684,26 @@ export function SettingsTab({
                   Object.entries(models.catalog.embedding).flatMap(
                     ([provider, entries]) =>
                       entries
-                        .filter(
-                          (entry) =>
-                            providerUsable(
-                              provider,
-                              "embedding",
-                              availability,
-                              project
-                            ) || `${provider}/${entry.model}` === embedding
-                        )
+                        .filter((entry) => {
+                          // The current selection is never hidden - a project
+                          // sitting on a retired model has to be able to SEE
+                          // what it is in order to move off it.
+                          if (`${provider}/${entry.model}` === embedding)
+                            return true
+                          // Retired upstream: still resolvable server-side for
+                          // projects that already chose it, but offering it to
+                          // anyone else builds a project that cannot index.
+                          if (
+                            isDeprecated(models, "embedding", provider, entry.model)
+                          )
+                            return false
+                          return providerUsable(
+                            provider,
+                            "embedding",
+                            availability,
+                            project
+                          )
+                        })
                         .map((entry) => {
                           const usable = providerUsable(
                             provider,
@@ -689,11 +716,27 @@ export function SettingsTab({
                               key={`${provider}/${entry.model}`}
                               value={`${provider}/${entry.model}`}
                               className={cn(
-                                !usable && "text-muted-foreground opacity-70"
+                                (!usable ||
+                                  isDeprecated(
+                                    models,
+                                    "embedding",
+                                    provider,
+                                    entry.model
+                                  )) &&
+                                  "text-muted-foreground opacity-70"
                               )}
                             >
                               {provider} / {entry.model} ({entry.dimensions}d)
-                              {!usable ? " · key removed" : ""}
+                              {isDeprecated(
+                                models,
+                                "embedding",
+                                provider,
+                                entry.model
+                              )
+                                ? " · retired - switch model"
+                                : !usable
+                                  ? " · key removed"
+                                  : ""}
                             </SelectItem>
                           )
                         })

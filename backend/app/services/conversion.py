@@ -64,6 +64,28 @@ SUPPORTED_UPLOAD_EXTENSIONS = {
 }
 
 
+def strip_nul(text: str) -> str:
+    """Remove NUL (0x00) bytes, which PostgreSQL text columns cannot store.
+
+    A NUL anywhere in a document fails the whole INSERT with
+    "PostgreSQL text fields cannot contain NUL (0x00) bytes", so ONE unmappable
+    glyph on page 17 of a 33-page PDF marks the entire file failed - the user
+    sees a database error about a file that looks perfectly readable.
+
+    They arrive from real, ordinary documents. PyMuPDF emits 0x00 for a glyph it
+    cannot map to a codepoint, which in practice means emoji and icon-font
+    characters: measured across five of these PDFs, every NUL sat beside an
+    emoji bullet or link icon ("Link Text: \\x00 View Works"). Only PDFs
+    containing no emoji at all came through clean, which is exactly why one file
+    of a matched set indexed while its four siblings did not.
+
+    Dropped rather than replaced: each one stands for a decorative glyph that
+    carried no text, and every occurrence measured was already adjacent to
+    whitespace, so removing it cannot join two words together.
+    """
+    return text.replace("\x00", "") if "\x00" in text else text
+
+
 @dataclass(frozen=True)
 class ConvertedDocument:
     markdown: str
@@ -71,6 +93,15 @@ class ConvertedDocument:
     # Non-fatal caveat the uploader should see (e.g. audio used the free
     # fallback endpoint) - surfaced on the file row and toasted by the UI.
     note: str | None = None
+
+    def __post_init__(self):
+        # Sanitised HERE rather than at the INSERT, because this is the single
+        # boundary every extraction path crosses - MarkItDown, the plain-text
+        # decoder, audio transcripts, and any converter added later - and
+        # because the markdown is also uploaded to storage, so cleaning it at
+        # the database would leave NULs in the copy the file viewer serves.
+        # frozen=True, hence object.__setattr__.
+        object.__setattr__(self, "markdown", strip_nul(self.markdown))
 
 
 def source_extension(filename: str) -> str:

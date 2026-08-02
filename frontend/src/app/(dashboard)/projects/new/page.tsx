@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher, uploadWithProgress } from "@/lib/api"
-import { dimensionOptions, providerOf } from "@/lib/models"
+import { dimensionOptions, isDeprecated, providerOf } from "@/lib/models"
 import { cn } from "@/lib/utils"
 import type { ModelsResponse, Project } from "@/lib/types"
 
@@ -40,12 +40,18 @@ const MAX_FILE_MB = 50
 function firstAvailableModel<T>(
   groups: Record<string, T[]>,
   availability: Record<string, boolean>,
-  toValue: (provider: string, entry: T) => string
+  toValue: (provider: string, entry: T) => string,
+  retired: (provider: string, entry: T) => boolean
 ): string | null {
   for (const [provider, entries] of Object.entries(groups)) {
-    if (availability[provider] && entries.length > 0) {
-      return toValue(provider, entries[0])
-    }
+    if (!availability[provider]) continue
+    // Skipping retired entries here is load-bearing, not tidiness: this picks
+    // entries[0], and for several providers the first listed model is the one
+    // the vendor is shutting down. Auto-selecting it would hand a brand-new
+    // project a model that cannot answer - the exact failure the picker
+    // filtering exists to prevent, arriving through the back door.
+    const usable = entries.find((entry) => !retired(provider, entry))
+    if (usable !== undefined) return toValue(provider, usable)
   }
   return null
 }
@@ -70,19 +76,31 @@ export default function NewProjectPage() {
   const [progress, setProgress] = useState(0)
 
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher, {
-    onSuccess({ availability, catalog }) {
+    onSuccess(response) {
+      const { availability, catalog } = response
       setEmbedding((current) => {
         const [provider] = current.split("/", 1)
         if (availability[provider]) return current
         return (
-          firstAvailableModel(catalog.embedding, availability, (p, e) => `${p}/${e.model}`) ??
-          current
+          firstAvailableModel(
+            catalog.embedding,
+            availability,
+            (p, e) => `${p}/${e.model}`,
+            (p, e) => isDeprecated(response, "embedding", p, e.model)
+          ) ?? current
         )
       })
       setLlm((current) => {
         const [provider] = current.split("/", 1)
         if (availability[provider]) return current
-        return firstAvailableModel(catalog.llm, availability, (p, m) => `${p}/${m}`) ?? current
+        return (
+          firstAvailableModel(
+            catalog.llm,
+            availability,
+            (p, m) => `${p}/${m}`,
+            (p, m) => isDeprecated(response, "llm", p, m)
+          ) ?? current
+        )
       })
     },
   })
@@ -334,11 +352,24 @@ export default function NewProjectPage() {
                     ? Object.entries(models.catalog.embedding).flatMap(
                         ([provider, entries]) =>
                           entries
-                            .filter(
-                              (entry) =>
+                            .filter((entry) => {
+                              // Retired upstream - never offer it to a NEW
+                              // project; the provider would 404 every embed
+                              // call and the project could not index at all.
+                              if (
+                                isDeprecated(
+                                  models,
+                                  "embedding",
+                                  provider,
+                                  entry.model
+                                )
+                              )
+                                return false
+                              return (
                                 availability[provider] ||
                                 `${provider}/${entry.model}` === embedding
-                            )
+                              )
+                            })
                             .map((entry) => (
                               <SelectItem
                                 key={`${provider}/${entry.model}`}
@@ -405,11 +436,15 @@ export default function NewProjectPage() {
                     ? Object.entries(models.catalog.llm).flatMap(
                         ([provider, names]) =>
                           names
-                            .filter(
-                              (model) =>
+                            .filter((model) => {
+                              // Never offer a retired model to a NEW project.
+                              if (isDeprecated(models, "llm", provider, model))
+                                return false
+                              return (
                                 availability[provider] ||
                                 `${provider}/${model}` === llm
-                            )
+                              )
+                            })
                             .map((model) => (
                               <SelectItem
                                 key={`${provider}/${model}`}

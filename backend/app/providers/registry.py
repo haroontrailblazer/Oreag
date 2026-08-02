@@ -22,7 +22,15 @@ CATALOG: dict = {
             },
         ],
         "gemini": [
-            {"model": "text-embedding-004", "dimensions": 768},
+            # RETIRED at Google: absent from the live embedContent list and a
+            # direct call returns 404. It stays in the catalog because
+            # _embedding_entry raises for an unknown model and that lookup runs
+            # for STORED project config - deleting the row would turn a project
+            # that already picked it from "cannot embed" into a 500 on every
+            # page that reads it. "deprecated" hides it from the pickers so no
+            # new project can choose it; existing ones still resolve, and see
+            # the retired marker in Settings.
+            {"model": "text-embedding-004", "dimensions": 768, "deprecated": True},
             {
                 "model": "gemini-embedding-001",
                 "dimensions": 3072,
@@ -62,7 +70,23 @@ CATALOG: dict = {
             },
         ],
         "together": [
-            {"model": "BAAI/bge-large-en-v1.5", "dimensions": 1024},
+            # Together's only current serverless embedding model. Added because
+            # bge below was removed on 2026-02-06 with no replacement named,
+            # which would otherwise leave this provider unable to index at all.
+            # No dimension_options: e5 is not Matryoshka-trained and rejects the
+            # dimensions parameter, and an empty list is what keeps
+            # send_dimensions False in get_embedder.
+            {"model": "intfloat/multilingual-e5-large-instruct", "dimensions": 1024},
+            # Retired by Together on 2026-02-06. Kept resolvable, hidden from
+            # the pickers: same 1024 width as the replacement but a DIFFERENT
+            # vector space, so a project on it must be fully re-indexed rather
+            # than switched - mixing the two produces plausible-looking garbage
+            # similarity instead of an error.
+            {
+                "model": "BAAI/bge-large-en-v1.5",
+                "dimensions": 1024,
+                "deprecated": True,
+            },
         ],
         "fireworks": [
             {"model": "nomic-ai/nomic-embed-text-v1.5", "dimensions": 768},
@@ -143,7 +167,15 @@ CATALOG: dict = {
             "mistral-medium-latest",
             "mistral-small-latest",
         ],
-        "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+        # v4-* are the only two ids DeepSeek documents today. Added because
+        # both legacy aliases are past their 2026-07-24 discontinuation, which
+        # would otherwise leave this provider with no selectable model at all.
+        "deepseek": [
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
         "cohere": ["command-a-03-2025", "command-r-plus-08-2024"],
         "together": [
             "meta-llama/Llama-3.3-70B-Instruct-Turbo",
@@ -264,7 +296,66 @@ def embedding_change_plan(
     return "reembed"
 
 
+# LLM ids the vendor has retired, is about to retire, or now silently redirects.
+#
+# A SEPARATE SET rather than a "deprecated" key on the entry, because
+# CATALOG["llm"] values are bare `list[str]` and validate_llm below is a plain
+# `model not in list` membership test. Promoting a single entry to a dict makes
+# that test fail for EVERY model of that provider - the string "deepseek-chat"
+# never equals {"model": "deepseek-chat", ...} - which would 500 every query on
+# a provider the moment one of its models was marked. Embeddings can carry the
+# flag inline because those entries are already dicts.
+#
+# These stay RESOLVABLE on purpose. validate_llm runs on every single query, so
+# removing an id would break projects that already store it; the flag only stops
+# the pickers offering it to someone new. Dates are the vendors' own.
+DEPRECATED_LLMS: dict[str, set[str]] = {
+    # Discontinued 2026-07-24, per DeepSeek's 2026-04-24 changelog.
+    "deepseek": {"deepseek-chat", "deepseek-reasoner"},
+    # Shutdown 2026-08-16 on Groq's deprecations page - the nearest date here.
+    "groq": {"llama-3.3-70b-versatile", "llama-3.1-8b-instant"},
+    # Live-measured: present in models.list() but generateContent returns 404
+    # "no longer available to new users". Existing callers still work, which is
+    # precisely why this is a hide and not a removal.
+    "gemini": {"gemini-2.5-flash"},
+    # Azure lifecycle "Deprecated": new subscriptions cannot create deployments.
+    # gpt-4.1 / gpt-4.1-mini are deliberately NOT here - they carry the same
+    # label but retire in 2027 and existing customers can still deploy them.
+    "azure": {"gpt-4o", "gpt-4o-mini"},
+    # Retired 2026-05-15; xAI keeps the slugs alive but silently redirects them
+    # to grok-4.3, so a user is billed for a model they did not choose.
+    "xai": {"grok-4-fast-reasoning", "grok-4-fast-non-reasoning"},
+    # "As of December 15, 2025, the sonar-reasoning model has been deprecated
+    # and removed from the API" - Perplexity's changelog.
+    "perplexity": {"sonar-reasoning"},
+    # Sarvam's own docs: "Deprecated - migrate to Sarvam-105B". Corroborated by
+    # measurement: its public /v1/models returns only sarvam-105b.
+    "sarvam": {"sarvam-30b"},
+    # Removed 2026-02-06 per Together's deprecations page.
+    "together": {"meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"},
+}
+
+
+def deprecated_model_ids() -> dict[str, dict[str, list[str]]]:
+    """Retired ids per role and provider, for the pickers to grey out.
+
+    Both roles are reported through ONE structure so the frontend has a single
+    rule. Embeddings declare it inline on their dict entry; LLMs come from the
+    set above. Two declaration sites, one consumer contract.
+    """
+    embedding = {
+        provider: [e["model"] for e in entries if e.get("deprecated")]
+        for provider, entries in CATALOG["embedding"].items()
+    }
+    return {
+        "llm": {p: sorted(ids) for p, ids in DEPRECATED_LLMS.items() if ids},
+        "embedding": {p: ids for p, ids in embedding.items() if ids},
+    }
+
+
 def validate_llm(provider: str, model: str) -> None:
+    # Deliberately does NOT consult DEPRECATED_LLMS: this runs on every query,
+    # and a project that already stores a retired id must keep working.
     if model not in CATALOG["llm"].get(provider, []):
         raise ValueError(f"Unknown LLM: {provider}/{model}")
 

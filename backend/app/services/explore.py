@@ -256,7 +256,18 @@ def explore_brain(
         raise ProviderUnavailableError(
             "Brain exploration needs an embedding key. Add one in Settings → API keys."
         )
-    embedder = get_embedder(project.embedding_provider, project.embedding_model, key)
+    # dimensions= is load-bearing, not decoration. Without it
+    # resolve_embedding_dimensions falls back to the MODEL's default size, so a
+    # project that shrank a Matryoshka model (3072 -> 768, which Settings offers
+    # as an instant in-place truncation) embedded its query at 3072 and compared
+    # it against 768-d stored vectors - pgvector refuses to compare mismatched
+    # widths, so Brain exploration failed outright on exactly those projects.
+    embedder = get_embedder(
+        project.embedding_provider,
+        project.embedding_model,
+        key,
+        dimensions=project.embedding_dimensions,
+    )
     qvec = "[" + ",".join(repr(v) for v in embedder.embed_query(query)) + "]"
 
     max_nodes = settings.explore_max_nodes

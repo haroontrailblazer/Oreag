@@ -711,16 +711,102 @@ class TestAzureOpenAI:
         assert emb._send_dimensions is True  # MRL deployment: dims param sent
 
 
-class TestGeminiProviderCompat:
-    def test_vertex_express_keys_are_detected(self):
-        # AQ.-prefixed Vertex express keys must route to the Vertex backend;
-        # sending them to the Gemini Developer API 401s
-        # (ACCESS_TOKEN_TYPE_UNSUPPORTED). AIza keys stay on the Developer API.
-        from app.providers.gemini_provider import is_vertex_express_key
+class TestEmbedderDimensionsAreAlwaysPassed:
+    """Every get_embedder() call must pass dimensions=.
 
-        assert is_vertex_express_key("AQ.Ab8example")
-        assert not is_vertex_express_key("AIzaSyExample")
-        assert not is_vertex_express_key("")
+    Omitting it does not fail loudly - resolve_embedding_dimensions quietly
+    substitutes the MODEL's default size. For a project that shrank a
+    Matryoshka model in place (3072 -> 768, offered in Settings as an instant
+    truncation) that produces a query vector of the wrong width, and pgvector
+    refuses to compare mismatched widths.
+
+    Asserted across the whole services package rather than per-call-site,
+    because that is what would have caught it: explore.py was the ONE omission
+    out of seven, and every individual site around it looked fine.
+    """
+
+    def _call_sites(self):
+        import ast
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1] / "app"
+        for path in root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = getattr(func, "id", None) or getattr(func, "attr", None)
+                if name == "get_embedder":
+                    yield path, node
+
+    def test_every_call_site_passes_dimensions(self):
+        offenders = [
+            f"{path.name}:{node.lineno}"
+            for path, node in self._call_sites()
+            if not any(kw.arg == "dimensions" for kw in node.keywords)
+        ]
+        assert offenders == [], (
+            "get_embedder() without dimensions= silently uses the model default "
+            f"instead of the project's configured size: {offenders}"
+        )
+
+    def test_the_scan_actually_finds_call_sites(self):
+        """Guards the guard: a broken walk would make the test above vacuous."""
+        assert len(list(self._call_sites())) >= 6
+
+
+class TestGeminiProviderCompat:
+    """The prefix must not decide the backend.
+
+    This class previously asserted the opposite - that an "AQ." key routes to
+    Vertex - which broke every key Google AI Studio issues today, since AQ. is
+    now the only prefix it hands out for new keys. Verified live: an AQ. key
+    lists models and embeds successfully on the Developer API.
+    """
+
+    def test_both_key_prefixes_are_recognised_as_api_keys(self):
+        from app.providers.gemini_provider import looks_like_api_key
+
+        assert looks_like_api_key("AQ.Ab8example")  # current AI Studio format
+        assert looks_like_api_key("AIzaSyExample")  # legacy format
+        assert not looks_like_api_key("")
+
+    def test_other_google_credential_types_are_not_api_keys(self):
+        """OAuth tokens and service-account JSON are the credentials people
+        actually paste by mistake; google-genai can consume neither."""
+        from app.providers.gemini_provider import looks_like_api_key
+
+        assert not looks_like_api_key("ya29.a0AfB_oauth-access-token")
+        assert not looks_like_api_key('{"type": "service_account"}')
+
+    def test_no_key_shape_selects_the_vertex_backend(self, monkeypatch):
+        """The regression guard. Vertex is reached only via vertexai=True, and
+        nothing about the key may set it - an AQ. key sent there 403s with
+        SERVICE_DISABLED for anyone without aiplatform enabled."""
+        from google import genai
+
+        import app.providers.gemini_provider as gp
+
+        seen = []
+
+        def fake_client(**kwargs):
+            seen.append(kwargs)
+            return object()
+
+        # setattr on the real module, NOT setitem on sys.modules: _client does
+        # `from google import genai`, which reads an ATTRIBUTE of the already
+        # imported `google` package, so a sys.modules swap never reaches it.
+        monkeypatch.setattr(genai, "Client", fake_client)
+
+        for key in ["AQ.Ab8example", "AIzaSyExample"]:
+            gp._client(key)
+        assert seen, "client was never constructed"
+        assert all("vertexai" not in kwargs for kwargs in seen)
+        assert [kwargs["api_key"] for kwargs in seen] == [
+            "AQ.Ab8example",
+            "AIzaSyExample",
+        ]
 
 
 class TestAnthropicProviderCompat:
@@ -1007,6 +1093,62 @@ class TestGeneration:
         assert prompt.endswith("Question: what?")
 
 
+class TestNulBytesNeverReachPostgres:
+    """A NUL (0x00) anywhere in a document failed the whole INSERT.
+
+    Real-world cause, measured on five PDFs: PyMuPDF emits 0x00 for a glyph it
+    cannot map to a codepoint, which in practice means emoji and icon-font
+    characters. One emoji bullet on page 17 of a 33-page PDF was enough to mark
+    the entire file failed with "(psycopg.DataError) PostgreSQL text fields
+    cannot contain NUL (0x00) bytes" - a database error about a document that
+    reads perfectly. The sibling PDF that indexed fine simply had no emoji.
+    """
+
+    def test_strip_nul_removes_only_the_nul(self):
+        from app.services.conversion import strip_nul
+
+        assert strip_nul("- \x00Can the agent recover?") == "- Can the agent recover?"
+        assert strip_nul("Pencil \x00\x00 Learning") == "Pencil  Learning"
+
+    def test_ordinary_text_is_returned_untouched(self):
+        """Including the emoji that DID map - only unmappable glyphs become
+        NUL, and the rest of the document must survive verbatim."""
+        from app.services.conversion import strip_nul
+
+        for text in ["plain", "", "emoji ✅ ok", "tabs\tand\nnewlines"]:
+            assert strip_nul(text) == text
+
+    def test_every_converted_document_is_cleaned(self):
+        """Enforced on the dataclass, not at each return, so a converter added
+        later cannot reintroduce this by forgetting to sanitise."""
+        from app.services.conversion import ConvertedDocument
+
+        assert ConvertedDocument(markdown="a\x00b", page_count=1).markdown == "ab"
+        assert ConvertedDocument(markdown="x\x00", page_count=None).markdown == "x"
+
+    def test_the_column_type_is_the_backstop(self):
+        from app.models import NulSafeText
+
+        assert NulSafeText().process_bind_param("x\x00y", None) == "xy"
+        assert NulSafeText().process_bind_param("clean", None) == "clean"
+        assert NulSafeText().process_bind_param(None, None) is None
+
+    def test_external_text_columns_all_use_it(self):
+        """The three places arbitrary outside text lands. Missing one leaves a
+        path that still 500s on the same byte."""
+        from app.models import Chunk, Memory, NulSafeText, QueryLog, SemanticQueryCache
+
+        for column in (
+            Chunk.__table__.c.content,
+            Memory.__table__.c.content,
+            QueryLog.__table__.c.question,
+            # The semantic cache stores the asked question verbatim too, so a
+            # NUL there would fail the cache write rather than the query.
+            SemanticQueryCache.__table__.c.question,
+        ):
+            assert isinstance(column.type, NulSafeText), column
+
+
 class TestConversion:
     def test_supported_upload_extensions(self):
         assert is_supported_upload("handbook.pdf")
@@ -1204,10 +1346,18 @@ class TestVisionAndTranscriptionClients:
         assert client is not None and model == "gemini-2.5-flash"
         assert "generativelanguage.googleapis.com" in str(client.base_url)
 
-    def test_gemini_vertex_express_key_is_skipped(self):
+    def test_modern_aq_key_still_gets_captioning(self):
+        """Inverted deliberately. AQ. keys used to be refused captioning as
+        "Vertex only"; they are ordinary AI Studio keys, so refusing them
+        silently disabled image captioning for every current Gemini user and
+        surfaced as "No text could be extracted"."""
         from app.services.ingestion import vision_llm_for
 
-        assert vision_llm_for(self._project("gemini"), "AQ.express") == (None, None)
+        client, model = vision_llm_for(
+            self._project("gemini", "gemini-2.5-flash"), "AQ.Ab8example"
+        )
+        assert client is not None and model == "gemini-2.5-flash"
+        assert "generativelanguage.googleapis.com" in str(client.base_url)
 
     def test_other_providers_get_no_captioning(self):
         from app.services.ingestion import vision_llm_for

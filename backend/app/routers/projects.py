@@ -11,7 +11,7 @@ from ..models import File, Project, QueryLog
 from ..providers.registry import resolve_embedding_dimensions, validate_llm
 from ..schemas import ProjectCreate, ProjectOut, ProjectUpdate
 from ..services import storage
-from .deps import get_owned_project
+from .deps import ensure_valid_provider_key, get_owned_project
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -22,6 +22,11 @@ def _set_key_override(project: Project, slot: str, value: str | None) -> None:
     pair = crypto.apply_override(value)
     if pair is None:
         return
+    # Validated against the provider the key will actually be used with, which
+    # callers have already set on the project by this point - so switching
+    # provider and pasting its key in one request checks the pair, not the old
+    # provider. A rejected key 422s before either column is written.
+    ensure_valid_provider_key(getattr(project, f"{slot}_provider"), value)
     encrypted, masked = pair
     setattr(project, f"{slot}_key_encrypted", encrypted)
     setattr(project, f"{slot}_key_last4", masked)

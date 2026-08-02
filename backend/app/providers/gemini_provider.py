@@ -16,11 +16,19 @@ def l2_normalize(values: list[float]) -> list[float]:
     return [v / norm for v in values]
 
 
-def is_vertex_express_key(api_key: str) -> bool:
-    """Vertex AI express-mode API keys start with "AQ." (AI Studio keys start
-    with "AIza"). They hit a different Google backend: sending one to the
-    Gemini Developer API fails with 401 ACCESS_TOKEN_TYPE_UNSUPPORTED."""
-    return api_key.startswith("AQ.")
+def looks_like_api_key(api_key: str) -> bool:
+    """Is this string shaped like a Google API key at all?
+
+    Two prefixes are in circulation and BOTH are ordinary Gemini API keys:
+    the legacy Standard key ("AIza...") and the newer Authorization key
+    ("AQ.Ab..."), which AI Studio now issues exclusively for new keys.
+
+    This is a credential-TYPE check, not a routing signal - see _client. Its
+    only job is to tell an API key apart from the other Google credentials
+    people reach for (gcloud / Gemini CLI OAuth tokens, service-account JSON),
+    none of which google-genai can accept as api_key.
+    """
+    return api_key.startswith(("AIza", "AQ."))
 
 
 def _client(api_key: str | None):
@@ -42,10 +50,26 @@ def _client(api_key: str | None):
     # full-budget non-streaming generation (the client is shared with the
     # embedder, which never gets near it).
     http_options = types.HttpOptions(timeout=300_000)
-    # Both key kinds work through the same SDK - express keys just need the
-    # Vertex backend selected.
-    if is_vertex_express_key(api_key):
-        return genai.Client(vertexai=True, api_key=api_key, http_options=http_options)
+    # ONE backend for every API key.
+    #
+    # There used to be a branch here sending "AQ."-prefixed keys to Vertex, on
+    # the theory that the prefix marked a Vertex express key. It does not.
+    # Google AI Studio now issues "AQ." Authorization keys EXCLUSIVELY for new
+    # keys, so that rule misrouted the ordinary key of every newly-onboarded
+    # user to Vertex - where it 403s with SERVICE_DISABLED unless that user
+    # happens to have aiplatform.googleapis.com enabled in the backing GCP
+    # project. The symptom was "my valid Gemini key does not work", with an
+    # error naming a Google Cloud service the user had never heard of.
+    #
+    # Measured against the live API with a real AQ. key: it lists 42 models
+    # here, embeds successfully, and hits FREE-TIER 429s - which a Vertex key
+    # would not have. The old docstring's claim that such a key 401s with
+    # ACCESS_TOKEN_TYPE_UNSUPPORTED described a transitional Google-side
+    # provisioning bug, not a key type.
+    #
+    # google-genai itself does no prefix inspection anywhere in its 30 modules;
+    # it treats keys as opaque and picks the backend purely from the vertexai
+    # flag. Credentials are opaque - do not pattern-match them for routing.
     return genai.Client(api_key=api_key, http_options=http_options)
 
 

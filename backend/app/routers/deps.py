@@ -6,7 +6,27 @@ from sqlalchemy.orm import Session
 from ..auth.jwt import get_current_user
 from ..db import get_db
 from ..models import Project
+from ..providers.validation import InvalidProviderKeyError, validate_credential
 from ..services.rate_limit import enforce_user_rate_limit
+
+
+def ensure_valid_provider_key(provider: str, secret: str | None) -> None:
+    """422 if `provider` rejects `secret`, so a bad key never reaches storage.
+
+    No-op for the two non-values a key field can carry: None ("leave whatever
+    is there alone") and "" ("clear the override"). Only a real credential is
+    worth a network round trip.
+
+    Call this BEFORE the route mutates anything. The probe is a network call and
+    can raise; every caller here sits in front of writes that would otherwise
+    have to be unwound.
+    """
+    if not secret:
+        return
+    try:
+        validate_credential(provider, secret)
+    except InvalidProviderKeyError as exc:
+        raise HTTPException(422, str(exc))
 
 
 def heavy_dashboard_limit(
