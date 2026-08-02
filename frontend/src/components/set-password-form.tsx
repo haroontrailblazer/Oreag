@@ -24,18 +24,22 @@ import { createClient } from "@/lib/supabase/client"
  *   `supabase.auth.reauthenticate()`. That deliberately does NOT create a new
  *   session, so an existing aal2 session survives the password change intact.
  *
- * `onError` exists because a wrong nonce is only detectable here: Supabase has
- * no standalone "check this nonce" call, so `updateUser` is where it surfaces
- * and the caller needs to know in order to send the user back to the code step.
+ * `beforeSubmit` runs immediately before `updateUser`. The profile card uses it
+ * to restore the session the user had before the recovery code replaced it -
+ * Supabase refuses a password change on the fresh aal1 session that
+ * `verifyOtp` creates when the account has a second factor, so without this the
+ * update fails at the last step with a two-factor error.
  */
 export function SetPasswordForm({
   submitLabel = "Update password",
   nonce,
+  beforeSubmit,
   onSuccess,
   onError,
 }: {
   submitLabel?: string
   nonce?: string
+  beforeSubmit?: () => Promise<void> | void
   onSuccess?: () => void
   onError?: (error: unknown) => void
 }) {
@@ -54,6 +58,7 @@ export function SetPasswordForm({
       return
     }
     setLoading(true)
+    await beforeSubmit?.()
     const { error } = await createClient().auth.updateUser(
       nonce ? { password, nonce } : { password }
     )

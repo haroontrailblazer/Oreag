@@ -1,10 +1,10 @@
 "use client"
 
-import { ArrowRight, LockKey } from "@phosphor-icons/react/dist/ssr"
-import { useCallback, useState } from "react"
+import { CheckCircle, LockKey } from "@phosphor-icons/react/dist/ssr"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { OtpField, isCompleteCode } from "@/components/auth/otp-field"
-import { ConfirmPasswordField, PasswordField } from "@/components/password-field"
+import { SetPasswordForm } from "@/components/set-password-form"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -13,64 +13,82 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
 import { Spin } from "@/components/ui/loader"
 import { authErrorMessage } from "@/lib/auth-errors"
 import { useResendCooldown } from "@/lib/auth-hooks"
-import { passwordFailures } from "@/lib/password"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
+type Stage = "idle" | "code" | "verified"
+
 /**
- * Change password while signed in: choose the password, then confirm with an
- * emailed code.
+ * Change password while signed in:
  *
- * WHY THIS ORDER, AND NOT "code first, fields after"
+ *     Email me a code  ->  enter code  ->  code correct  ->  password fields
  *
- * The obvious design - verify the code, then reveal the password fields - needs
- * a code that can be checked on its own. Only `verifyOtp({ type: 'recovery' })`
- * can do that, and it establishes a NEW session, which starts at aal1. Supabase
- * then refuses to change the password of an account that has a verified second
- * factor from an aal1 session, so the fields appeared and the update could
- * never succeed: the user typed a password twice and got a two-factor error.
- * That flow was structurally broken for exactly the accounts it mattered for.
+ * The code is verified on its own with `verifyOtp({ type: 'recovery' })`, which
+ * is the only Supabase call that can check a code WITHOUT a password attached.
+ * That is what lets the fields stay hidden until the code is right.
  *
- * `reauthenticate()` avoids it by issuing a nonce against the CURRENT session
- * and creating nothing - an aal2 session survives, so the update goes through
- * and no second factor is ever demanded here. The cost is that its nonce has no
- * standalone verify endpoint (`EmailOtpType` has no 'reauthentication'); it is
- * validated by `updateUser` itself.
+ * THE CATCH, AND THE FIX
  *
- * So the code moves to the END. It is the last thing entered and the thing that
- * submits, which means a wrong code fails on the code field - where the mistake
- * actually is - and the password survives the retry. Nobody types a password
- * twice only to be told the wrong thing was wrong.
+ * `verifyOtp` establishes a NEW session, and a new session starts at aal1.
+ * Supabase refuses to change the password of an account with a verified second
+ * factor from an aal1 session - so on a 2FA account the fields appeared, the
+ * user typed a password twice, and `updateUser` came back with a two-factor
+ * error. The flow looked right and could never finish.
  *
- * It also uses Supabase's Reauthentication template, which is code-only with no
- * link, so this flow cannot be short-circuited by clicking through an email.
+ * So the session the user ALREADY had is captured before the code is sent and
+ * restored just before the update. That session is theirs and is typically
+ * aal2, so the update is allowed. Nothing is granted that they did not already
+ * hold - it is put back, not escalated - and the emailed code still had to be
+ * correct to get this far.
  */
 export function ChangePasswordCard() {
   const supabase = createClient()
-
-  const [password, setPassword] = useState("")
-  const [confirm, setConfirm] = useState("")
-  const [attempted, setAttempted] = useState(false)
-
-  const [stage, setStage] = useState<"password" | "code">("password")
+  const [stage, setStage] = useState<Stage>("idle")
+  const [email, setEmail] = useState<string | null>(null)
   const [code, setCode] = useState("")
   const [invalid, setInvalid] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [verifying, setVerifying] = useState(false)
   const resend = useResendCooldown()
 
-  const failing = passwordFailures(password)
-  const mismatch = password !== confirm
-  const passwordReady = failing.length === 0 && !mismatch && password.length > 0
+  // The pre-recovery session, held only for the length of this flow. A ref, not
+  // state: it must never trigger a render, and it must not be readable from a
+  // stale closure after the stage changes.
+  const priorSession = useRef<{
+    access_token: string
+    refresh_token: string
+  } | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    supabase.auth.getUser().then(({ data }) => {
+      if (alive) setEmail(data.user?.email ?? null)
+    })
+    return () => {
+      alive = false
+      priorSession.current = null
+    }
+  }, [supabase])
 
   const sendCode = useCallback(async () => {
+    if (!email) {
+      toast.error("No email address on this account.")
+      return
+    }
     const ok = await resend.send(async () => {
-      // Emails a one-time nonce to the signed-in user's confirmed address.
-      // Does not touch the session, which is the whole point.
-      const { error } = await supabase.auth.reauthenticate()
+      // Capture the current session BEFORE anything replaces it.
+      const { data: current } = await supabase.auth.getSession()
+      if (current.session) {
+        priorSession.current = {
+          access_token: current.session.access_token,
+          refresh_token: current.session.refresh_token,
+        }
+      }
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${location.origin}/auth/confirm?next=/auth/reset-password`,
+      })
       if (error) {
         toast.error(authErrorMessage(error, "Could not send the code."))
         return false
@@ -82,41 +100,51 @@ export function ChangePasswordCard() {
       setInvalid(false)
       setStage("code")
     }
-  }, [supabase, resend])
+  }, [supabase, email, resend])
 
-  function startOver() {
-    setStage("password")
-    setPassword("")
-    setConfirm("")
-    setCode("")
-    setInvalid(false)
-    setAttempted(false)
-  }
-
-  const submit = useCallback(
+  const verify = useCallback(
     async (value: string) => {
-      if (saving) return
-      setSaving(true)
+      if (!email || verifying) return
+      setVerifying(true)
       setInvalid(false)
-      // The nonce is checked here, by the server, together with the password.
-      const { error } = await supabase.auth.updateUser({
-        password,
-        nonce: value,
+      const { error } = await supabase.auth.verifyOtp({
+        email,
+        token: value,
+        type: "recovery",
       })
-      setSaving(false)
+      setVerifying(false)
       if (error) {
-        // Nearly always a wrong or expired code. Keep the password - only the
-        // code is cleared, so the retry is one field, not three.
         setInvalid(true)
         setCode("")
         toast.error(authErrorMessage(error, "That code isn't right."))
         return
       }
-      toast.success("Password updated")
-      startOver()
+      setStage("verified")
     },
-    [supabase, password, saving]
+    [supabase, email, verifying]
   )
+
+  /**
+   * Put the pre-recovery session back, so the update runs at the assurance
+   * level the user already had. Best effort: if it fails, the recovery session
+   * is still in place and the update is simply attempted with that instead.
+   */
+  const restorePriorSession = useCallback(async () => {
+    const saved = priorSession.current
+    if (!saved) return
+    try {
+      await supabase.auth.setSession(saved)
+    } catch {
+      /* keep the recovery session and let updateUser report the truth */
+    }
+  }, [supabase])
+
+  function reset() {
+    priorSession.current = null
+    setStage("idle")
+    setCode("")
+    setInvalid(false)
+  }
 
   return (
     <Card>
@@ -124,57 +152,40 @@ export function ChangePasswordCard() {
         <CardTitle>Change password</CardTitle>
         <CardDescription>
           Min 12 characters, one uppercase, one special character. We&apos;ll
-          email a code to confirm it&apos;s you.
+          email a code first to confirm it&apos;s you.
         </CardDescription>
       </CardHeader>
 
       <CardContent>
-        {stage === "password" ? (
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (!passwordReady) {
-                setAttempted(true)
-                return
-              }
-              void sendCode()
-            }}
-          >
-            <div className="space-y-2">
-              <Label htmlFor="new-password">New password</Label>
-              <PasswordField
-                id="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                attempted={attempted}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirm-password">Confirm password</Label>
-              <ConfirmPasswordField
-                id="confirm-password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                password={password}
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={resend.blocked}>
+        {stage === "idle" && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              For your security, changing your password needs a code from your
+              email - even while you&apos;re signed in.
+            </p>
+            <Button
+              type="button"
+              className="w-full"
+              disabled={resend.blocked || !email}
+              onClick={sendCode}
+            >
               {resend.sending ? (
                 <Spin />
               ) : (
                 <>
                   <LockKey className="size-4" />
-                  Continue
-                  <ArrowRight className="size-4" weight="bold" />
+                  Email me a code
                 </>
               )}
             </Button>
-          </form>
-        ) : (
+          </div>
+        )}
+
+        {stage === "code" && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              We emailed you a code. Enter it to confirm the change.
+              Enter the code we sent to{" "}
+              <span className="font-medium text-foreground">{email}</span>.
             </p>
             <OtpField
               value={code}
@@ -182,22 +193,23 @@ export function ChangePasswordCard() {
                 setCode(next)
                 if (invalid) setInvalid(false)
               }}
-              onComplete={submit}
-              disabled={saving}
+              onComplete={verify}
+              disabled={verifying}
               invalid={invalid}
+              autoFocus={false}
             />
             <Button
               type="button"
               className="w-full"
-              disabled={!isCompleteCode(code) || saving}
-              onClick={() => submit(code)}
+              disabled={!isCompleteCode(code) || verifying}
+              onClick={() => verify(code)}
             >
-              {saving ? <Spin /> : "Update password"}
+              {verifying ? <Spin /> : "Verify code"}
             </Button>
             <div className="flex items-center justify-between">
               <button
                 type="button"
-                onClick={startOver}
+                onClick={reset}
                 className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
               >
                 Cancel
@@ -211,6 +223,24 @@ export function ChangePasswordCard() {
                 {resend.label}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Only reachable once the code was accepted. */}
+        {stage === "verified" && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+              <CheckCircle weight="fill" className="size-4 shrink-0" />
+              <p>Code confirmed. Choose your new password.</p>
+            </div>
+            <SetPasswordForm
+              submitLabel="Update password"
+              beforeSubmit={restorePriorSession}
+              onSuccess={() => {
+                toast.success("Password updated")
+                reset()
+              }}
+            />
           </div>
         )}
       </CardContent>
