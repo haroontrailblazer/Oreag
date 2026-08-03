@@ -1612,3 +1612,31 @@ class TestApiSurface:
         client = TestClient(app)
         pid = "00000000-0000-0000-0000-000000000000"
         assert client.get(f"/api/projects/{pid}/memory").status_code == 401
+
+
+class TestPublicProjectInfoCounts:
+    """GET /v1/projects/{id} must report the counts it claims to.
+
+    chunk_count was declared on ProjectInfo with a default of 0 and then never
+    passed by the handler, so a fully indexed project reported "0 chunks" to
+    every API consumer. Nothing errored - the number was just always wrong,
+    which is why it survived. A field with a silent default needs a test that
+    the producer actually fills it.
+    """
+
+    def test_handler_populates_every_declared_field(self):
+        import inspect
+
+        from app.routers import rag_v1
+        from app.schemas import ProjectInfo
+
+        src = inspect.getsource(rag_v1.project_info)
+        for field in ProjectInfo.model_fields:
+            assert f"{field}=" in src, f"project_info never sets {field!r}"
+
+    def test_chunk_count_is_not_left_to_its_default(self):
+        from app.schemas import ProjectInfo
+
+        # Guards the shape of the bug: the default is what hid it, so if the
+        # default is ever removed this test should be revisited, not deleted.
+        assert ProjectInfo.model_fields["chunk_count"].default == 0

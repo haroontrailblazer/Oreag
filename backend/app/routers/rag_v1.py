@@ -326,9 +326,21 @@ def project_info(
 ):
     project = _get_project(db, project_id)
     enforce_rate_limit(api_key.id, project.id)
-    file_count = db.scalar(
-        select(func.count()).select_from(File).where(File.project_id == project.id)
-    )
+    # Both counts in ONE query. chunk_count used to be omitted entirely, and
+    # because ProjectInfo declares it with a default of 0, the endpoint happily
+    # reported "0 chunks" for a fully indexed project - to every /v1 consumer,
+    # for ever. A field that silently defaults is worse than a required one:
+    # nothing failed, the number was just always wrong.
+    file_count, chunk_count = db.execute(
+        select(
+            func.count(),
+            func.coalesce(func.sum(File.chunk_count), 0),
+        ).where(File.project_id == project.id)
+    ).one()
     return ProjectInfo(
-        id=project.id, name=project.name, status=project.status, file_count=file_count
+        id=project.id,
+        name=project.name,
+        status=project.status,
+        file_count=file_count,
+        chunk_count=chunk_count,
     )
