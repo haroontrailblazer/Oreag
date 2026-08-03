@@ -346,14 +346,23 @@ export function FilesTab({
     ).length ?? 0
 
   return (
-    // md:h-full + flex column so the list below can claim the leftover height
-    // itself. The cap used to be a hardcoded max-h-[calc(100dvh-16.5rem)],
+    // max-h-full, NOT h-full: the card grows with its rows and stops at the
+    // viewport, so three files render a three-row card instead of a mostly
+    // empty full-height one. Only once the rows exceed the space does the list
+    // below start scrolling inside it.
+    //
+    // Unprefixed, so phones behave the same. It resolves there because the
+    // project page is already a definite-height frame on mobile
+    // (h-[calc(100dvh-6.25rem)] in projects/[id]/page.tsx), so 100% has a real
+    // height to measure against - no second magic number needed here.
+    //
+    // The cap used to be a hardcoded max-h-[calc(100dvh-16.5rem)] on the list,
     // measured against the chrome that existed when it was written - the
     // bundling animation later grew the header and pushed the bottom of the
-    // list off-screen. Deriving the height means nothing to re-tune the next
-    // time this header changes.
-    <Card className="gap-0 overflow-hidden p-0 md:flex md:h-full md:min-h-0 md:flex-col">
-      <div className="flex items-start justify-between gap-3 border-b px-5 py-4 md:shrink-0">
+    // list off-screen. That number had to account for the card's OWN header;
+    // this one does not, which is why it cannot rot the same way.
+    <Card className="flex max-h-full min-h-0 flex-col gap-0 overflow-hidden p-0">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b px-5 py-4">
         <div className="min-w-0 flex-1 space-y-0.5">
           <h3 className="text-sm font-semibold">Files</h3>
           <p className="text-xs text-muted-foreground">
@@ -459,13 +468,17 @@ export function FilesTab({
           </p>
         </div>
       ) : (
-        // Desktop: the list takes whatever height is left under the pinned
-        // header and scrolls inside it, so the page itself never scrolls.
-        // min-h-0 is load-bearing - a flex child defaults to min-height:auto
-        // and would refuse to shrink below its content, which is exactly how
-        // a list overflows its container instead of scrolling.
-        // Phones keep natural page flow.
-        <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
+        // No flex-1 here, deliberately. flex-1 is `flex: 1 1 0%`, which makes
+        // the item GROW to fill the card - reintroducing the empty space this
+        // is meant to avoid - and with min-h-0 in an auto-height container a
+        // zero flex-basis can collapse it entirely. Left alone, the list takes
+        // its natural height and merely SHRINKS (flex-shrink is 1 by default)
+        // once the card hits its cap.
+        //
+        // min-h-0 is what makes that shrink legal: a flex child defaults to
+        // min-height:auto and refuses to go below its content, which is
+        // exactly how a list overflows instead of scrolling.
+        <div className="min-h-0 overflow-y-auto">
         <ul className="divide-y">
           {(files ?? []).map((file) => {
             const meta = [

@@ -132,13 +132,18 @@ export function MemoryTab({ project }: { project: Project }) {
   }
 
   return (
-    // Fixed frame on desktop: the title and the filter box stay put and only
-    // the memory list scrolls, so the page itself never moves. Height is
-    // DERIVED (h-full + flex + min-h-0) rather than a max-h calc against the
-    // surrounding chrome - a hardcoded number silently goes wrong the moment
-    // anything above it changes height. Phones keep natural page flow.
-    <Card className="md:flex md:h-full md:min-h-0 md:flex-col">
-      <CardHeader className="md:shrink-0">
+    // max-h-full, NOT h-full: the card is as tall as its memories and no
+    // taller, up to the viewport. Two memories should render a small card, not
+    // a full-height one with a field of empty space under them. Past that
+    // point the list below scrolls while the title and filter stay pinned.
+    //
+    // Unprefixed so phones behave identically - it resolves there because the
+    // project page is already a definite-height frame on mobile
+    // (h-[calc(100dvh-6.25rem)] in projects/[id]/page.tsx). Derived from that
+    // rather than carrying its own calc, because a hardcoded number goes wrong
+    // the moment anything above it changes height.
+    <Card className="flex max-h-full min-h-0 flex-col">
+      <CardHeader className="shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <CardTitle>Agent memory</CardTitle>
@@ -153,7 +158,7 @@ export function MemoryTab({ project }: { project: Project }) {
       {/* The filter belongs to the pinned frame, not the scrolling list -
           scrolling away the box you are filtering with is worse than useless
           on a long list. */}
-      <CardContent className="md:shrink-0 md:pb-3">
+      <CardContent className="shrink-0 pb-3">
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -167,7 +172,10 @@ export function MemoryTab({ project }: { project: Project }) {
           />
         </div>
       </CardContent>
-      <CardContent className="space-y-3 md:min-h-0 md:flex-1 md:overflow-y-auto">
+      {/* No flex-1: that would grow the list to fill the card and put the
+          empty space back. Natural height, shrinking (and so scrolling) only
+          once the card reaches its cap - min-h-0 is what permits the shrink. */}
+      <CardContent className="space-y-3 min-h-0 overflow-y-auto">
         {error ? (
           <p className="text-sm text-destructive">
             Could not load memories: {error.message}
