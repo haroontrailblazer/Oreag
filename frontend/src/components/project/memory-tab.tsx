@@ -1,6 +1,10 @@
 "use client"
 
-import { Brain, MagnifyingGlass as Search } from "@phosphor-icons/react/dist/ssr"
+import {
+  Brain,
+  MagnifyingGlass as Search,
+  Trash,
+} from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
@@ -221,11 +225,16 @@ export function MemoryTab({ project }: { project: Project }) {
               </div>
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon-sm"
+                // The word is gone, so the label has to carry the meaning for
+                // screen readers - and title gives sighted users the same
+                // hover confirmation before they commit to a destructive icon.
+                aria-label="Delete memory"
+                title="Delete memory"
                 onClick={() => setDeleteTarget(m)}
-                className="shrink-0"
+                className="shrink-0 text-muted-foreground hover:text-destructive"
               >
-                Delete
+                <Trash className="size-4" />
               </Button>
             </div>
           ))
