@@ -151,6 +151,35 @@ def count_pdf_pages(data: bytes, filename: str) -> int | None:
         doc.close()
 
 
+def pdf_is_image_only(data: bytes) -> bool:
+    """True for a PDF that is pictures of text rather than text.
+
+    Scans, phone photos and "print to PDF" of a slide deck all produce a file
+    whose pages carry an embedded image and no character data at all. Nothing
+    downstream can read them: text extraction returns "", and MarkItDown does
+    no OCR, so the generic "no extractable text" error blames the file without
+    saying what is actually wrong with it.
+
+    Requires an image to be PRESENT before claiming that is the reason - a
+    genuinely blank or broken PDF has neither, and deserves a different message.
+    """
+    try:
+        doc = pymupdf.open(stream=data, filetype="pdf")
+    except Exception:
+        return False
+    try:
+        text = 0
+        images = 0
+        for page in doc:
+            text += len(page.get_text("text").strip())
+            images += len(page.get_images(full=True))
+        return text == 0 and images > 0
+    except Exception:
+        return False
+    finally:
+        doc.close()
+
+
 def _transcribe_with_byok(transcribers, data: bytes, filename: str) -> str | None:
     """Transcribe audio through the uploader's own provider keys, in order.
 
@@ -267,6 +296,17 @@ def convert_to_markdown(
                     "No text could be extracted from this image. AI image "
                     "captioning needs the project's answer model to be an "
                     "OpenAI or Gemini model with a usable key."
+                )
+            if suffix == ".pdf" and pdf_is_image_only(data):
+                # Name the actual problem and the way out. Oreag DOES read text
+                # out of pictures - that is what the image-captioning path is
+                # for - it just cannot reach inside a PDF wrapper to do it.
+                raise ValueError(
+                    "This PDF contains only scanned images, with no text layer "
+                    "to extract - nothing in it is machine-readable. Export the "
+                    "pages as .png or .jpg and upload those instead: images are "
+                    "read by AI captioning, which transcribes the text in them. "
+                    "Alternatively, run the PDF through an OCR tool first."
                 )
             raise ValueError("No extractable text found in this file")
         return ConvertedDocument(

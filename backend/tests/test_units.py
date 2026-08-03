@@ -1640,3 +1640,56 @@ class TestPublicProjectInfoCounts:
         # Guards the shape of the bug: the default is what hid it, so if the
         # default is ever removed this test should be revisited, not deleted.
         assert ProjectInfo.model_fields["chunk_count"].default == 0
+
+
+class TestImageOnlyPdfDiagnosis:
+    """A scanned PDF must say WHY it failed, not just that it failed.
+
+    Real case: DL.pdf - one page, one embedded image, zero characters. The
+    generic "No extractable text found in this file" is true but blames the
+    file without naming the cause, and hides the fact that Oreag can read that
+    exact content if the page is uploaded as an image instead.
+    """
+
+    def _pdf(self, *, with_text: bool, with_image: bool) -> bytes:
+        import pymupdf
+
+        doc = pymupdf.open()
+        page = doc.new_page()
+        if with_text:
+            page.insert_text((72, 72), "readable text layer")
+        if with_image:
+            # A tiny real PNG, so get_images() actually reports one.
+            png = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), False)
+            png.set_rect(png.irect, (255, 0, 0))
+            page.insert_image(pymupdf.Rect(100, 100, 180, 180), pixmap=png)
+        data = doc.tobytes()
+        doc.close()
+        return data
+
+    def test_scanned_pdf_is_recognised(self):
+        from app.services.conversion import pdf_is_image_only
+
+        assert pdf_is_image_only(self._pdf(with_text=False, with_image=True))
+
+    def test_a_normal_pdf_is_not_flagged(self):
+        from app.services.conversion import pdf_is_image_only
+
+        assert not pdf_is_image_only(self._pdf(with_text=True, with_image=False))
+        # Text AND images is an ordinary illustrated document.
+        assert not pdf_is_image_only(self._pdf(with_text=True, with_image=True))
+
+    def test_empty_pdf_is_not_blamed_on_scanning(self):
+        """No text and no image is a different fault - saying "scanned" there
+        would send the user off to OCR a file that has nothing in it."""
+        from app.services.conversion import pdf_is_image_only
+
+        assert not pdf_is_image_only(self._pdf(with_text=False, with_image=False))
+
+    def test_garbage_input_never_raises(self):
+        """Runs inside an error path; throwing here would replace a clear
+        message with a 500."""
+        from app.services.conversion import pdf_is_image_only
+
+        assert not pdf_is_image_only(b"not a pdf at all")
+        assert not pdf_is_image_only(b"")
