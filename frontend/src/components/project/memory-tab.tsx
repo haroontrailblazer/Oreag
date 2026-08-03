@@ -22,6 +22,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Spin } from "@/components/ui/loader"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -73,13 +81,19 @@ export function MemoryTab({ project }: { project: Project }) {
   const term = filter.trim().toLowerCase()
   const shown = all.filter((m) => m.content.toLowerCase().includes(term))
 
-  const [deleting, setDeleting] = useState<number | null>(null)
+  // Deleting a memory is irreversible and there is no undo, so it goes through
+  // a confirmation step exactly like deleting a file does. Before this, a
+  // single stray click destroyed a memory outright - and because the old
+  // handler showed no feedback at all, people clicked again and destroyed a
+  // second one without ever seeing the first go.
+  const [deleteTarget, setDeleteTarget] = useState<Memory | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
-  async function handleDelete(id: number) {
-    // One at a time, and never twice: without this a double-click fires two
-    // DELETEs for the same row and the second comes back 404.
-    if (deleting !== null) return
-    setDeleting(id)
+  async function confirmDelete() {
+    const target = deleteTarget
+    if (!target || deleting) return
+    const id = target.id
+    setDeleting(true)
     try {
       // OPTIMISTIC. This used to be `await api(...); mutate()`, which left the
       // row sitting on screen through BOTH round trips - the DELETE and then
@@ -106,12 +120,14 @@ export function MemoryTab({ project }: { project: Project }) {
         }
       )
       toast.success("Memory deleted")
+      setDeleteTarget(null)
     } catch (err) {
       // The row is already back on screen via rollbackOnError, so the toast is
-      // the only thing that has to explain what happened.
+      // the only thing that has to explain what happened. The dialog stays OPEN
+      // on failure - closing it would imply the delete had worked.
       toast.error(err instanceof Error ? err.message : "Failed to delete")
     } finally {
-      setDeleting(null)
+      setDeleting(false)
     }
   }
 
@@ -188,19 +204,59 @@ export function MemoryTab({ project }: { project: Project }) {
               <Button
                 variant="ghost"
                 size="sm"
-                // Disabled for the WHOLE list while any delete is in flight,
-                // not just this row: the rows re-order as one disappears, so a
-                // second click would land on a different memory than intended.
-                disabled={deleting !== null}
-                onClick={() => handleDelete(m.id)}
+                onClick={() => setDeleteTarget(m)}
                 className="shrink-0"
               >
-                {deleting === m.id ? <Spin /> : "Delete"}
+                Delete
               </Button>
             </div>
           ))
         )}
       </CardContent>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          // Not dismissable mid-request - closing under a delete would leave
+          // the user unsure whether it went through.
+          if (!open && !deleting) setDeleteTarget(null)
+        }}
+      >
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Delete this memory?</DialogTitle>
+            <DialogDescription asChild>
+              <div>
+                {/* Quote it back. Memories have no filename to identify them
+                    by, so the text IS the identifier - without it the dialog
+                    asks you to confirm deleting something unnamed. */}
+                <span className="line-clamp-4 italic text-foreground">
+                  &ldquo;{deleteTarget?.content}&rdquo;
+                </span>
+                <span className="mt-2 block">
+                  Agents will no longer recall this. It can&apos;t be undone.
+                </span>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={deleting}
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleting}
+              onClick={confirmDelete}
+            >
+              {deleting ? <Spin /> : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }
