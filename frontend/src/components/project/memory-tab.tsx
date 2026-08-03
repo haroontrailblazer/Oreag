@@ -132,8 +132,13 @@ export function MemoryTab({ project }: { project: Project }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
+    // Fixed frame on desktop: the title and the filter box stay put and only
+    // the memory list scrolls, so the page itself never moves. Height is
+    // DERIVED (h-full + flex + min-h-0) rather than a max-h calc against the
+    // surrounding chrome - a hardcoded number silently goes wrong the moment
+    // anything above it changes height. Phones keep natural page flow.
+    <Card className="md:flex md:h-full md:min-h-0 md:flex-col">
+      <CardHeader className="md:shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <CardTitle>Agent memory</CardTitle>
@@ -145,7 +150,10 @@ export function MemoryTab({ project }: { project: Project }) {
           <BestPractices className="ml-auto" tips={BEST_PRACTICE_TIPS} />
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      {/* The filter belongs to the pinned frame, not the scrolling list -
+          scrolling away the box you are filtering with is worse than useless
+          on a long list. */}
+      <CardContent className="md:shrink-0 md:pb-3">
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -158,6 +166,8 @@ export function MemoryTab({ project }: { project: Project }) {
             className="pl-8"
           />
         </div>
+      </CardContent>
+      <CardContent className="space-y-3 md:min-h-0 md:flex-1 md:overflow-y-auto">
         {error ? (
           <p className="text-sm text-destructive">
             Could not load memories: {error.message}

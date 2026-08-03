@@ -346,8 +346,14 @@ export function FilesTab({
     ).length ?? 0
 
   return (
-    <Card className="gap-0 overflow-hidden p-0">
-      <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+    // md:h-full + flex column so the list below can claim the leftover height
+    // itself. The cap used to be a hardcoded max-h-[calc(100dvh-16.5rem)],
+    // measured against the chrome that existed when it was written - the
+    // bundling animation later grew the header and pushed the bottom of the
+    // list off-screen. Deriving the height means nothing to re-tune the next
+    // time this header changes.
+    <Card className="gap-0 overflow-hidden p-0 md:flex md:h-full md:min-h-0 md:flex-col">
+      <div className="flex items-start justify-between gap-3 border-b px-5 py-4 md:shrink-0">
         <div className="min-w-0 flex-1 space-y-0.5">
           <h3 className="text-sm font-semibold">Files</h3>
           <p className="text-xs text-muted-foreground">
@@ -453,11 +459,13 @@ export function FilesTab({
           </p>
         </div>
       ) : (
-        // Desktop: cap the list to the viewport so the page itself never
-        // scrolls - only the rows do, under the pinned "Files" header bar
-        // above. No min-height: the card shrinks to fit when files are
-        // deleted. Phones keep natural page flow.
-        <div className="md:max-h-[calc(100dvh-16.5rem)] md:overflow-y-auto">
+        // Desktop: the list takes whatever height is left under the pinned
+        // header and scrolls inside it, so the page itself never scrolls.
+        // min-h-0 is load-bearing - a flex child defaults to min-height:auto
+        // and would refuse to shrink below its content, which is exactly how
+        // a list overflows its container instead of scrolling.
+        // Phones keep natural page flow.
+        <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
         <ul className="divide-y">
           {(files ?? []).map((file) => {
             const meta = [
