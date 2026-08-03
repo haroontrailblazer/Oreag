@@ -23,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Spin } from "@/components/ui/loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, fetcher } from "@/lib/api"
 import type { Memory, Project } from "@/lib/types"
@@ -72,12 +73,45 @@ export function MemoryTab({ project }: { project: Project }) {
   const term = filter.trim().toLowerCase()
   const shown = all.filter((m) => m.content.toLowerCase().includes(term))
 
+  const [deleting, setDeleting] = useState<number | null>(null)
+
   async function handleDelete(id: number) {
+    // One at a time, and never twice: without this a double-click fires two
+    // DELETEs for the same row and the second comes back 404.
+    if (deleting !== null) return
+    setDeleting(id)
     try {
-      await api(`/api/projects/${project.id}/memory/${id}`, { method: "DELETE" })
-      mutate()
+      // OPTIMISTIC. This used to be `await api(...); mutate()`, which left the
+      // row sitting on screen through BOTH round trips - the DELETE and then
+      // the refetch - with no spinner, no disabled button and no toast. It read
+      // as a dead click, and clicking again just queued another DELETE.
+      //
+      // The row now vanishes on the same tick, and `revalidate: false` skips
+      // the follow-up GET entirely: removing one known row from a list is
+      // deterministic, so there is nothing to ask the server about.
+      // rollbackOnError puts it back if the request actually fails.
+      await mutate(
+        async () => {
+          await api(`/api/projects/${project.id}/memory/${id}`, {
+            method: "DELETE",
+          })
+          return (memories ?? []).filter((m) => m.id !== id)
+        },
+        {
+          optimisticData: (current?: Memory[]) =>
+            (current ?? []).filter((m) => m.id !== id),
+          rollbackOnError: true,
+          populateCache: true,
+          revalidate: false,
+        }
+      )
+      toast.success("Memory deleted")
     } catch (err) {
+      // The row is already back on screen via rollbackOnError, so the toast is
+      // the only thing that has to explain what happened.
       toast.error(err instanceof Error ? err.message : "Failed to delete")
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -151,8 +185,17 @@ export function MemoryTab({ project }: { project: Project }) {
                   <span>· {new Date(m.created_at).toLocaleDateString()}</span>
                 </div>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => handleDelete(m.id)}>
-                Delete
+              <Button
+                variant="ghost"
+                size="sm"
+                // Disabled for the WHOLE list while any delete is in flight,
+                // not just this row: the rows re-order as one disappears, so a
+                // second click would land on a different memory than intended.
+                disabled={deleting !== null}
+                onClick={() => handleDelete(m.id)}
+                className="shrink-0"
+              >
+                {deleting === m.id ? <Spin /> : "Delete"}
               </Button>
             </div>
           ))
