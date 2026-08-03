@@ -28,6 +28,17 @@ WHAT IT SETS
   * the four email templates, each carrying BOTH a {{ .Token }} code and a
     {{ .TokenHash }} link into /auth/confirm
   * OTP length 6, matching NEXT_PUBLIC_OTP_LENGTH and every authenticator app
+  * the Phase 5 auth hardening: OTP expiry, minimum password length, required
+    password character classes, and re-authentication on password change
+
+IT RATCHETS - IT CANNOT LOOSEN A SETTING
+  mailer_otp_exp is min(current, 600) and password_min_length is max(current,
+  12), so a re-run can only tighten them. Written as flat targets they would
+  have WEAKENED this project: the first run found otp_exp already at 300 and
+  was about to raise it to 600, doubling the window a stolen code stays usable.
+  A hardening script that can loosen a setting is worse than none, because
+  nobody re-reads what it did. Anything already correct is skipped, so a re-run
+  on a configured project prints "Already up to date".
 
 NEVER PATCH A SINGLE smtp_* FIELD
   The auth config endpoint does NOT do partial updates of the SMTP block. A
@@ -49,6 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -179,9 +191,59 @@ def request(method: str, path: str, token: str, body: dict | None = None) -> dic
         ) from exc
 
 
-def desired() -> dict[str, object]:
+# Supabase accepts only a fixed set of strings here - it is an enum of
+# colon-separated character CLASSES, not a free-form rule. Guessing costs three
+# rejected requests, so the real value is discovered from the API's own error
+# (see character_classes_from_error) and this is only the opening bid.
+STRONG_CHARACTER_CLASSES = (
+    "abcdefghijklmnopqrstuvwxyz:"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ:"
+    "0123456789:"
+    "!@#$%^&*()_+-=[]{};'\\:\"|<>?,./`~"
+)
+
+
+def character_classes_from_error(detail: str) -> str | None:
+    """Pull the strictest value Supabase says it accepts out of a 4xx body.
+
+    The endpoint answers an invalid password_required_characters with a message
+    listing the permitted values. Reading them back beats hardcoding a guess
+    that a future Supabase release quietly changes.
+    """
+    candidates = [
+        chunk
+        for chunk in re.findall(r"[A-Za-z0-9:!@#$%^&*()_+\-=\[\]{};'\\:\"|<>?,./`~]{20,}", detail)
+        if "abcdefghijklmnopqrstuvwxyz" in chunk
+    ]
+    if not candidates:
+        return None
+    # Most colons = most required classes = strictest.
+    return max(candidates, key=lambda c: c.count(":"))
+
+
+def desired(current: dict | None = None) -> dict[str, object]:
+    """The settings this script owns.
+
+    The two PHASE 5 numbers RATCHET - they only ever tighten. Written as a
+    fixed target they would have LOOSENED a live project: `mailer_otp_exp` was
+    already 300 here, and a flat "set 600" would have doubled the window a
+    stolen code stays usable. A hardening script that can weaken a setting is
+    worse than no script, because nobody re-reads what it did.
+    """
+    current = current or {}
     out: dict[str, object] = {
         "mailer_otp_length": 6,
+        # PHASE 5. Ceiling, not a target: at most 10 minutes, and never longer
+        # than it already is. The Supabase default is a FULL HOUR (3600), and
+        # its own advisor flags anything above one - a code that outlives the
+        # session it was meant for is a standing invitation to whoever reaches
+        # the inbox later.
+        "mailer_otp_exp": min(int(current.get("mailer_otp_exp") or 3600), 600),
+        # PHASE 5. Floor, not a target: at least 12, and never shorter than it
+        # already is. The browser talks to Supabase DIRECTLY - our backend
+        # never sees a password - so this is the only place the length rule is
+        # real. frontend/src/lib/password.ts asks for the same 12.
+        "password_min_length": max(int(current.get("password_min_length") or 0), 12),
         # Supabase refuses any redirect_to not matched here, silently killing
         # the link. The previous value only allowed localhost:3000/auth/callback,
         # so every emailed link in LOCAL dev - which now points at
@@ -192,6 +254,48 @@ def desired() -> dict[str, object]:
         out[f"mailer_subjects_{key}"] = tpl["subject"]
         out[f"mailer_templates_{key}_content"] = tpl["content"]
     return out
+
+
+def try_patch(path: str, token: str, body: dict) -> str | None:
+    """PATCH, returning the error text instead of exiting. None means success."""
+    try:
+        request("PATCH", path, token, body)
+        return None
+    except SystemExit as exc:
+        return str(exc)
+
+
+def apply_character_classes(path: str, token: str, apply: bool) -> None:
+    """PHASE 5: require character classes server-side, discovering the enum.
+
+    Sent as its OWN PATCH, deliberately. Bundled with the rest, a rejected
+    enum value would fail validation for the whole payload and silently take
+    the OTP expiry and the minimum length down with it.
+
+    Only ever RELAXES toward what Supabase will accept: if the strict value is
+    refused, the accepted list is read back out of the error and reported
+    rather than guessed at again.
+    """
+    if not apply:
+        print(
+            f"\n  password_required_characters -> {STRONG_CHARACTER_CLASSES!r}"
+            "\n  (dry run - not sent)"
+        )
+        return
+    detail = try_patch(path, token, {"password_required_characters": STRONG_CHARACTER_CLASSES})
+    if detail is None:
+        print("\nApplied password_required_characters (lower+upper+digit+symbol).")
+        return
+    accepted = character_classes_from_error(detail)
+    if accepted and accepted != STRONG_CHARACTER_CLASSES:
+        print(f"\nSupabase refused that value; it accepts {accepted!r}. Retrying.")
+        if try_patch(path, token, {"password_required_characters": accepted}) is None:
+            print("Applied the accepted value instead.")
+            return
+    print(
+        "\nCould NOT set password_required_characters. Nothing else was affected "
+        f"- this was its own request.\n  {detail[:300]}"
+    )
 
 
 def main() -> int:
@@ -222,7 +326,7 @@ def main() -> int:
         return 0
 
     current = request("GET", path, token)
-    wanted = desired()
+    wanted = desired(current)
 
     # Back up only the keys we are about to touch - the full config includes
     # the SMTP password and every other auth setting.
@@ -248,13 +352,55 @@ def main() -> int:
         else:
             print(f"      new: <{len(str(changes[key]))} chars>")
 
+    # The two hardening settings below were opt-in flags while their risks were
+    # unproven. Both risks are now closed by evidence from the live project, so
+    # leaving them opt-in only meant a fresh project could be configured, report
+    # success, and still be missing them:
+    #
+    #  * password_required_characters - the danger was a server stricter than
+    #    the form, so people satisfy every displayed rule and are refused
+    #    anyway. frontend/src/lib/password.ts now asks for the same four
+    #    classes, so they agree.
+    #  * require_reauthentication - the danger was breaking password reset,
+    #    which calls updateUser({password}) from a recovery session with NO
+    #    nonce. Read live 2026-08-03: it is already True on this project and
+    #    reset works, so recovery sessions are exempt.
+    #
+    # Both are skipped automatically when already correct, so a re-run is a
+    # no-op rather than two redundant writes.
+    reauth_ok = current.get("security_update_password_require_reauthentication") is True
+    chars_ok = bool(current.get("password_required_characters"))
+
     if not args.apply:
         print(f"\nDry run. Backup written to {BACKUP.name}. Re-run with --apply to write.")
+        if not chars_ok:
+            apply_character_classes(path, token, apply=False)
+        if not reauth_ok:
+            print("\n  security_update_password_require_reauthentication -> True")
+            print("  (dry run - not sent)")
         return 0
 
     request("PATCH", path, token, changes)
     print(f"\nApplied {len(changes)} setting(s). Undo with --restore.")
-    print("Send yourself a password reset to confirm the code arrives.")
+
+    if not chars_ok:
+        apply_character_classes(path, token, apply=True)
+
+    if not reauth_ok:
+        # Its own request, and last, so a failure here cannot strand the
+        # settings above - the same reason the character classes are separate.
+        detail = try_patch(
+            path, token, {"security_update_password_require_reauthentication": True}
+        )
+        print(
+            "\nApplied security_update_password_require_reauthentication."
+            "\n  Confirm password reset still works - that flow is the one thing "
+            "this setting can break."
+            if detail is None
+            else f"\nCould not set require_reauthentication:\n  {detail[:300]}"
+        )
+
+    print("\nSend yourself a password reset to confirm the code still arrives.")
     return 0
 
 

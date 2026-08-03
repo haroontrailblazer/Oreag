@@ -25,6 +25,7 @@ function BaseSecret({
   invalid,
   right,
   rightPad,
+  collapseRightWhenVisible,
   className,
   onFocus,
   onBlur,
@@ -37,11 +38,23 @@ function BaseSecret({
   invalid?: boolean
   right?: React.ReactNode
   rightPad: string
+  /**
+   * Drop the indicator while the password is REVEALED, and give the text back
+   * the full width.
+   *
+   * The indicator is an overlay, so `rightPad` permanently reserves its width
+   * inside the field. With a wordy hint that reservation swallowed most of the
+   * box, and clicking the eye to CHECK a password showed only the first half of
+   * it - the one moment the text matters more than the hint. Revealing is a
+   * deliberate "let me read this", so the hint yields.
+   */
+  collapseRightWhenVisible?: boolean
   className?: string
   onFocus?: () => void
   onBlur?: () => void
 }) {
   const [visible, setVisible] = useState(false)
+  const showRight = !(visible && collapseRightWhenVisible)
   return (
     <div className="relative">
       <Input
@@ -54,10 +67,15 @@ function BaseSecret({
         aria-invalid={invalid}
         onFocus={onFocus}
         onBlur={onBlur}
-        className={cn("h-11 rounded-xl bg-muted/50 sm:h-12", rightPad, className)}
+        className={cn(
+          "h-11 rounded-xl bg-muted/50 sm:h-12",
+          // Only the eye needs clearance once the indicator is gone.
+          showRight ? rightPad : "pr-12",
+          className
+        )}
       />
       <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1.5 pr-3">
-        {right}
+        {showRight ? right : null}
         <button
           type="button"
           tabIndex={-1}
@@ -75,9 +93,13 @@ function BaseSecret({
 
 /**
  * Password input whose requirement feedback lives INSIDE the field as a single
- * live hint that names the ONE next thing to fix, in order: character count ->
- * special character -> uppercase. Once every rule passes the hint disappears
- * entirely. The hint turns red after a failed submit while anything is unmet.
+ * live hint naming the ONE next thing to fix, taken from PASSWORD_RULES in
+ * order. Once every rule passes the hint disappears entirely, and it turns red
+ * after a failed submit while anything is unmet.
+ *
+ * The hint also yields the moment the password is revealed - see
+ * collapseRightWhenVisible - because clicking the eye means "let me read what
+ * I typed", and a hint that clips it defeats the button.
  */
 export function PasswordField({
   id,
@@ -94,23 +116,31 @@ export function PasswordField({
   placeholder?: string
   className?: string
 }) {
-  const lengthOk = value.length >= LENGTH_TARGET
-  const specialOk = /[^A-Za-z0-9]/.test(value)
-  const capsOk = /[A-Z]/.test(value)
-  const allOk = lengthOk && specialOk && capsOk
+  // Derived from PASSWORD_RULES, never re-implemented here.
+  //
+  // This used to hard-code its own length/uppercase/special checks, so when
+  // lowercase and number were added to the shared rules it kept reporting
+  // success without them: the hint vanished, the user believed they were
+  // finished, and ConfirmPasswordField - which asks passwordFailures() -
+  // stayed LOCKED behind a padlock with nothing on screen explaining why.
+  // Two copies of one policy will always drift; there is now one copy.
+  const failures = passwordFailures(value)
+  const allOk = failures.length === 0
 
   let hint: string | null = null
   // Only guide once the user starts typing; the empty field stays clean. The
-  // live n/12 count always trails the next missing rule (uppercase, then
-  // special character); when every rule is met, nothing is shown.
+  // live n/12 count trails the next unmet rule, in PASSWORD_RULES order; when
+  // everything passes, nothing is shown.
   if (value.length > 0 && !allOk) {
     // Cap the display at the target so a long password reads "12/12", never
     // "15/12".
     const counter = `${Math.min(value.length, LENGTH_TARGET)}/${LENGTH_TARGET}`
-    let rule = ""
-    if (!capsOk) rule = "Add an uppercase letter"
-    else if (!specialOk) rule = "Add a special character"
-    hint = rule ? `${rule}, ${counter}` : counter
+    // `short` ("Uppercase"), not `label` ("One uppercase letter") - the hint
+    // is an overlay competing with the password for width, so every character
+    // it saves is a character of password left readable. The length rule is
+    // already expressed by the counter, so it never names itself.
+    const next = failures.find((rule) => rule.key !== "length")
+    hint = next ? `${next.short}, ${counter}` : counter
   }
 
   return (
@@ -120,7 +150,11 @@ export function PasswordField({
       onChange={onChange}
       placeholder={placeholder}
       invalid={attempted && Boolean(hint)}
-      rightPad="pr-52"
+      // Sized for the longest hint the short labels can produce
+      // ("Special character, 12/12") plus the eye - was pr-52, which reserved
+      // 208px of a field that is often only ~380px wide.
+      rightPad="pr-44"
+      collapseRightWhenVisible
       className={className}
       right={
         hint ? (
