@@ -2,10 +2,12 @@
 
 import {
   BrainIcon as Brain,
+  CaretDownIcon as CaretDown,
+  CaretUpIcon as CaretUp,
   MagnifyingGlassIcon as Search,
   TrashIcon as Trash,
 } from "@phosphor-icons/react/dist/ssr"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
@@ -72,6 +74,112 @@ const BEST_PRACTICE_TIPS = [
       "A memory saved while no embedding key was available has no vector and cannot be searched - re-save it (or change models) to embed it.",
   },
 ]
+
+/** A long memory stays scannable until its reader asks for the full text.
+ * Measuring the rendered paragraph instead of guessing from character count
+ * keeps the control accurate across desktop, mobile and manual line breaks. */
+function MemoryBody({ memory }: { memory: Memory }) {
+  const contentRef = useRef<HTMLParagraphElement | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [canExpand, setCanExpand] = useState(false)
+
+  useEffect(() => {
+    if (expanded) return
+    const content = contentRef.current
+    if (!content) return
+
+    const measure = () => {
+      setCanExpand(content.scrollHeight > content.clientHeight + 1)
+    }
+    measure()
+
+    const observer = new ResizeObserver(measure)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [expanded, memory.content])
+
+  const contentId = `memory-${memory.id}-content`
+
+  return (
+    <div className="space-y-2">
+      <p
+        ref={contentRef}
+        id={contentId}
+        className={`max-w-[80ch] whitespace-pre-wrap break-words text-[0.9375rem] leading-6 text-foreground/90 ${expanded ? "" : "line-clamp-4"}`}
+      >
+        {memory.content}
+      </p>
+      {canExpand && (
+        <Button
+          type="button"
+          variant="link"
+          size="xs"
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          onClick={() => setExpanded((open) => !open)}
+          className="h-auto gap-1 p-0 text-xs"
+        >
+          {expanded ? "Show less" : "Show more"}
+          {expanded ? (
+            <CaretUp className="size-3" />
+          ) : (
+            <CaretDown className="size-3" />
+          )}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+function MemoryRow({
+  memory,
+  onDelete,
+}: {
+  memory: Memory
+  onDelete: (memory: Memory) => void
+}) {
+  return (
+    <article className="group px-6 py-4 transition-colors hover:bg-muted/30 [contain-intrinsic-size:auto_9rem] [content-visibility:auto]">
+      <div className="flex items-start gap-4">
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            {memory.pinned && <Badge variant="secondary">Pinned</Badge>}
+            <span className="font-medium text-foreground/70">
+              {memory.source}
+            </span>
+            <span aria-hidden="true">·</span>
+            <time dateTime={memory.created_at}>
+              {new Date(memory.created_at).toLocaleDateString()}
+            </time>
+          </div>
+
+          <MemoryBody memory={memory} />
+
+          {memory.tags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {memory.tags.map((tag) => (
+                <Badge key={tag} variant="outline">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Delete memory"
+          title="Delete memory"
+          onClick={() => onDelete(memory)}
+          className="-mr-1 shrink-0 text-muted-foreground opacity-70 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <Trash className="size-4" />
+        </Button>
+      </div>
+    </article>
+  )
+}
 
 export function MemoryTab({ project }: { project: Project }) {
   const { data: memories, error, mutate } = useSWR<Memory[]>(
@@ -179,7 +287,7 @@ export function MemoryTab({ project }: { project: Project }) {
       {/* No flex-1: that would grow the list to fill the card and put the
           empty space back. Natural height, shrinking (and so scrolling) only
           once the card reaches its cap - min-h-0 is what permits the shrink. */}
-      <CardContent className="space-y-3 min-h-0 overflow-y-auto">
+      <CardContent className="min-h-0 overflow-y-auto px-0">
         {error ? (
           <p className="text-sm text-destructive">
             Could not load memories: {error.message}
@@ -205,39 +313,15 @@ export function MemoryTab({ project }: { project: Project }) {
             No memories match &ldquo;{filter.trim()}&rdquo;.
           </p>
         ) : (
-          shown.map((m) => (
-            <div
-              key={m.id}
-              className="flex items-start justify-between gap-3 rounded-md border p-3"
-            >
-              <div className="min-w-0 space-y-1">
-                <p className="text-sm">{m.content}</p>
-                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                  {m.pinned && <Badge variant="secondary">pinned</Badge>}
-                  {m.tags.map((t) => (
-                    <Badge key={t} variant="outline">
-                      {t}
-                    </Badge>
-                  ))}
-                  <span>{m.source}</span>
-                  <span>· {new Date(m.created_at).toLocaleDateString()}</span>
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                // The word is gone, so the label has to carry the meaning for
-                // screen readers - and title gives sighted users the same
-                // hover confirmation before they commit to a destructive icon.
-                aria-label="Delete memory"
-                title="Delete memory"
-                onClick={() => setDeleteTarget(m)}
-                className="shrink-0 text-muted-foreground hover:text-destructive"
-              >
-                <Trash className="size-4" />
-              </Button>
-            </div>
-          ))
+          <div className="divide-y border-y">
+            {shown.map((memory) => (
+              <MemoryRow
+                key={memory.id}
+                memory={memory}
+                onDelete={setDeleteTarget}
+              />
+            ))}
+          </div>
         )}
       </CardContent>
 
