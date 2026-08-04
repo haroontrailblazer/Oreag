@@ -81,6 +81,14 @@ const NODE_SIZES: Record<string, number> = {
   chunk: 1.5,
   memory: 3,
 }
+/* Radius multiplier for every node, and the ONLY knob that scales them all
+   uniformly. nodeVal above is a VOLUME - three-forcegraph derives the radius as
+   cbrt(val) * nodeRelSize - so raising the values instead would need cubing to
+   have any real effect, and would quietly distort the hierarchy on the way
+   (cbrt already compresses a 6.7x range in val into a 1.9x range in radius).
+   Multiplying here scales every node linearly and leaves those proportions
+   exactly as tuned. Was the library default of 4; nodes read as too small. */
+const NODE_REL_SIZE = 7
 /* Sphere segments per node. The library default (8) is a visibly faceted
    lump at file/project size; 16 reads as round without meaningfully changing
    the triangle count at these radii. */
@@ -113,12 +121,18 @@ const LEGEND = [
    directional sphere lighting bloom only one side of the graph. Anchor nodes
    carry the cluster glow; tiny chunks stay deliberately restrained so dense
    document groups remain sharp rather than merging into coloured fog. */
+/* These sizes are ABSOLUTE world units, not multiples of the node, so they are
+   coupled to NODE_REL_SIZE and must be scaled with it. At the previous values a
+   chunk's halo (16) was ~1.7x its own diameter; after the node scale-up it
+   would have been exactly 1.0x - the glow entirely inside the sphere, i.e.
+   gone. Scaled by the same 1.75 so the tuned "very minimal glow" look survives
+   the change instead of quietly disappearing. */
 const NODE_GLOW: Record<string, { opacity: number; size: number }> = {
-  project: { opacity: 0.4, size: 40 },
-  file: { opacity: 0.32, size: 30 },
-  section: { opacity: 0.24, size: 22 },
-  chunk: { opacity: 0.1, size: 16 },
-  memory: { opacity: 0.28, size: 22 },
+  project: { opacity: 0.4, size: 70 },
+  file: { opacity: 0.32, size: 52 },
+  section: { opacity: 0.24, size: 38 },
+  chunk: { opacity: 0.1, size: 28 },
+  memory: { opacity: 0.28, size: 38 },
 }
 
 const GLOW_TEXTURE_SIZE = 64
@@ -876,6 +890,7 @@ export function VisualizeTab({
               }
               nodeColor={(node: GNode) => NODE_COLORS[node.type] ?? "#e4e4e7"}
               nodeVal={(node: GNode) => NODE_SIZES[node.type] ?? 2}
+              nodeRelSize={NODE_REL_SIZE}
               nodeResolution={NODE_RESOLUTION}
               nodeOpacity={0.98}
               nodeThreeObject={createNodeGlow}
