@@ -20,7 +20,11 @@ import {
   useSyncExternalStore,
 } from "react"
 import type ForceGraph3DComponent from "react-force-graph-3d"
-import type { ForceGraphMethods, NodeObject } from "react-force-graph-3d"
+import type {
+  ForceGraphMethods,
+  LinkObject,
+  NodeObject,
+} from "react-force-graph-3d"
 import useSWR from "swr"
 import {
   AdditiveBlending,
@@ -52,6 +56,7 @@ import {
 } from "@/components/ui/card"
 import { fetcher } from "@/lib/api"
 import type {
+  MemoryGraphEdge,
   MemoryGraphNode,
   MemoryGraphResponse,
   Project,
@@ -109,6 +114,14 @@ const LINK_WIDTHS: Record<string, number> = {
   derived_from: 1.1,
 }
 const LINK_RESOLUTION = 12
+
+/* Straight links can visually pierce a third, unrelated node. Once the force
+   layout settles, route only those colliding links around the occupied sphere.
+   The padding includes the cylinder radius plus a small visible air gap. */
+const LINK_NODE_GAP = 3
+const LINK_ROUTE_DIRECTIONS = 16
+const LINK_ROUTE_SAFETY = 1.08
+const MAX_LINK_CURVATURE = 0.9
 
 const LEGEND = [
   { type: "file", label: "Files" },
@@ -362,6 +375,183 @@ function DimensionsIllustration() {
 }
 
 type GNode = NodeObject<MemoryGraphNode>
+type GLink = LinkObject<MemoryGraphNode, MemoryGraphEdge> & {
+  __routeCurvature?: number
+  __routeRotation?: number
+}
+
+type PositionedNode = GNode & { x: number; y: number; z: number }
+
+const hasPosition = (node: GNode): node is PositionedNode =>
+  Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.z)
+
+const nodeRadius = (node: GNode) =>
+  Math.cbrt(Math.max(0, NODE_SIZES[node.type] ?? 2)) * NODE_REL_SIZE
+
+/**
+ * Bend links that intersect an unrelated node after the force simulation has
+ * settled. Curvature is visual only: relationships and force layout stay
+ * unchanged. A small spatial grid keeps this check local on large graphs.
+ */
+function routeLinksAroundNodes(nodes: GNode[], links: GLink[]) {
+  const positionedNodes = nodes.filter(hasPosition)
+  const byId = new Map(positionedNodes.map((node) => [String(node.id), node]))
+  const maxNodeRadius = positionedNodes.reduce(
+    (largest, node) => Math.max(largest, nodeRadius(node)),
+    0
+  )
+  const maxLinkRadius = Math.max(...Object.values(LINK_WIDTHS)) / 2
+  const maxClearance = maxNodeRadius + maxLinkRadius + LINK_NODE_GAP
+  const cellSize = Math.max(1, maxClearance * 2)
+  const grid = new Map<string, PositionedNode[]>()
+  const cellKey = (x: number, y: number, z: number) =>
+    `${Math.floor(x / cellSize)}:${Math.floor(y / cellSize)}:${Math.floor(z / cellSize)}`
+
+  for (const node of positionedNodes) {
+    const key = cellKey(node.x, node.y, node.z)
+    const cell = grid.get(key)
+    if (cell) cell.push(node)
+    else grid.set(key, [node])
+  }
+
+  for (const link of links) {
+    link.__routeCurvature = 0
+    link.__routeRotation = 0
+
+    const source =
+      typeof link.source === "object"
+        ? link.source
+        : byId.get(String(link.source))
+    const target =
+      typeof link.target === "object"
+        ? link.target
+        : byId.get(String(link.target))
+    if (!source || !target || !hasPosition(source) || !hasPosition(target)) {
+      continue
+    }
+
+    const lx = target.x - source.x
+    const ly = target.y - source.y
+    const lz = target.z - source.z
+    const lengthSquared = lx * lx + ly * ly + lz * lz
+    if (lengthSquared < 1e-6) continue
+    const length = Math.sqrt(lengthSquared)
+
+    // Sample cells along the segment instead of comparing every link with
+    // every node. Neighbouring cells cover the largest possible node sphere.
+    const candidates = new Set<PositionedNode>()
+    const sampleCount = Math.max(1, Math.ceil(length / (cellSize / 2)))
+    for (let sample = 0; sample <= sampleCount; sample += 1) {
+      const t = sample / sampleCount
+      const x = source.x + lx * t
+      const y = source.y + ly * t
+      const z = source.z + lz * t
+      const cx = Math.floor(x / cellSize)
+      const cy = Math.floor(y / cellSize)
+      const cz = Math.floor(z / cellSize)
+      for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dz = -1; dz <= 1; dz += 1) {
+            for (const node of grid.get(`${cx + dx}:${cy + dy}:${cz + dz}`) ?? []) {
+              candidates.add(node)
+            }
+          }
+        }
+      }
+    }
+
+    const linkRadius =
+      (LINK_WIDTHS[(link as { type?: string }).type ?? ""] ?? 1.4) / 2
+    const obstacles: {
+      dx: number
+      dy: number
+      dz: number
+      distanceSquared: number
+      clearance: number
+      t: number
+    }[] = []
+
+    for (const node of candidates) {
+      if (node === source || node === target) continue
+      const fromSourceX = node.x - source.x
+      const fromSourceY = node.y - source.y
+      const fromSourceZ = node.z - source.z
+      const t =
+        (fromSourceX * lx + fromSourceY * ly + fromSourceZ * lz) /
+        lengthSquared
+      if (t <= 0.02 || t >= 0.98) continue
+
+      const closestX = source.x + lx * t
+      const closestY = source.y + ly * t
+      const closestZ = source.z + lz * t
+      // From the obstacle towards the straight segment: bending in this
+      // direction increases clearance instead of wrapping around the node.
+      const dx = closestX - node.x
+      const dy = closestY - node.y
+      const dz = closestZ - node.z
+      const distanceSquared = dx * dx + dy * dy + dz * dz
+      const clearance = nodeRadius(node) + linkRadius + LINK_NODE_GAP
+      if (distanceSquared < clearance * clearance) {
+        obstacles.push({ dx, dy, dz, distanceSquared, clearance, t })
+      }
+    }
+
+    if (!obstacles.length) continue
+
+    const axisX = lx / length
+    const axisY = ly / length
+    const axisZ = lz / length
+    // Matches three-forcegraph's zero-rotation reference direction.
+    const referenceX = lx !== 0 || ly !== 0 ? ly : -lz
+    const referenceY = lx !== 0 || ly !== 0 ? -lx : 0
+    const referenceZ = lx !== 0 || ly !== 0 ? 0 : lx
+    const referenceLength = Math.hypot(referenceX, referenceY, referenceZ)
+    const baseX = referenceX / referenceLength
+    const baseY = referenceY / referenceLength
+    const baseZ = referenceZ / referenceLength
+    const sideX = axisY * baseZ - axisZ * baseY
+    const sideY = axisZ * baseX - axisX * baseZ
+    const sideZ = axisX * baseY - axisY * baseX
+
+    let bestControlOffset = Number.POSITIVE_INFINITY
+    let bestRotation = 0
+
+    // Choose the least-curved clear route around all nodes blocking this link,
+    // rather than arbitrarily bending toward one obstacle and into another.
+    for (let direction = 0; direction < LINK_ROUTE_DIRECTIONS; direction += 1) {
+      const rotation = (direction / LINK_ROUTE_DIRECTIONS) * Math.PI * 2
+      const ux = baseX * Math.cos(rotation) + sideX * Math.sin(rotation)
+      const uy = baseY * Math.cos(rotation) + sideY * Math.sin(rotation)
+      const uz = baseZ * Math.cos(rotation) + sideZ * Math.sin(rotation)
+      let requiredControlOffset = 0
+
+      for (const obstacle of obstacles) {
+        const alongDirection =
+          obstacle.dx * ux + obstacle.dy * uy + obstacle.dz * uz
+        const discriminant =
+          alongDirection * alongDirection +
+          obstacle.clearance * obstacle.clearance -
+          obstacle.distanceSquared
+        const curveWeight = 2 * obstacle.t * (1 - obstacle.t)
+        const needed =
+          (-alongDirection + Math.sqrt(Math.max(0, discriminant))) /
+          curveWeight
+        requiredControlOffset = Math.max(requiredControlOffset, needed)
+      }
+
+      if (requiredControlOffset < bestControlOffset) {
+        bestControlOffset = requiredControlOffset
+        bestRotation = rotation
+      }
+    }
+
+    link.__routeCurvature = Math.min(
+      (bestControlOffset * LINK_ROUTE_SAFETY) / length,
+      MAX_LINK_CURVATURE
+    )
+    link.__routeRotation = bestRotation
+  }
+}
 
 function createNodeGlow(node: GNode) {
   const style = NODE_GLOW[node.type] ?? NODE_GLOW.section
@@ -905,6 +1095,18 @@ export function VisualizeTab({
                 LINK_WIDTHS[(link as { type?: string }).type ?? ""] ?? 1.4
               }
               linkResolution={LINK_RESOLUTION}
+              linkCurvature={(link) =>
+                (link as GLink).__routeCurvature ?? 0
+              }
+              linkCurveRotation={(link) =>
+                (link as GLink).__routeRotation ?? 0
+              }
+              onEngineStop={() => {
+                routeLinksAroundNodes(
+                  graphData.nodes as GNode[],
+                  graphData.links as GLink[]
+                )
+              }}
               onNodeClick={(node, event) => {
                 event.stopPropagation()
                 focusNode(node as GNode)
