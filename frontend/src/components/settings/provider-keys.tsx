@@ -1,10 +1,10 @@
 "use client"
 
 import {
-  ArrowsClockwise,
-  DotsThree as MoreHorizontal,
-  Key as KeyRound,
-  Trash,
+  ArrowsClockwiseIcon as ArrowsClockwise,
+  DotsThreeIcon as MoreHorizontal,
+  KeyIcon as KeyRound,
+  TrashIcon as Trash,
 } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRef, useState } from "react"

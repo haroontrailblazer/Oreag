@@ -1,11 +1,11 @@
 "use client"
 
 import {
-  ArrowRight,
-  EnvelopeSimple,
-  Fingerprint,
-  PencilSimple,
-  ShieldCheck,
+  ArrowRightIcon as ArrowRight,
+  EnvelopeSimpleIcon as EnvelopeSimple,
+  FingerprintIcon as Fingerprint,
+  PencilSimpleIcon as PencilSimple,
+  ShieldCheckIcon as ShieldCheck,
 } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"

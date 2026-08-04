@@ -1,16 +1,16 @@
 "use client"
 
 import {
-  ArrowUp,
-  Brain,
-  CaretDown,
-  Check,
-  Copy,
-  FileText,
-  Lightning,
-  Plus,
-  Square,
-  Warning,
+  ArrowUpIcon as ArrowUp,
+  BrainIcon as Brain,
+  CaretDownIcon as CaretDown,
+  CheckIcon as Check,
+  CopyIcon as Copy,
+  FileTextIcon as FileText,
+  LightningIcon as Lightning,
+  PlusIcon as Plus,
+  SquareIcon as Square,
+  WarningIcon as Warning,
 } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"

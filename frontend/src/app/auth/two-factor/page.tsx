@@ -1,6 +1,6 @@
 "use client"
 
-import { ShieldCheck } from "@phosphor-icons/react/dist/ssr"
+import { ShieldCheckIcon as ShieldCheck} from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
 

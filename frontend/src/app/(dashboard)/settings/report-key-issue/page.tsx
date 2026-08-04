@@ -1,6 +1,6 @@
 "use client"
 
-import { PaperPlaneTilt, Warning } from "@phosphor-icons/react/dist/ssr"
+import { PaperPlaneTiltIcon as PaperPlaneTilt, WarningIcon as Warning} from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useState } from "react"
 

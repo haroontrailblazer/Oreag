@@ -1,15 +1,15 @@
 "use client"
 
 import {
-  ArrowsClockwise,
-  ArrowsIn,
-  ArrowsOut,
-  CornersOut,
-  FileText,
-  Hand,
-  Minus,
-  Plus,
-  X,
+  ArrowsClockwiseIcon as ArrowsClockwise,
+  ArrowsInIcon as ArrowsIn,
+  ArrowsOutIcon as ArrowsOut,
+  CornersOutIcon as CornersOut,
+  FileTextIcon as FileText,
+  HandIcon as Hand,
+  MinusIcon as Minus,
+  PlusIcon as Plus,
+  XIcon as X,
 } from "@phosphor-icons/react/dist/ssr"
 import {
   useCallback,

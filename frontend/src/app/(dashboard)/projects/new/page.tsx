@@ -1,6 +1,6 @@
 "use client"
 
-import { FileArrowUp as FileUp, X } from "@phosphor-icons/react/dist/ssr"
+import { FileArrowUpIcon as FileUp, XIcon as X} from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useRef, useState } from "react"

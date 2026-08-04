@@ -1,14 +1,14 @@
 "use client"
 
 import {
-  WarningCircle as AlertCircle,
-  CheckCircle as CheckCircle2,
-  Clock as Clock3,
-  FileText,
-  CircleNotch as Loader2,
-  DotsThree as MoreHorizontal,
-  ArrowCounterClockwise as RotateCcw,
-  Trash as Trash2,
+  WarningCircleIcon as AlertCircle,
+  CheckCircleIcon as CheckCircle2,
+  ClockIcon as Clock3,
+  FileTextIcon as FileText,
+  CircleNotchIcon as Loader2,
+  DotsThreeIcon as MoreHorizontal,
+  ArrowCounterClockwiseIcon as RotateCcw,
+  TrashIcon as Trash2,
 } from "@phosphor-icons/react/dist/ssr"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"

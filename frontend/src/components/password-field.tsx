@@ -1,10 +1,10 @@
 "use client"
 
 import {
-  Check,
-  Eye,
-  EyeSlash,
-  Lock,
+  CheckIcon as Check,
+  EyeIcon as Eye,
+  EyeSlashIcon as EyeSlash,
+  LockIcon as Lock,
 } from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
 

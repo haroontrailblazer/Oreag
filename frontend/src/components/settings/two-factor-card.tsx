@@ -1,12 +1,12 @@
 "use client"
 
 import {
-  DeviceMobile,
-  Fingerprint,
-  Key,
-  ShieldCheck,
-  Trash,
-  Warning,
+  DeviceMobileIcon as DeviceMobile,
+  FingerprintIcon as Fingerprint,
+  KeyIcon as Key,
+  ShieldCheckIcon as ShieldCheck,
+  TrashIcon as Trash,
+  WarningIcon as Warning,
 } from "@phosphor-icons/react/dist/ssr"
 import Image from "next/image"
 import { useCallback, useState } from "react"

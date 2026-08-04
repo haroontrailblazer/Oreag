@@ -1,7 +1,7 @@
 import httpx
 from openai import OpenAI
 
-from .base import ProviderUnavailableError
+from .base import ProviderUnavailableError, ensure_width
 
 # SDK defaults are 600s + 2 retries: a hung upstream would pin a threadpool
 # thread (and the request's DB connection) for ~10 minutes and triple provider
@@ -44,7 +44,7 @@ class OpenAIEmbedder:
                 model=self.model, input=texts[i : i + self.batch_size], **params
             )
             out.extend(item.embedding for item in resp.data)
-        return out
+        return ensure_width(out, self.dimensions, "OpenAI", self.model)
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_texts([text])[0]

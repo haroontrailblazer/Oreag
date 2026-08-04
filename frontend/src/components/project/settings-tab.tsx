@@ -1,11 +1,11 @@
 "use client"
 
 import {
-  ChatCircle,
-  Cube,
-  Gauge,
-  GearSix,
-  WarningOctagon,
+  ChatCircleIcon as ChatCircle,
+  CubeIcon as Cube,
+  GaugeIcon as Gauge,
+  GearSixIcon as GearSix,
+  WarningOctagonIcon as WarningOctagon,
 } from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
 import { useRef, useState } from "react"

@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import {
-  Check as CheckIcon,
-  CaretRight as ChevronRightIcon,
-  Circle as CircleIcon,
+  CheckIcon as CheckIcon,
+  CaretRightIcon as ChevronRightIcon,
+  CircleIcon as CircleIcon,
 } from "@phosphor-icons/react/dist/ssr"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 

@@ -1,17 +1,17 @@
 "use client"
 
 import {
-  Camera,
-  ChatCircleText,
-  Check,
-  Copy,
-  Cube,
-  Files,
-  FolderSimple,
-  PencilSimple,
-  SealCheck,
-  SignOut,
-  WarningCircle,
+  CameraIcon as Camera,
+  ChatCircleTextIcon as ChatCircleText,
+  CheckIcon as Check,
+  CopyIcon as Copy,
+  CubeIcon as Cube,
+  FilesIcon as Files,
+  FolderSimpleIcon as FolderSimple,
+  PencilSimpleIcon as PencilSimple,
+  SealCheckIcon as SealCheck,
+  SignOutIcon as SignOut,
+  WarningCircleIcon as WarningCircle,
 } from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"

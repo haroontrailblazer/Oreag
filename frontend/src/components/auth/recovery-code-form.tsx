@@ -1,6 +1,6 @@
 "use client"
 
-import { Key, SignOut } from "@phosphor-icons/react/dist/ssr"
+import { KeyIcon as Key, SignOutIcon as SignOut} from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"

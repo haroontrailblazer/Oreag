@@ -1,6 +1,6 @@
 "use client"
 
-import { Eye, EyeSlash as EyeOff } from "@phosphor-icons/react/dist/ssr"
+import { EyeIcon as Eye, EyeSlashIcon as EyeOff} from "@phosphor-icons/react/dist/ssr"
 import * as React from "react"
 
 import { Input } from "@/components/ui/input"

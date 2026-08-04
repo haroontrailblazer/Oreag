@@ -1,9 +1,9 @@
 "use client"
 
 import {
-  Brain,
-  MagnifyingGlass as Search,
-  Trash,
+  BrainIcon as Brain,
+  MagnifyingGlassIcon as Search,
+  TrashIcon as Trash,
 } from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
 import { toast } from "@/lib/toast"

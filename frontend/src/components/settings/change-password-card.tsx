@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckCircle, LockKey } from "@phosphor-icons/react/dist/ssr"
+import { CheckCircleIcon as CheckCircle, LockKeyIcon as LockKey} from "@phosphor-icons/react/dist/ssr"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { OtpField, isCompleteCode } from "@/components/auth/otp-field"

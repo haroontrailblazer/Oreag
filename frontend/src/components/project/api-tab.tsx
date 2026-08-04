@@ -1,13 +1,13 @@
 "use client"
 
 import {
-  Check,
-  Copy,
-  DotsThree as MoreHorizontal,
-  Key as KeyRound,
-  Plus,
-  Prohibit,
-  Trash,
+  CheckIcon as Check,
+  CopyIcon as Copy,
+  DotsThreeIcon as MoreHorizontal,
+  KeyIcon as KeyRound,
+  PlusIcon as Plus,
+  ProhibitIcon as Prohibit,
+  TrashIcon as Trash,
 } from "@phosphor-icons/react/dist/ssr"
 import { useRef, useState, useSyncExternalStore } from "react"
 import { toast } from "@/lib/toast"

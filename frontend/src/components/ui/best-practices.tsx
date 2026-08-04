@@ -1,6 +1,6 @@
 "use client"
 
-import { Lightbulb } from "@phosphor-icons/react/dist/ssr"
+import { LightbulbIcon as Lightbulb} from "@phosphor-icons/react/dist/ssr"
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"

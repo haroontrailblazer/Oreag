@@ -1,4 +1,4 @@
-import { ArrowRight, GithubLogo } from "@phosphor-icons/react/dist/ssr"
+import { ArrowRightIcon as ArrowRight, GithubLogoIcon as GithubLogo} from "@phosphor-icons/react/dist/ssr"
 import Image from "next/image"
 import Link from "next/link"
 

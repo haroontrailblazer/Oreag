@@ -1,7 +1,7 @@
 import httpx
 
 from ..config import settings
-from .base import ProviderUnavailableError
+from .base import ProviderUnavailableError, ensure_width
 
 
 def _post(path: str, payload: dict, timeout: float) -> dict:
@@ -48,7 +48,14 @@ class OllamaEmbedder:
                 timeout=300,
             )
             out.extend(data["embeddings"])
-        return out
+        # Ollama's /api/embed takes NO dimensions parameter - the width is
+        # whatever the pulled model produces, and `self.dimensions` is only
+        # what the catalog claims it will be. That makes this check more
+        # necessary here than for a remote provider, not less: `ollama pull
+        # nomic-embed-text` can resolve to a different variant than the one the
+        # catalog was written against, and the mismatch would otherwise land
+        # silently in an untyped Vector column.
+        return ensure_width(out, self.dimensions, "Ollama", self.model)
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_texts([text])[0]

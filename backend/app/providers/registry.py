@@ -55,6 +55,16 @@ CATALOG: dict = {
         "mistral": [
             {"model": "mistral-embed", "dimensions": 1024},
         ],
+        # DO NOT add dimension_options here. All three Voyage models really are
+        # Matryoshka and really do support 2048/1024/512/256 - which makes this
+        # look like an oversight worth "fixing". It is not: Voyage's size
+        # parameter is named `output_dimension`, and Oreag reaches Voyage
+        # through the OpenAI-compatible path, which sends `dimensions`. Adding
+        # options would flip send_dimensions to True and ship a parameter Voyage
+        # ignores - the exact Cohere bug, whose entry above explains the damage.
+        # 1024 is correct precisely because it is the parameterless default.
+        # (Full fidelity is 2048, so these are stored at half width. Recovering
+        # that needs a Voyage-native embedder, not a catalog edit.)
         "voyage": [
             {"model": "voyage-3.5", "dimensions": 1024},
             {"model": "voyage-3.5-lite", "dimensions": 1024},
@@ -92,13 +102,22 @@ CATALOG: dict = {
             {"model": "nomic-ai/nomic-embed-text-v1.5", "dimensions": 768},
         ],
         "cohere": [
-            # embed-v4.0 is Matryoshka-trained; Cohere's OpenAI-compatible
-            # endpoint accepts the standard `dimensions` parameter for it.
-            {
-                "model": "embed-v4.0",
-                "dimensions": 1536,
-                "dimension_options": [256, 512, 1024, 1536],
-            },
+            # embed-v4.0 IS Matryoshka-trained, but no smaller size is
+            # reachable on the transport Oreag uses. Cohere's
+            # OpenAI-compatibility endpoint (api.cohere.ai/compatibility/v1,
+            # see COMPAT_BASE_URLS) documents `dimensions` as UNSUPPORTED for
+            # embeddings: it accepts the parameter and returns 1536 anyway.
+            #
+            # Offering [256, 512, 1024] therefore promised sizes that silently
+            # produced 1536-wide vectors in a column sized for the smaller one -
+            # not an error, a corrupted index. Listing only the native size also
+            # flips send_dimensions to False in get_embedder, which is the
+            # correct wire behaviour for this endpoint.
+            #
+            # To restore the smaller sizes, embeddings would have to move to
+            # Cohere's native /v2/embed, which honours `output_dimension` - a
+            # provider change, not a catalog one.
+            {"model": "embed-v4.0", "dimensions": 1536},
             {"model": "embed-multilingual-v3.0", "dimensions": 1024},
         ],
         "ollama": [

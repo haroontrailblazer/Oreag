@@ -37,6 +37,35 @@ def is_provider_rate_limit(exc: BaseException) -> bool:
     return False
 
 
+def ensure_width(
+    vectors: list[list[float]], expected: int, provider: str, model: str
+) -> list[list[float]]:
+    """Fail loudly when a provider returns vectors of the wrong width.
+
+    A vendor that IGNORES the requested size silently returns its native width,
+    and nothing downstream notices: `chunks.embedding` is an untyped `Vector`
+    column, so a 1536-wide vector inserts happily into a project configured for
+    512. The result is not an error but a corrupted index - similarity scores
+    computed against a mismatched space, quietly wrong answers, and a re-embed
+    of the entire corpus to recover.
+
+    This is exactly what Cohere's OpenAI-compatibility endpoint did: it accepts
+    the `dimensions` parameter and does nothing with it. Checked here rather
+    than per provider because the failure is indistinguishable from success at
+    every other layer, and the next vendor to do it should cost one clear error
+    instead of another silent corpus.
+    """
+    for vector in vectors:
+        if len(vector) != expected:
+            raise ProviderUnavailableError(
+                f"{provider}/{model} returned {len(vector)}-dimensional vectors "
+                f"but this project is configured for {expected}. The provider "
+                "ignored the requested size - pick the model's native dimension "
+                "in Settings, or choose a different embedding model."
+            )
+    return vectors
+
+
 class EmbeddingProvider(Protocol):
     dimensions: int
     # How many texts this provider comfortably embeds per request - callers

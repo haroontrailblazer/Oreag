@@ -1,6 +1,6 @@
 "use client"
 
-import { SignOut as LogOut, User as UserIcon } from "@phosphor-icons/react/dist/ssr"
+import { SignOutIcon as LogOut, UserIcon as UserIcon} from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 

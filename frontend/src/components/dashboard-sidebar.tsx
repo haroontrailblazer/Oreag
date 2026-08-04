@@ -1,15 +1,15 @@
 "use client"
 
 import {
-  CaretRight as ChevronRight,
-  Circle,
-  FileText,
-  Kanban as FolderKanban,
-  House as Home,
-  Key as KeyRound,
-  List,
-  Plus,
-  MagnifyingGlass as Search,
+  CaretRightIcon as ChevronRight,
+  CircleIcon as Circle,
+  FileTextIcon as FileText,
+  KanbanIcon as FolderKanban,
+  HouseIcon as Home,
+  KeyIcon as KeyRound,
+  ListIcon as List,
+  PlusIcon as Plus,
+  MagnifyingGlassIcon as Search,
 } from "@phosphor-icons/react/dist/ssr"
 import Link, { useLinkStatus } from "next/link"
 import { usePathname, useRouter } from "next/navigation"

@@ -1,6 +1,6 @@
 "use client"
 
-import { FileText, Plus } from "@phosphor-icons/react/dist/ssr"
+import { FileTextIcon as FileText, PlusIcon as Plus} from "@phosphor-icons/react/dist/ssr"
 import Link, { useLinkStatus } from "next/link"
 import { type CSSProperties } from "react"
 import useSWR from "swr"

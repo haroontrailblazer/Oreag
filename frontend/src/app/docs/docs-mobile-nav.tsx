@@ -1,6 +1,6 @@
 "use client"
 
-import { List } from "@phosphor-icons/react/dist/ssr"
+import { ListIcon as List} from "@phosphor-icons/react/dist/ssr"
 import { useState } from "react"
 
 import {

@@ -1,4 +1,4 @@
-import { ArrowSquareOut } from "@phosphor-icons/react/dist/ssr"
+import { ArrowSquareOutIcon as ArrowSquareOut} from "@phosphor-icons/react/dist/ssr"
 import type { Metadata } from "next"
 import Link from "next/link"
 

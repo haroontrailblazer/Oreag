@@ -639,9 +639,19 @@ class TestOpenAICompatProviders:
         assert "api.x.ai" in str(llm.client.base_url)
 
     def test_compat_embedder_wires_dimensions_and_batching(self):
-        emb = get_embedder("cohere", "embed-v4.0", api_key="k", dimensions=512)
-        assert emb.dimensions == 512
-        assert emb._send_dimensions is True  # embed-v4.0 is Matryoshka-capable
+        # INVERTED. This used to request cohere at 512 and assert
+        # _send_dimensions is True, encoding the belief that embed-v4.0's
+        # Matryoshka sizes were reachable. They are not on this transport:
+        # Cohere's compatibility endpoint documents `dimensions` as unsupported
+        # for embeddings and returns 1536 whatever you ask for - so the test
+        # was asserting a promise the wire could not keep.
+        with pytest.raises(ValueError):
+            get_embedder("cohere", "embed-v4.0", api_key="k", dimensions=512)
+
+        emb = get_embedder("cohere", "embed-v4.0", api_key="k")
+        assert emb.dimensions == 1536
+        # Single reachable size => no dimensions param goes over the wire.
+        assert emb._send_dimensions is False
         assert emb.batch_size == 64
 
         emb = get_embedder("mistral", "mistral-embed", api_key="k")
@@ -1693,3 +1703,105 @@ class TestImageOnlyPdfDiagnosis:
 
         assert not pdf_is_image_only(b"not a pdf at all")
         assert not pdf_is_image_only(b"")
+
+
+class TestVectorWidthGuard:
+    """A provider that ignores the requested size must not corrupt the index.
+
+    chunks.embedding is an untyped `Vector` column, so a 1536-wide vector
+    inserts happily into a project configured for 512 - no error, just a
+    silently wrong vector space and answers to match. Cohere's compatibility
+    endpoint did exactly this: it accepts `dimensions` and returns its native
+    width regardless.
+    """
+
+    def test_mismatched_width_is_refused(self):
+        from app.providers.base import ProviderUnavailableError, ensure_width
+
+        with pytest.raises(ProviderUnavailableError) as exc:
+            ensure_width([[0.0] * 1536], 512, "Cohere", "embed-v4.0")
+        message = str(exc.value)
+        # Both numbers have to appear or the error cannot be acted on.
+        assert "1536" in message and "512" in message
+
+    def test_correct_width_passes_through_unchanged(self):
+        from app.providers.base import ensure_width
+
+        vectors = [[0.1] * 768, [0.2] * 768]
+        assert ensure_width(vectors, 768, "Gemini", "gemini-embedding-001") is vectors
+
+    def test_every_vector_is_checked_not_just_the_first(self):
+        """A partial batch failure is the likelier real-world shape."""
+        from app.providers.base import ProviderUnavailableError, ensure_width
+
+        with pytest.raises(ProviderUnavailableError):
+            ensure_width([[0.0] * 768, [0.0] * 512], 768, "x", "y")
+
+    def test_cohere_no_longer_offers_unreachable_sizes(self):
+        """The compat endpoint ignores `dimensions`, so anything but the native
+        1536 was a promise the transport could not keep."""
+        from app.providers.registry import embedding_dimension_options
+
+        assert embedding_dimension_options("cohere", "embed-v4.0") == [1536]
+
+    def test_cohere_no_longer_sends_the_dimensions_param(self):
+        """send_dimensions is derived from the option count, so trimming the
+        catalog is also what stops the useless parameter going over the wire."""
+        from app.providers.registry import embedding_dimension_options
+
+        assert len(embedding_dimension_options("cohere", "embed-v4.0")) == 1
+
+
+class TestEveryEmbedderIsGuarded:
+    """No embedder may return vectors without checking their width.
+
+    Written as a scan over the package rather than five separate assertions,
+    because the first version of this guard covered three of the five embedder
+    classes and the two it missed - Ollama and sentence-transformers - were the
+    ones that need it MOST: neither endpoint takes a dimensions parameter at
+    all, so their width is whatever the locally resolved model happens to
+    produce. A per-class test would have passed while the gap stayed open.
+    """
+
+    def _embedder_sources(self):
+        import ast
+        import inspect
+        import pkgutil
+        import importlib
+
+        import app.providers as providers
+
+        found = []
+        for mod in pkgutil.iter_modules(providers.__path__):
+            module = importlib.import_module(f"app.providers.{mod.name}")
+            for name, obj in vars(module).items():
+                if (
+                    isinstance(obj, type)
+                    and name.endswith("Embedder")
+                    and obj.__module__ == module.__name__
+                ):
+                    src = inspect.getsource(obj)
+                    found.append((f"{mod.name}.{name}", ast.parse(src), src))
+        return found
+
+    def test_all_embedders_call_ensure_width(self):
+        offenders = [
+            name
+            for name, _tree, src in self._embedder_sources()
+            if "ensure_width" not in src
+        ]
+        assert offenders == [], (
+            "these embedders return vectors without verifying the width: "
+            f"{offenders}"
+        )
+
+    def test_the_scan_finds_every_known_embedder(self):
+        """Guards the guard - a broken scan would make the test above vacuous."""
+        names = {n.split(".")[1] for n, _t, _s in self._embedder_sources()}
+        assert {
+            "OpenAIEmbedder",
+            "GeminiEmbedder",
+            "CompatEmbedder",
+            "OllamaEmbedder",
+            "SentenceTransformersEmbedder",
+        } <= names, names

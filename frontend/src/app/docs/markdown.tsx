@@ -1,6 +1,6 @@
 "use client"
 
-import { Image as ImageIcon } from "@phosphor-icons/react/dist/ssr"
+import { ImageIcon as ImageIcon} from "@phosphor-icons/react/dist/ssr"
 import type { ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"

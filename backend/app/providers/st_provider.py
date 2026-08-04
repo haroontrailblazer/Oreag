@@ -1,4 +1,4 @@
-from .base import ProviderUnavailableError
+from .base import ProviderUnavailableError, ensure_width
 
 # loaded models are cached per process - sentence-transformers model load is slow
 _model_cache: dict[str, object] = {}
@@ -37,7 +37,16 @@ class SentenceTransformersEmbedder:
         self._st = _load_model(model)
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        return self._st.encode(texts, normalize_embeddings=True).tolist()
+        # encode() has no size argument either - it returns the checkpoint's
+        # native width. Checked for the same reason as Ollama: the model is
+        # resolved by name at runtime, so a different checkpoint under the same
+        # name silently changes the vector width.
+        return ensure_width(
+            self._st.encode(texts, normalize_embeddings=True).tolist(),
+            self.dimensions,
+            "sentence-transformers",
+            self.model,
+        )
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_texts([text])[0]

@@ -1,7 +1,7 @@
 """Google Gemini provider (embeddings + chat) via the unified google-genai SDK."""
 import math
 
-from .base import ProviderUnavailableError
+from .base import ProviderUnavailableError, ensure_width
 
 
 def l2_normalize(values: list[float]) -> list[float]:
@@ -94,7 +94,7 @@ class GeminiEmbedder:
                 config=config,
             )
             out.extend(l2_normalize(e.values) for e in resp.embeddings)
-        return out
+        return ensure_width(out, self.dimensions, "Gemini", self.model)
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_texts([text])[0]

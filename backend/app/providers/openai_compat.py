@@ -10,7 +10,7 @@ import httpx
 from openai import OpenAI
 
 from ..config import settings
-from .base import ProviderUnavailableError
+from .base import ProviderUnavailableError, ensure_width
 
 
 # Bound the SDK defaults (600s, 2 retries) so a hung vendor can't pin a
@@ -124,6 +124,7 @@ class CompatEmbedder:
         self.model = model
         self.dimensions = dimensions
         self.batch_size = batch_size
+        self._label = provider_label
         # Only Matryoshka-capable models accept a dimensions param; sending it
         # to others is a 400 on most vendors.
         self._send_dimensions = send_dimensions
@@ -137,7 +138,10 @@ class CompatEmbedder:
                 model=self.model, input=texts[i : i + self.batch_size], **params
             )
             out.extend(item.embedding for item in resp.data)
-        return out
+        # Sending `dimensions` is a REQUEST, not a guarantee - some vendors
+        # accept the parameter and ignore it. Verify before the vectors reach an
+        # untyped Vector column that will store any width without complaint.
+        return ensure_width(out, self.dimensions, self._label, self.model)
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_texts([text])[0]

@@ -1,11 +1,11 @@
 "use client"
 
 import {
-  CheckCircle as CircleCheckIcon,
-  Info as InfoIcon,
-  CircleNotch as Loader2Icon,
-  XCircle as OctagonXIcon,
-  Warning as TriangleAlertIcon,
+  CheckCircleIcon as CircleCheckIcon,
+  InfoIcon as InfoIcon,
+  CircleNotchIcon as Loader2Icon,
+  XCircleIcon as OctagonXIcon,
+  WarningIcon as TriangleAlertIcon,
 } from "@phosphor-icons/react/dist/ssr"
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"

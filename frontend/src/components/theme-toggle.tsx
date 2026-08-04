@@ -1,6 +1,6 @@
 "use client"
 
-import { Laptop, Moon, Sun } from "@phosphor-icons/react/dist/ssr"
+import { LaptopIcon as Laptop, MoonIcon as Moon, SunIcon as Sun} from "@phosphor-icons/react/dist/ssr"
 import { useTheme } from "next-themes"
 import { useSyncExternalStore } from "react"
 
