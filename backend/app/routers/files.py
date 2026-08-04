@@ -174,6 +174,13 @@ _LEGACY_TRUNCATE_MEMORIES_SQL = sql_text(
 def _archive_supported(db: Session) -> bool:
     """Has migration 0024 been applied?
 
+    Scope: this guards COST, not availability. It exists so a shrink attempted
+    without the archive columns keeps today's free in-place truncate instead of
+    demoting to a paid re-embed. It does NOT make the code safe to deploy ahead
+    of the migration - projects.embedding_native_dimensions is mapped
+    non-deferred, so loading a Project already fails before anything reaches
+    here. Migration 0024 is mandatory before deploy; see its header.
+
     Probed per request, NOT memoised. Memoising looks obviously right and is
     the trap: migrations are applied to the live database while old instances
     are still serving, so a process that cached "absent" at boot would keep

@@ -2283,3 +2283,42 @@ class TestConversionNoteSurvivesReindex:
         assert "conversion_note = None" in inspect.getsource(
             ingestion.mark_file_failed
         )
+
+
+class TestArchiveColumnIsOmittedNotNulled:
+    """The archive column must be ABSENT from the INSERT when unused.
+
+    A key present in the row dict makes SQLAlchemy name that column in the
+    INSERT. Carrying "embedding_full": None therefore referenced a column that
+    does not exist until migration 0024 runs - breaking EVERY file upload on a
+    database that had not had it applied, for projects that were not even
+    shrunk. Omission is what keeps the statement identical to today's.
+    """
+
+    def test_insert_omits_the_key_when_not_archiving(self):
+        import inspect
+
+        from app.services import ingestion
+
+        # CODE only. The comment above the fix quotes the bad literal in order
+        # to explain it, so a naive substring check matches the explanation and
+        # fails on correct code - a test that cannot tell code from prose.
+        code = "\n".join(
+            line
+            for line in inspect.getsource(ingestion.ingest_file).splitlines()
+            if not line.strip().startswith("#")
+        )
+        assert '"embedding_full": None' not in code
+        assert '"embedding_full": vector if archiving else None' not in code
+        # Added only under the archiving branch.
+        assert "if archiving:" in code
+        assert 'row["embedding_full"] = vector' in code
+
+    def test_memory_save_never_writes_the_archive(self):
+        """Memories are archived only by the SQL shrink, never at save time -
+        so save_memory must not name the column either."""
+        import inspect
+
+        from app.services import memory
+
+        assert "embedding_full" not in inspect.getsource(memory)

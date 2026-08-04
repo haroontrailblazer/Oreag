@@ -373,28 +373,32 @@ def ingest_file(file_id: uuid.UUID) -> None:
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i : i + batch_size]
             vectors = embedder.embed_texts([content for _, _, content in batch])
-            db.execute(
-                insert(Chunk),
-                [
-                    {
-                        "project_id": project.id,
-                        "file_id": file.id,
-                        "chunk_index": idx,
-                        "page_number": page_number,
-                        "content": content,
-                        # Active width in `embedding` - it is what search reads,
-                        # and what the partial HNSW index is built on. The wider
-                        # original goes to the archive, never to `embedding`.
-                        "embedding": (
-                            _prefix_normalize(vector, active_dims)
-                            if archiving
-                            else vector
-                        ),
-                        "embedding_full": vector if archiving else None,
-                    }
-                    for (idx, page_number, content), vector in zip(batch, vectors)
-                ],
-            )
+            rows = [
+                {
+                    "project_id": project.id,
+                    "file_id": file.id,
+                    "chunk_index": idx,
+                    "page_number": page_number,
+                    "content": content,
+                    # Active width in `embedding` - it is what search reads, and
+                    # what the partial HNSW index is built on. The wider
+                    # original goes to the archive, never to `embedding`.
+                    "embedding": (
+                        _prefix_normalize(vector, active_dims) if archiving else vector
+                    ),
+                }
+                for (idx, page_number, content), vector in zip(batch, vectors)
+            ]
+            if archiving:
+                # OMITTED, not set to None, when there is nothing to archive.
+                # A key present in the dict makes SQLAlchemy name that column in
+                # the INSERT - so carrying "embedding_full": None would reference
+                # a column that does not exist until migration 0024 runs, and
+                # break EVERY file upload on a database that has not had it
+                # applied yet. Absent means the column is never mentioned.
+                for row, vector in zip(rows, vectors):
+                    row["embedding_full"] = vector
+            db.execute(insert(Chunk), rows)
             db.commit()
 
         file.status = "indexed"

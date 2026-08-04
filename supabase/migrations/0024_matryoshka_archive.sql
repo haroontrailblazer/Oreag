@@ -37,11 +37,21 @@
 -- Every existing row reads NULL, which means "nothing archived", which is
 -- exactly today's behaviour.
 --
--- DEPLOY ORDER: apply this BEFORE deploying the code. The application degrades
--- deliberately if you do not (it keeps today's destructive-but-free shrink
--- rather than demoting to a paid re-embed - see _archive_supported in
--- backend/app/routers/files.py), but the reversibility this migration exists
--- for is simply absent until it runs.
+-- DEPLOY ORDER: THIS IS MANDATORY BEFORE THE CODE SHIPS, not an optimisation.
+--
+-- projects.embedding_native_dimensions is mapped NON-deferred, so every ORM
+-- load of a Project names it in the SELECT. Deploy the code first and the
+-- column does not exist yet, so loading a project fails - which is most of the
+-- application, not just this feature. (Migration 0023 has exactly the same
+-- property via files.conversion_version; migrate-before-deploy is this repo's
+-- real contract, and it is written down here because assuming otherwise cost a
+-- production incident.)
+--
+-- _archive_supported() in backend/app/routers/files.py is NOT a licence to skip
+-- this. It protects one specific BEHAVIOUR - a shrink attempted without the
+-- archive columns keeps today's free in-place truncate instead of demoting to a
+-- paid re-embed - and it can only help once the process is able to load a
+-- project at all. Availability is not covered; only cost is.
 --
 -- The ALTERs are catalog-only yet still take ACCESS EXCLUSIVE for an instant.
 -- On a busy table that lock queues behind any long-running scan, and everything
