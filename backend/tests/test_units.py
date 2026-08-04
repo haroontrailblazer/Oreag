@@ -1805,3 +1805,63 @@ class TestEveryEmbedderIsGuarded:
             "OllamaEmbedder",
             "SentenceTransformersEmbedder",
         } <= names, names
+
+
+class TestTruncationBumpsContentVersion:
+    """Shrinking a Matryoshka model must move the cache signature.
+
+    The fast path re-writes EVERY vector in the project in place and then
+    returns early because nothing needs re-ingesting - and it used to return
+    without bumping projects.content_version. That column is the cache key for
+    the memory-graph response (services/memory_graph.py) and for the answer
+    caches (services/query.py), so after a 3072 -> 1536 shrink the Visualize
+    tab kept rendering the graph built from the OLD vectors and queries kept
+    replaying answers computed against them. Nothing on screen suggested the
+    shrink had not taken effect.
+
+    Asserted by scanning the source: the bug was an early `return` skipping a
+    call, and an execution-level test would need a live pgvector database to
+    reach that branch at all.
+    """
+
+    def _truncate_branches(self):
+        import ast
+        import inspect
+
+        from app.routers import files as files_router
+
+        tree = ast.parse(inspect.getsource(files_router))
+        # Every `if`/`elif` whose test mentions the truncate plan.
+        return [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and "truncate" in ast.unparse(node.test)
+        ]
+
+    def test_the_scan_finds_the_truncate_paths(self):
+        """Guards the guard - a vacuous scan would pass the test below."""
+        assert len(self._truncate_branches()) >= 2
+
+    def test_every_truncate_path_bumps_the_version(self):
+        """A branch is exempt only if it hands off to the re-embed path.
+
+        `plan == "truncate" and not _truncate_vectors_in_place(...)` is the
+        FALLBACK: truncation failed, so it sets plan = "reembed" and falls
+        through to code that wipes the chunks and bumps there. Requiring a bump
+        inside it would be wrong. What must never happen again is a truncate
+        branch that neither bumps NOR defers - which is exactly what the
+        early-returning fast path did.
+        """
+        import ast
+
+        offenders = []
+        for node in self._truncate_branches():
+            body = ast.unparse(node)
+            defers = 'plan = "reembed"' in body or "plan = 'reembed'" in body
+            if "bump_content_version" not in body and not defers:
+                offenders.append(ast.unparse(node.test))
+        assert offenders == [], (
+            "a truncate path rewrites every vector without bumping "
+            f"content_version, leaving stale caches: {offenders}"
+        )

@@ -153,6 +153,14 @@ async def upload_files(
         )
         if plan == "truncate" and not _truncate_vectors_in_place(db, project, dims):
             plan = "reembed"
+        elif plan == "truncate":
+            # A successful truncation rewrote every existing vector, so the
+            # cache signature has to move even though nothing is re-ingested.
+            # Bumped HERE rather than relying on the uploaded files bumping it
+            # during ingestion: that happens to work today, but it makes a
+            # correctness invariant depend on a side effect of an unrelated
+            # step, and it fails outright if every uploaded file errors out.
+            bump_content_version(db, project.id)
         project.embedding_provider = provider
         project.embedding_model = model
         project.embedding_dimensions = dims
@@ -355,7 +363,22 @@ def reindex_project(
 
     # Matryoshka fast path: vectors already migrated in place, chunks still
     # valid - nothing to re-ingest.
+    #
+    # It still has to bump content_version. "No re-ingest" is not "no change":
+    # _truncate_vectors_in_place has just rewritten EVERY vector in the project
+    # to a new width and re-normalised it, so anything keyed on the old
+    # signature is now describing a vector space that no longer exists.
+    # content_version is exactly that signature - it keys the memory-graph
+    # response cache (services/memory_graph.py) and the answer caches
+    # (services/query.py). Without the bump, the Visualize tab kept serving the
+    # graph built from the pre-shrink vectors, and queries kept returning
+    # answers computed against them, with nothing on screen to suggest the
+    # shrink had not taken effect.
+    #
+    # AFTER the truncation, never before: _truncate_vectors_in_place rolls back
+    # on failure and would discard a bump made ahead of it.
     if plan == "truncate" and not chunking_changed:
+        bump_content_version(db, project.id)
         db.commit()
         return files
 
