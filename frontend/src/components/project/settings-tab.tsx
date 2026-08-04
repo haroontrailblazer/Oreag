@@ -186,13 +186,26 @@ export function SettingsTab({
   )
   const embDimOptions = embEntry ? dimensionOptions(embEntry) : [embDimensions]
   const embDimsChanged = embDimensions !== project.embedding_dimensions
-  // Same MRL model at a smaller size: the backend truncates stored vectors in
-  // place - instant, nothing is re-embedded.
+  // Same MRL model at a smaller size: the backend cuts the stored vectors to
+  // the prefix in place, banking the wider original - instant, nothing is
+  // re-embedded, and reversible.
   const instantShrink =
     !embModelChanged &&
     !chunkChanged &&
     embDimsChanged &&
     embDimensions < project.embedding_dimensions
+  // Growing BACK up to a width already archived by an earlier shrink. Also
+  // instant: the originals are restored from the archive rather than
+  // recomputed. Anything wider than the archive really does need re-embedding,
+  // which is why this is capped at embedding_native_dimensions rather than
+  // being true for every grow.
+  const instantRestore =
+    !embModelChanged &&
+    !chunkChanged &&
+    embDimsChanged &&
+    embDimensions > project.embedding_dimensions &&
+    embDimensions <= (project.embedding_native_dimensions ?? 0)
+  const instantChange = instantShrink || instantRestore
   const reindexNeeded = embModelChanged || chunkChanged || embDimsChanged
   const embKeyOnly = !reindexNeeded && Boolean(embKeyInput.trim())
   const embForcedInput = !embAccountHasKey && !embOverrideLast4
@@ -388,8 +401,10 @@ export function SettingsTab({
         !hasFiles
           ? "Embedding configuration saved"
           : instantShrink
-            ? "Vector size updated - existing vectors reused, nothing re-embedded"
-            : "Re-indexing started - all files will be processed again"
+            ? "Vector size reduced - originals kept, nothing re-embedded"
+            : instantRestore
+              ? "Vector size restored from the kept originals - nothing re-embedded"
+              : "Re-indexing started - files are being re-embedded"
       )
       setConfirmReindex(false)
       setEmbKeyInput("")
@@ -832,10 +847,11 @@ export function SettingsTab({
                   ))}
                 </SelectContent>
               </Select>
-              {instantShrink && (
+              {instantChange && (
                 <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-                  Same model, smaller size: applied instantly by truncating the
-                  stored vectors (Matryoshka) - nothing is re-embedded.
+                  {instantShrink
+                    ? "Same model, smaller size: applied instantly, and your full-size vectors are kept so you can switch back."
+                    : "Restoring a size you used before: applied instantly from the kept copies - no re-embedding."}
                 </p>
               )}
             </div>
@@ -879,10 +895,14 @@ export function SettingsTab({
                 >
                   {reindexing ? (
                     <Spin />
-                  ) : hasFiles ? (
-                    "Change & re-index"
-                  ) : (
+                  ) : !hasFiles ? (
                     "Save changes"
+                  ) : instantChange ? (
+                    // No re-index happens on this path - promising one would
+                    // make a free, instant action look expensive.
+                    "Change dimensions"
+                  ) : (
+                    "Change & re-index"
                   )}
                 </Button>
               ) : (
@@ -954,16 +974,34 @@ export function SettingsTab({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {instantShrink ? "Shrink vector dimensions?" : "Re-index all files?"}
+              {instantShrink
+                ? "Shrink vector dimensions?"
+                : instantRestore
+                  ? "Restore vector dimensions?"
+                  : "Re-index all files?"}
             </DialogTitle>
+            {/* Three genuinely different operations, and the difference the
+                user cares about is whether it COSTS anything. The old copy
+                warned that "growing back later requires a full re-index" - true
+                when a shrink threw the wide numbers away, and now the opposite
+                of what happens. Wording that scares someone off a free action
+                is as costly as wording that hides a paid one. */}
             <DialogDescription>
               {instantShrink
-                ? `Existing vectors are truncated to ${embDimensions} dimensions ` +
-                  "and reused instantly (Matryoshka) - nothing is re-embedded. " +
-                  "Growing back later requires a full re-index."
-                : `All ${project.file_count} file(s) will be re-chunked and ` +
-                  "re-embedded with the new configuration. Queries may return " +
-                  "incomplete results until indexing finishes."}
+                ? `Vectors are cut to ${embDimensions} dimensions instantly - ` +
+                  "nothing is re-embedded and no API calls are made. Your " +
+                  `full-size ${project.embedding_dimensions}-dimension vectors ` +
+                  "are kept, so you can switch back later just as quickly."
+                : instantRestore
+                  ? `Your ${embDimensions}-dimension vectors are restored from ` +
+                    "the copies kept when you shrank - instantly, with no " +
+                    "re-embedding and no API calls. Files added while shrunk " +
+                    "are re-embedded on their own if they need it."
+                  : `All ${project.file_count} file(s) will be re-embedded with ` +
+                    "the new configuration, which uses your provider key. Text " +
+                    "already extracted is reused, so documents are not " +
+                    "re-converted. Queries may return incomplete results until " +
+                    "indexing finishes."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -971,7 +1009,15 @@ export function SettingsTab({
               Cancel
             </Button>
             <Button onClick={handleReindex} disabled={reindexing}>
-              {reindexing ? <Spin /> : instantShrink ? "Apply" : "Re-index"}
+              {reindexing ? (
+                <Spin />
+              ) : instantShrink ? (
+                "Shrink"
+              ) : instantRestore ? (
+                "Restore"
+              ) : (
+                "Re-index"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

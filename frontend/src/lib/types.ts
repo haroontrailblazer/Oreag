@@ -7,6 +7,11 @@ export interface Project {
   embedding_provider: string
   embedding_model: string
   embedding_dimensions: number
+  // Width the vectors were originally computed at. Greater than
+  // embedding_dimensions means the project is shrunk and the wider originals
+  // are archived, so growing back up to this width is instant and free.
+  // null means never shrunk - nothing is archived.
+  embedding_native_dimensions: number | null
   llm_provider: string
   llm_model: string
   top_k: number

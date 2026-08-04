@@ -63,6 +63,12 @@ class ProjectOut(BaseModel):
     embedding_provider: str
     embedding_model: str
     embedding_dimensions: int
+    # Width the vectors were originally computed at. Greater than
+    # embedding_dimensions means this project is shrunk and the wider originals
+    # are archived - so the UI can tell a FREE grow (back up to this width,
+    # restored from the archive) from a PAID one, instead of warning about a
+    # re-index that will not happen.
+    embedding_native_dimensions: int | None = None
     llm_provider: str
     llm_model: str
     top_k: int
