@@ -64,6 +64,21 @@ SUPPORTED_UPLOAD_EXTENSIONS = {
 }
 
 
+# Which conversion pipeline this build produces. A re-index reuses previously
+# written markdown only when the file was converted by THIS version.
+#
+# BUMP THIS whenever a change alters conversion OUTPUT - a new extractor, a
+# different chunk of MarkItDown config, a fix like strip_nul below. Do NOT bump
+# it for changes that cannot alter the bytes (comments, error wording, logging):
+# every bump makes the whole corpus convert once more, which for images and
+# audio costs real money on the user's own keys.
+#
+# 1: first versioned pipeline. Includes strip_nul, so any markdown written
+#    before this existed is correctly treated as stale - it may still carry the
+#    0x00 bytes that failed the insert.
+CONVERSION_VERSION = 1
+
+
 def strip_nul(text: str) -> str:
     """Remove NUL (0x00) bytes, which PostgreSQL text columns cannot store.
 

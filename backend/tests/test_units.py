@@ -288,14 +288,17 @@ class TestMatryoshkaDimensions:
             == "truncate"
         )
 
-    def test_change_plan_grow_requires_reembed(self):
-        # the truncated tail was never stored - growing needs a full re-embed
+    def test_change_plan_grow_is_restorable(self):
+        # INVERTED by migration 0024. This used to assert "reembed", on the
+        # premise that "the truncated tail was never stored". That premise was
+        # the bug: the shrink now banks the wide original in embedding_full, so
+        # growing back is a pure UPDATE and costs nothing.
         assert (
             embedding_change_plan(
                 "openai", "text-embedding-3-large", 1024,
                 "openai", "text-embedding-3-large", 3072,
             )
-            == "reembed"
+            == "restore"
         )
 
     def test_change_plan_model_switch_requires_reembed(self):
@@ -499,36 +502,75 @@ class TestVectorMigration:
     the new model on a model switch."""
 
     class _RecordingDB:
-        def __init__(self, fail: bool = False):
+        def __init__(self, fail: bool = False, archive_supported: bool = True):
             self.fail = fail
+            self.archive_supported = archive_supported
             self.statements: list[str] = []
             self.rollbacks = 0
 
         def execute(self, statement, params=None):
+            text = str(statement)
+            # _archive_supported probes information_schema; answer that without
+            # recording it as one of the migration statements.
+            if "information_schema" in text:
+                return self._Probe(self.archive_supported)
             if self.fail:
                 raise RuntimeError("no subvector on this postgres")
-            self.statements.append(str(statement))
+            self.statements.append(text)
+            return self._Probe(False)
+
+        class _Probe:
+            def __init__(self, found: bool):
+                self._found = found
+
+            def first(self):
+                return (1,) if self._found else None
+
+            def all(self):
+                return []
 
         def rollback(self):
             self.rollbacks += 1
 
-    def test_truncate_updates_chunks_and_memories(self):
-        from app.routers.files import _truncate_vectors_in_place
+    def test_shrink_updates_chunks_and_memories(self):
+        from app.routers.files import _shrink_vectors_in_place
 
-        db = self._RecordingDB()
-        assert _truncate_vectors_in_place(db, Project(id=uuid.uuid4()), 1024) is True
+        db = self._RecordingDB(archive_supported=True)
+        project = Project(id=uuid.uuid4(), embedding_dimensions=3072)
+        assert _shrink_vectors_in_place(db, project, 1024) is True
         joined = "\n".join(db.statements).lower()
         assert "update chunks" in joined
         assert "update memories" in joined
         # both tables go through the same MRL prefix + re-normalize
         assert joined.count("subvector") == 2
         assert joined.count("l2_normalize") == 2
+        # and both bank the wide original in the SAME statement
+        assert joined.count("embedding_full =") == 2
+        # the shrink remembers the width to restore back to
+        assert project.embedding_native_dimensions == 3072
 
-    def test_truncate_falls_back_cleanly_on_db_error(self):
-        from app.routers.files import _truncate_vectors_in_place
+    def test_shrink_without_migration_0024_stays_free(self):
+        """Deploy-order safety: referencing the archive columns before the SQL
+        lands would raise, roll back and demote to a PAID re-embed. Shrinking
+        destructively is exactly today's behaviour; charging for it is not."""
+        from app.routers.files import _shrink_vectors_in_place
+
+        db = self._RecordingDB(archive_supported=False)
+        project = Project(id=uuid.uuid4(), embedding_dimensions=3072)
+        assert _shrink_vectors_in_place(db, project, 1024) is True
+        joined = "\n".join(db.statements).lower()
+        assert "embedding_full" not in joined
+        assert joined.count("l2_normalize") == 2
+        # nothing was archived, so nothing claims to be restorable
+        assert project.embedding_native_dimensions is None
+
+    def test_shrink_falls_back_cleanly_on_db_error(self):
+        from app.routers.files import _shrink_vectors_in_place
 
         db = self._RecordingDB(fail=True)
-        assert _truncate_vectors_in_place(db, Project(id=uuid.uuid4()), 512) is False
+        assert (
+            _shrink_vectors_in_place(db, Project(id=uuid.uuid4()), 512) is False
+        )
         assert db.rollbacks == 1  # transaction cleaned up for the full-reembed path
 
     def test_reembed_memories_uses_the_projects_current_model(self, monkeypatch):
@@ -1864,4 +1906,380 @@ class TestTruncationBumpsContentVersion:
         assert offenders == [], (
             "a truncate path rewrites every vector without bumping "
             f"content_version, leaving stale caches: {offenders}"
+        )
+
+
+class TestConvertedMarkdownReuse:
+    """A re-embed must not pay for conversion twice.
+
+    Re-embedding (model switch, or growing a Matryoshka dimension) deletes the
+    chunks and re-ingests. That used to re-download the ORIGINAL file and run
+    conversion again - for images that means re-running the vision model, for
+    audio re-running speech-to-text, both on the user's own keys. The markdown
+    was already in storage from the first pass.
+
+    Everything here is about the guard rails, because the failure mode of a
+    cache is serving something stale, and conversion output is only
+    deterministic for a FIXED pipeline.
+    """
+
+    class _File:
+        def __init__(self, **kw):
+            self.id = uuid.uuid4()
+            self.markdown_storage_path = kw.get("path", "p/doc.md")
+            self.conversion_version = kw.get("version")
+
+    def _reuse(self, monkeypatch, file, blob=b"# hello", raises=None):
+        from app.services import ingestion
+
+        def fake_download(path):
+            if raises:
+                raise raises
+            return blob
+
+        monkeypatch.setattr(ingestion.storage, "download", fake_download)
+        return ingestion._reuse_converted_markdown(file)
+
+    def test_current_version_is_reused(self, monkeypatch):
+        from app.services.conversion import CONVERSION_VERSION
+
+        file = self._File(version=CONVERSION_VERSION)
+        assert self._reuse(monkeypatch, file) == "# hello"
+
+    def test_markdown_from_an_older_pipeline_is_not_reused(self, monkeypatch):
+        """The whole reason for the version. Blobs written before a conversion
+        FIX still contain whatever it fixed - reusing them would silently undo
+        it (e.g. the 0x00 bytes strip_nul now removes)."""
+        from app.services.conversion import CONVERSION_VERSION
+
+        file = self._File(version=CONVERSION_VERSION - 1)
+        assert self._reuse(monkeypatch, file) is None
+
+    def test_unstamped_rows_convert_again(self, monkeypatch):
+        """Every row predating migration 0023 reads NULL, so the whole existing
+        corpus re-converts once and is re-stamped - no bulk backfill."""
+        assert self._reuse(monkeypatch, self._File(version=None)) is None
+
+    def test_missing_markdown_path_converts(self, monkeypatch):
+        assert self._reuse(monkeypatch, self._File(path=None)) is None
+
+    def test_unreadable_blob_falls_back_instead_of_failing(self, monkeypatch):
+        """This is an optimisation; a storage hiccup must cost time, not the
+        whole ingest."""
+        from app.services.conversion import CONVERSION_VERSION
+
+        file = self._File(version=CONVERSION_VERSION)
+        assert self._reuse(monkeypatch, file, raises=RuntimeError("gone")) is None
+
+    def test_empty_blob_is_treated_as_absent(self, monkeypatch):
+        """Returning "" would mark the file indexed with zero chunks - worse
+        than converting again, because it looks like success."""
+        from app.services.conversion import CONVERSION_VERSION
+
+        file = self._File(version=CONVERSION_VERSION)
+        assert self._reuse(monkeypatch, file, blob=b"   \n  ") is None
+
+    def test_version_is_stamped_only_after_the_upload(self):
+        """A crash between writing the blob and stamping the row must leave the
+        row UNSTAMPED - claiming markdown that was never stored is the one
+        failure this design cannot recover from on its own."""
+        import inspect
+
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion.ingest_file)
+        assert src.index("storage.upload_file") < src.index(
+            "file.conversion_version = CONVERSION_VERSION"
+        )
+
+
+class TestReversibleMatryoshkaShrink:
+    """Shrinking must be reversible, and reversing must not corrupt.
+
+    Growing back used to re-embed because the shrink OVERWROTE the row - the
+    wide tail was deleted, not hidden. Migration 0024 banks it in
+    embedding_full instead. These tests pin the invariants three adversarial
+    reviews said were the difference between reversible and corrupting.
+    """
+
+    def test_grow_is_restore_not_reembed(self):
+        from app.providers.registry import embedding_change_plan
+
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-large", 1024,
+                "openai", "text-embedding-3-large", 3072,
+            )
+            == "restore"
+        )
+
+    def test_shrink_is_still_truncate(self):
+        from app.providers.registry import embedding_change_plan
+
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-large", 3072,
+                "openai", "text-embedding-3-large", 1024,
+            )
+            == "truncate"
+        )
+
+    def test_a_model_switch_is_never_restorable(self):
+        """An archive from another model is a vector from an incompatible
+        space. Restoring it would produce embeddings that are silently
+        meaningless rather than merely missing."""
+        from app.providers.registry import embedding_change_plan
+
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-large", 1024,
+                "gemini", "gemini-embedding-001", 3072,
+            )
+            == "reembed"
+        )
+
+    def test_a_size_the_model_does_not_offer_is_reembed(self):
+        from app.providers.registry import embedding_change_plan
+
+        assert (
+            embedding_change_plan(
+                "openai", "text-embedding-3-large", 1024,
+                "openai", "text-embedding-3-large", 2048,
+            )
+            == "reembed"
+        )
+
+    def test_model_switch_clears_the_memory_ARCHIVE_too(self):
+        """THE load-bearing invariant. If a model switch nulls memories.embedding
+        but leaves embedding_full, a later grow restores an old-model vector
+        into the new model's space - corruption that no error reports."""
+        from app.routers.files import _CLEAR_MEMORY_EMBEDDINGS_SQL
+
+        sql = str(_CLEAR_MEMORY_EMBEDDINGS_SQL).lower()
+        assert "embedding = null" in sql
+        assert "embedding_full = null" in sql
+
+    def test_shrink_never_narrows_an_existing_archive(self):
+        """3072 -> 1536 -> 768 must keep the 3072 archive. Overwriting it with
+        the 1536 intermediate would make the trip irreversible one step after
+        the user was told it was reversible."""
+        from app.routers.files import _SHRINK_CHUNKS_SQL, _SHRINK_MEMORIES_SQL
+
+        for stmt in (_SHRINK_CHUNKS_SQL, _SHRINK_MEMORIES_SQL):
+            sql = " ".join(str(stmt).split()).lower()
+            assert "case" in sql and "embedding_full is null" in sql
+            assert "vector_dims(embedding_full) < vector_dims(embedding)" in sql
+
+    def test_shrink_archives_and_truncates_in_one_statement(self):
+        """Two statements would leave an instant where the tail exists nowhere.
+        SET expressions read the pre-update row, so one statement is atomic."""
+        from app.routers.files import _SHRINK_CHUNKS_SQL
+
+        sql = " ".join(str(_SHRINK_CHUNKS_SQL).split()).lower()
+        assert sql.count("update") == 1
+        assert "embedding_full =" in sql and "embedding = l2_normalize" in sql
+
+    def test_shrink_is_idempotent(self):
+        """A retry must not re-archive a narrower vector over a wider one."""
+        from app.routers.files import _SHRINK_CHUNKS_SQL
+
+        sql = " ".join(str(_SHRINK_CHUNKS_SQL).split()).lower()
+        assert "vector_dims(embedding) > :dims" in sql
+
+    def test_restore_clears_the_archive_only_when_fully_grown(self):
+        """Growing to an intermediate width must KEEP the wider archive, or the
+        next grow silently becomes a paid re-embed."""
+        from app.routers.files import _RESTORE_CHUNKS_SQL
+
+        sql = " ".join(str(_RESTORE_CHUNKS_SQL).split()).lower()
+        assert "vector_dims(embedding_full) <= :dims" in sql
+        assert "then null" in sql
+
+    def test_unmigrated_database_keeps_the_free_shrink(self):
+        """Deploy-order safety. Referencing the archive columns before 0024 runs
+        would raise, roll back, and demote to 'reembed' - turning today's FREE
+        shrink into a PAID one purely because code shipped before SQL."""
+        import inspect
+
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router._shrink_vectors_in_place)
+        assert "_archive_supported" in src
+        assert "_LEGACY_TRUNCATE_CHUNKS_SQL" in src
+
+    def test_archive_support_probe_is_not_memoised(self):
+        """Migrations land while old instances serve. A cached 'absent' would
+        keep shrinking destructively for the whole process lifetime."""
+        import inspect
+
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router._archive_supported)
+        assert "lru_cache" not in src and "cache" not in src.split('"""')[2]
+
+    def test_restore_path_only_fills_missing_memories(self):
+        """A partial restore has just put correct vectors back; re-embedding
+        everything would pay to overwrite exactly what it preserved."""
+        import inspect
+
+        from app.services.memory import reembed_project_memories
+
+        sig = inspect.signature(reembed_project_memories)
+        assert "only_missing" in sig.parameters
+        assert sig.parameters["only_missing"].default is False
+
+    def test_archive_columns_are_deferred(self):
+        """Undeferred, every full ORM load of a Chunk or Memory would ship a
+        second whole vector over the wire."""
+        from sqlalchemy import inspect as sa_inspect
+
+        from app.models import Chunk, Memory
+
+        for model in (Chunk, Memory):
+            attr = sa_inspect(model).attrs["embedding_full"]
+            assert attr.deferred, f"{model.__name__}.embedding_full must be deferred"
+
+    def test_ingest_prefix_matches_the_sql_shrink(self):
+        """A chunk ingested while shrunk must be comparable with one shrunk in
+        place - same prefix, same re-normalisation."""
+        import math
+
+        from app.services.ingestion import _prefix_normalize
+
+        out = _prefix_normalize([3.0, 4.0, 99.0, 99.0], 2)
+        assert len(out) == 2
+        assert math.isclose(math.sqrt(sum(v * v for v in out)), 1.0, rel_tol=1e-9)
+        assert math.isclose(out[0], 0.6, rel_tol=1e-9)
+
+    def test_prefix_normalize_survives_a_zero_vector(self):
+        from app.services.ingestion import _prefix_normalize
+
+        assert _prefix_normalize([0.0, 0.0, 1.0], 2) == [0.0, 0.0]
+
+
+class TestPartialRestoreScope:
+    """Growing back must re-embed ONLY the files the archive could not cover.
+
+    The hard case: a file uploaded while the project was shrunk to 1536 never
+    had 3072 numbers, so growing back can restore every other file but not that
+    one. Two wrong answers are available and both are expensive - re-embed the
+    whole corpus (hands back the bill the archive exists to avoid), or leave the
+    odd file at the old width (retrieval compares with <=>, which RAISES on
+    mismatched widths on the exact path and silently drops the row on the ANN
+    path - a project that is either broken or quietly lying).
+    """
+
+    class _F:
+        def __init__(self):
+            self.id = uuid.uuid4()
+
+    def test_only_the_gap_files_are_requeued(self):
+        from app.routers.files import _files_to_requeue
+
+        keep_a, gap, keep_b = self._F(), self._F(), self._F()
+        files = [keep_a, gap, keep_b]
+        assert _files_to_requeue(files, [gap.id]) == [gap]
+
+    def test_an_empty_gap_requeues_everything(self):
+        """No gap means this is not a partial restore - a model switch or a
+        chunking change - and those must still re-ingest the whole project."""
+        from app.routers.files import _files_to_requeue
+
+        files = [self._F(), self._F()]
+        assert _files_to_requeue(files, []) == files
+
+    def test_a_gap_naming_every_file_requeues_every_file(self):
+        from app.routers.files import _files_to_requeue
+
+        files = [self._F(), self._F()]
+        assert _files_to_requeue(files, [f.id for f in files]) == files
+
+    def test_a_stale_gap_id_cannot_resurrect_a_deleted_file(self):
+        """Backstop half of the guarantee: even handed a dead id, the requeue
+        list only ever contains files that still exist."""
+        from app.routers.files import _files_to_requeue
+
+        alive = self._F()
+        assert _files_to_requeue([alive], [uuid.uuid4()]) == []
+
+    def test_the_gap_query_cannot_return_a_deleted_file(self):
+        """Primary half: the JOIN means a dead id never leaves the database, so
+        the guarantee does not depend on the caller remembering to intersect.
+        The gap query and the later file SELECT are two statements under READ
+        COMMITTED - a delete landing between them would otherwise leave a
+        live-looking id in a list built from the earlier snapshot."""
+        from app.routers.files import _UNRESTORABLE_CHUNK_FILES_SQL
+
+        sql = " ".join(str(_UNRESTORABLE_CHUNK_FILES_SQL).split()).lower()
+        assert "join files f on f.id = c.file_id" in sql
+
+    def test_the_gap_query_finds_rows_the_archive_cannot_reach(self):
+        from app.routers.files import _UNRESTORABLE_CHUNK_FILES_SQL
+
+        sql = " ".join(str(_UNRESTORABLE_CHUNK_FILES_SQL).split()).lower()
+        assert "select distinct c.file_id" in sql
+        # wrong width now...
+        assert "vector_dims(c.embedding) <> :dims" in sql
+        # ...AND no archive able to supply it
+        assert "c.embedding_full is null" in sql
+        assert "vector_dims(c.embedding_full) < :dims" in sql
+
+    def test_gap_files_have_their_chunks_deleted_not_left_behind(self):
+        """Leaving them is the silent-corruption option: mismatched widths
+        either raise on <=> or vanish from ANN results."""
+        import inspect
+
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.reindex_project)
+        assert "Chunk.file_id.in_(restore_gap)" in src
+
+
+class TestConversionNoteSurvivesReindex:
+    """A re-index must not silently drop the conversion caveat.
+
+    conversion_note describes how the MARKDOWN was produced ("audio used the
+    free transcription endpoint - none of your keys support speech-to-text").
+    The requeue loops used to clear it, which was harmless while every re-index
+    re-converted and regenerated it. Once re-index started REUSING the stored
+    markdown, clearing it deleted a caveat that was still true, and nothing
+    regenerated it - the file came back looking like a clean transcription.
+    """
+
+    def test_reindex_requeue_preserves_the_note(self):
+        import inspect
+
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.reindex_project)
+        assert "conversion_note = None" not in src
+
+    def test_upload_requeue_preserves_the_note(self):
+        import inspect
+
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.upload_files)
+        assert "conversion_note = None" not in src
+
+    def test_ingest_still_rewrites_it_either_way(self):
+        """Preserving is only safe because ingest_file sets it unconditionally:
+        carried forward on the reuse path, replaced on a real conversion."""
+        import inspect
+
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion.ingest_file)
+        assert "file.conversion_note = converted.note" in src
+        assert "note=file.conversion_note" in src
+
+    def test_a_failed_file_still_drops_its_note(self):
+        """The exception: a failed ingest's caveat describes work that did not
+        finish, so it would only mislead."""
+        import inspect
+
+        from app.services import ingestion
+
+        assert "conversion_note = None" in inspect.getsource(
+            ingestion.mark_file_failed
         )

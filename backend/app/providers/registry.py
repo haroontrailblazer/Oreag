@@ -298,21 +298,29 @@ def embedding_change_plan(
     """How to migrate a project's vectors to a new embedding config.
 
     - "keep":     nothing about the vector space changed.
-    - "truncate": same MRL model at a smaller size - existing vectors can be
-                  cut to the prefix and re-normalized in place, no API calls.
-    - "reembed":  a different model (incompatible space) or a larger size (the
-                  extra numbers were never stored) - everything must be
-                  re-embedded from the text.
+    - "truncate": same MRL model at a smaller listed size - vectors are cut to
+                  the prefix and re-normalized in place, banking the wider
+                  original first (migration 0024). No API calls.
+    - "restore":  same MRL model at a LARGER listed size - the wider numbers may
+                  already be archived, in which case growing is a pure UPDATE.
+                  No API calls IF the archive covers it.
+    - "reembed":  a different model (an incompatible vector space), or a size
+                  this model does not offer.
+
+    PURE FUNCTION - deliberately no database access. It cannot know whether an
+    archive actually exists, so "restore" means "growing back is worth
+    attempting", not "guaranteed free". routers/files.py resolves that against
+    the real rows and falls back to "reembed" when the archive does not reach
+    far enough. Keeping the decision split this way is what lets the plan stay
+    testable without a database.
     """
     if (provider, model) != (current_provider, current_model):
         return "reembed"
     if dimensions == current_dimensions:
         return "keep"
-    if dimensions < current_dimensions and dimensions in embedding_dimension_options(
-        provider, model
-    ):
-        return "truncate"
-    return "reembed"
+    if dimensions not in embedding_dimension_options(provider, model):
+        return "reembed"
+    return "truncate" if dimensions < current_dimensions else "restore"
 
 
 # LLM ids the vendor has retired, is about to retire, or now silently redirects.

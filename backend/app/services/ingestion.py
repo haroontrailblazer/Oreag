@@ -1,4 +1,5 @@
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 
@@ -16,7 +17,9 @@ from . import storage
 from .content_version import bump_content_version
 from .conversion import (
     AUDIO_EXTENSIONS,
+    CONVERSION_VERSION,
     IMAGE_CAPTION_EXTENSIONS,
+    ConvertedDocument,
     convert_to_markdown,
     markdown_path_for,
     source_extension,
@@ -183,6 +186,54 @@ def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
         db.rollback()
 
 
+def _prefix_normalize(vector: list[float], dims: int) -> list[float]:
+    """The Matryoshka prefix of a vector, re-normalised to unit length.
+
+    Deliberately the same arithmetic as the SQL shrink
+    (l2_normalize(subvector(v, 1, dims))), so a chunk ingested while a project
+    is shrunk is byte-comparable with one that was shrunk in place. Cosine
+    search assumes unit vectors; a raw prefix is not one.
+    """
+    prefix = vector[:dims]
+    norm = math.sqrt(sum(v * v for v in prefix))
+    if norm == 0:
+        return prefix
+    return [v / norm for v in prefix]
+
+
+def _reuse_converted_markdown(file: File) -> str | None:
+    """Previously converted markdown for this file, or None to convert again.
+
+    Returns None - meaning "just convert it" - for every uncertain case:
+      * no markdown was ever stored,
+      * it was written by a DIFFERENT conversion pipeline (see
+        CONVERSION_VERSION), so it may carry a bug that has since been fixed,
+      * the column does not exist yet because migration 0023 has not run,
+      * the blob is missing, unreadable, or decodes to nothing.
+
+    Fails open on purpose. This is an optimisation; the correct behaviour when
+    anything is unclear is the slower path that definitely works, never a
+    failed ingest. An empty result is treated as absent rather than as "this
+    file has no text", which would wrongly mark it indexed with zero chunks.
+    """
+    if not file.markdown_storage_path:
+        return None
+    try:
+        if file.conversion_version != CONVERSION_VERSION:
+            return None
+    except Exception:  # column missing - migration 0023 not applied
+        return None
+    try:
+        markdown = storage.download(file.markdown_storage_path).decode("utf-8")
+    except Exception:
+        logger.info(
+            "Stored markdown for file %s is unreadable - converting again",
+            file.id,
+        )
+        return None
+    return markdown.strip() or None
+
+
 def ingest_file(file_id: uuid.UUID) -> None:
     """Background task: parse -> chunk -> embed -> store, with status updates.
 
@@ -199,29 +250,54 @@ def ingest_file(file_id: uuid.UUID) -> None:
         project.status = "indexing"
         db.commit()
 
-        source_bytes = storage.download(file.storage_path)
+        # Reuse the markdown from a previous pass when this file has already
+        # been converted by THIS pipeline. A re-embed (model switch, or growing
+        # a Matryoshka dimension) has to recompute vectors, but the conversion
+        # that produced the text is unchanged - and for images and audio that
+        # step costs real money on the user's own keys, so repeating it is a
+        # second bill for the same work.
+        #
+        # Only when the version matches: markdown written by an older pipeline
+        # may carry a bug that has since been fixed (the 0x00 bytes strip_nul
+        # now removes, for one), and silently re-serving it would undo the fix.
+        cached_markdown = _reuse_converted_markdown(file)
+        if cached_markdown is not None:
+            converted = ConvertedDocument(
+                markdown=cached_markdown,
+                # Both already live on the row from the original conversion;
+                # re-deriving them is exactly the work being skipped.
+                page_count=file.page_count,
+                note=file.conversion_note,
+            )
+            logger.info("Reusing converted markdown for file %s", file_id)
+            source_bytes = None
+        else:
+            source_bytes = storage.download(file.storage_path)
         # Rich-media conversion runs on the uploader's own keys (BYOK):
         #   images -> AI caption via the project's answer model (OpenAI/Gemini
         #            speak the OpenAI format MarkItDown's captioner expects);
         #   audio  -> speech-to-text through whichever STT-capable provider
         #            keys the uploader holds (own provider first); the free
         #            Google endpoint runs only when the whole chain fails.
-        extension = source_extension(file.filename)
-        llm_client = llm_model = None
-        transcribers: list = []
-        if extension in IMAGE_CAPTION_EXTENSIONS:
-            llm_client, llm_model = vision_llm_for(
-                project, resolver.resolve_llm_key(db, project)
+        # This whole block is what the markdown reuse above skips - it is the
+        # part that spends money.
+        if source_bytes is not None:
+            extension = source_extension(file.filename)
+            llm_client = llm_model = None
+            transcribers: list = []
+            if extension in IMAGE_CAPTION_EXTENSIONS:
+                llm_client, llm_model = vision_llm_for(
+                    project, resolver.resolve_llm_key(db, project)
+                )
+            elif extension in AUDIO_EXTENSIONS:
+                transcribers = audio_transcribers_for(db, project)
+            converted = convert_to_markdown(
+                source_bytes,
+                file.filename,
+                llm_client=llm_client,
+                llm_model=llm_model,
+                transcribers=transcribers,
             )
-        elif extension in AUDIO_EXTENSIONS:
-            transcribers = audio_transcribers_for(db, project)
-        converted = convert_to_markdown(
-            source_bytes,
-            file.filename,
-            llm_client=llm_client,
-            llm_model=llm_model,
-            transcribers=transcribers,
-        )
 
         # The user may have deleted the file while we were converting - bail
         # before uploading markdown / paying for embeddings on a ghost.
@@ -235,14 +311,23 @@ def ingest_file(file_id: uuid.UUID) -> None:
         # and toasted by the Files tab when indexing completes.
         file.conversion_note = converted.note
 
-        markdown_path = file.markdown_storage_path or markdown_path_for(file.storage_path)
-        storage.upload_file(
-            markdown_path,
-            converted.markdown.encode("utf-8"),
-            "text/markdown; charset=utf-8",
-            upsert=True,
-        )
-        file.markdown_storage_path = markdown_path
+        # Nothing to write back when the markdown came FROM storage - the blob
+        # is already there and byte-identical, so re-uploading it is the other
+        # half of the same waste.
+        if cached_markdown is None:
+            markdown_path = (
+                file.markdown_storage_path or markdown_path_for(file.storage_path)
+            )
+            storage.upload_file(
+                markdown_path,
+                converted.markdown.encode("utf-8"),
+                "text/markdown; charset=utf-8",
+                upsert=True,
+            )
+            file.markdown_storage_path = markdown_path
+            # Stamp AFTER a successful write, so a crash between the two never
+            # leaves a row claiming markdown that was never stored.
+            file.conversion_version = CONVERSION_VERSION
 
         # per-file overrides fall back to the project defaults
         chunk_size = file.chunk_size or project.chunk_size
@@ -259,11 +344,25 @@ def ingest_file(file_id: uuid.UUID) -> None:
             raise ValueError("Document produced no chunks")
 
         api_key = resolver.resolve_embedding_key(db, project)
+        # While a project is SHRUNK, embed at the width its vectors were
+        # originally computed at and bank that alongside the active prefix.
+        #
+        # This is what removes the mixed-state problem rather than handling it:
+        # without it, a file uploaded at 1536 has no 3072 numbers, so growing
+        # back would leave some chunks restorable and some not - and retrieval
+        # compares with <=>, which RAISES on a width mismatch, so a half-restored
+        # project breaks search outright rather than degrading.
+        #
+        # It is free. Embedding APIs bill per TOKEN, not per dimension, so
+        # asking for 3072 costs exactly what asking for 1536 costs.
+        active_dims = project.embedding_dimensions
+        native_dims = project.embedding_native_dimensions or active_dims
+        archiving = native_dims > active_dims
         embedder = get_embedder(
             project.embedding_provider,
             project.embedding_model,
             api_key,
-            dimensions=project.embedding_dimensions,
+            dimensions=native_dims,
         )
 
         # idempotent re-runs: drop anything from a previous attempt
@@ -283,7 +382,15 @@ def ingest_file(file_id: uuid.UUID) -> None:
                         "chunk_index": idx,
                         "page_number": page_number,
                         "content": content,
-                        "embedding": vector,
+                        # Active width in `embedding` - it is what search reads,
+                        # and what the partial HNSW index is built on. The wider
+                        # original goes to the archive, never to `embedding`.
+                        "embedding": (
+                            _prefix_normalize(vector, active_dims)
+                            if archiving
+                            else vector
+                        ),
+                        "embedding_full": vector if archiving else None,
                     }
                     for (idx, page_number, content), vector in zip(batch, vectors)
                 ],

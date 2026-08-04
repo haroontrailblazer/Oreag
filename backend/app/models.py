@@ -5,7 +5,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import ARRAY, BigInteger, Boolean, DateTime, ForeignKey, Integer, Text, func
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, deferred, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -24,6 +24,13 @@ class Project(Base):
     embedding_provider: Mapped[str] = mapped_column(Text, default="openai")
     embedding_model: Mapped[str] = mapped_column(Text, default="text-embedding-3-small")
     embedding_dimensions: Mapped[int] = mapped_column(Integer, default=1536)
+    # Width the vectors were ORIGINALLY computed at (migration 0024). NULL or
+    # == embedding_dimensions means never shrunk, so nothing is archived.
+    # Greater means shrunk: ingestion embeds at this width and banks it, and a
+    # grow back up to it restores from the archive instead of re-embedding.
+    embedding_native_dimensions: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     llm_provider: Mapped[str] = mapped_column(Text, default="openai")
     llm_model: Mapped[str] = mapped_column(Text, default="gpt-4o-mini")
     top_k: Mapped[int] = mapped_column(Integer, default=5)
@@ -69,6 +76,11 @@ class File(Base):
     # Non-fatal: the file indexed, but the uploader should know how (e.g. audio
     # fell back to the free transcription endpoint - no capable provider key).
     conversion_note: Mapped[str | None] = mapped_column(Text)
+    # Which conversion pipeline wrote markdown_storage_path (migration 0023).
+    # A re-index reuses that markdown only when this matches the running
+    # CONVERSION_VERSION, so a pipeline fix invalidates older blobs instead of
+    # silently resurrecting whatever it fixed.
+    conversion_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Durable-queue bookkeeping: workers claim pending rows, take a lease and
     # bump attempts; an expired lease means the worker died mid-ingest and the
     # file is re-queued (up to the retry cap) instead of bulk-failed.
@@ -119,6 +131,10 @@ class Chunk(Base):
     page_number: Mapped[int | None] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(NulSafeText)
     embedding = mapped_column(Vector)  # dimension varies per project
+    # Full-fidelity original, banked by a Matryoshka shrink (migration 0024).
+    # DEFERRED: it is never read by search, and loading a full ORM Chunk would
+    # otherwise ship a second whole vector over the wire on every query.
+    embedding_full = deferred(mapped_column(Vector, nullable=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -186,6 +202,9 @@ class Memory(Base):
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(Text, default="mcp")
     embedding = mapped_column(Vector)  # per-project dimension; nullable
+    # Same contract as Chunk.embedding_full. Deferred for the same reason:
+    # services/memory.py and memory_graph.py load whole Memory entities.
+    embedding_full = deferred(mapped_column(Vector, nullable=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

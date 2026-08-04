@@ -35,24 +35,38 @@ def _embed(db: Session, project: Project, content: str) -> list[float] | None:
         return None
 
 
-def reembed_project_memories(project_id: uuid.UUID) -> None:
-    """Background task: re-embed every memory with the project's CURRENT model.
+def reembed_project_memories(
+    project_id: uuid.UUID, only_missing: bool = False
+) -> None:
+    """Background task: re-embed memories with the project's CURRENT model.
 
     Runs after an embedding model switch - old-model memory vectors live in an
     incompatible space (the caller nulls them out first so search never mixes
     spaces). Best-effort per memory: a failure leaves that one unembedded
     rather than aborting the rest. Owns its DB session (threadpool task).
+
+    only_missing=True restricts it to rows with NO embedding. Required by the
+    archive-restore path: that path has just put correct vectors back from the
+    archive, and re-embedding everything would spend money to overwrite exactly
+    the vectors it was called to preserve. The default stays False because a
+    model switch genuinely does need to replace them all.
     """
     db = SessionLocal()
     try:
         project = db.get(Project, project_id)
         if project is None:
             return
-        memories = db.scalars(
-            select(Memory).where(Memory.project_id == project_id)
-        ).all()
+        query = select(Memory).where(Memory.project_id == project_id)
+        if only_missing:
+            query = query.where(Memory.embedding.is_(None))
+        memories = db.scalars(query).all()
         for memory in memories:
-            memory.embedding = _embed(db, project, memory.content)
+            vector = _embed(db, project, memory.content)
+            # Never write a None over an existing vector: _embed returns None
+            # when no key is available, and on the restore path that would
+            # erase a memory that had just been correctly restored.
+            if vector is not None or memory.embedding is None:
+                memory.embedding = vector
         bump_content_version(db, project_id)
         db.commit()
         logger.info(
