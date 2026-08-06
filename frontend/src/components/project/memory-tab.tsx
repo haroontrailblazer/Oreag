@@ -55,7 +55,7 @@ const BEST_PRACTICE_TIPS = [
     visual: <MemoryViz />,
     title: "One fact per memory",
     detail:
-      "Short, self-contained memories retrieve better than long notes - they embed into a single clean vector, like a good chunk.",
+      "One idea per memory still retrieves best. Long ones are now split into pieces with their own vectors, so they stay findable - but a focused memory needs no splitting at all.",
   },
   {
     visual: <TagViz />,
@@ -67,7 +67,7 @@ const BEST_PRACTICE_TIPS = [
     visual: <PinViz />,
     title: "Pin what must persist",
     detail:
-      "Pinned memories are protected from bulk cleanup - use pins for decisions and constraints agents must never lose.",
+      "Pinned memories come first in the recent list - what an agent sees at the start of a session before it searches. Pinning does not boost search ranking.",
   },
   {
     visual: <RetrievalViz />,
@@ -213,16 +213,13 @@ function MemoryRow({
 
           {/* Metadata BELOW the content, not above it. The text is what the
               user is looking for; provenance is what they check afterwards. */}
+          {/* No pin indicator here. The toggle on the right already shows the
+              state - filled and amber when pinned - so a second amber pin on
+              the same row was the SAME fact drawn twice, and the read-only one
+              invited clicks that did nothing. State and its control belong in
+              one place. Screen readers get it from aria-pressed on the button,
+              which is why nothing was lost with the sr-only label. */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {memory.pinned && (
-              <span
-                className="inline-flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400"
-                title="Pinned - sorted to the top of this list"
-              >
-                <PushPin weight="fill" className="size-3.5" />
-                <span className="sr-only">Pinned</span>
-              </span>
-            )}
             <span
               className="inline-flex items-center gap-1"
               title={`Created ${new Date(memory.created_at).toLocaleString()}`}

@@ -7,7 +7,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Chunk, File, Memory, Project
+from ..models import Chunk, File, Memory, MemoryChunk, Project
 from ..schemas import MemoryGraphEdge, MemoryGraphNode, MemoryGraphResponse, ProjectInfo
 from . import query_cache, storage
 
@@ -285,8 +285,25 @@ def _memory_related_edges(
     return edges
 
 
+# Bump when the SHAPE of the built graph changes (new node/edge types, changed
+# ids or metadata) - not when content changes, which content_version already
+# covers.
+#
+# Needed because the cached value stays SCHEMA-VALID across such a change: an
+# entry cached before memory pieces existed still parses cleanly as a
+# MemoryGraphResponse, just without them, so the model_validate_json drift
+# fallback below never fires and the stale graph is served as if correct. Redis
+# also survives the deploy that introduced the change, so this does not
+# self-heal on restart.
+#
+# 2 = memory pieces (migration 0025) render as their own nodes.
+GRAPH_SCHEMA_VERSION = 2
+
+
 def build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
-    cache_key = f"graph:{project.id}:v{project.content_version}"
+    cache_key = (
+        f"graph:{project.id}:s{GRAPH_SCHEMA_VERSION}:v{project.content_version}"
+    )
     cached = _graph_cache.get(cache_key)
     if isinstance(cached, str):
         try:
@@ -444,6 +461,33 @@ def _build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
     memories = db.scalars(
         select(Memory).where(Memory.project_id == project.id).order_by(Memory.created_at)
     ).all()
+
+    # The split pieces of LONG memories (migration 0025), mirroring how a file's
+    # chunks hang off the file. Without these the graph showed every memory as a
+    # single node whatever its length, which is exactly the picture the chunking
+    # was built to correct - a long memory looked identical to a one-line one.
+    #
+    # Columns are listed explicitly, never `select(MemoryChunk)`: the row carries
+    # `embedding` AND `embedding_full`, tens of KB apiece and used by neither the
+    # nodes nor the edges. Shipping them is the same N+1-adjacent dead weight the
+    # file-chunk query above was rewritten to avoid.
+    #
+    # Only long memories appear here. A short memory has NO pieces by design -
+    # it is already one coherent vector - so it stays a bare node, and the
+    # difference on screen is real information rather than a gap.
+    memory_pieces: dict[int, list] = defaultdict(list)
+    for row in db.execute(
+        select(
+            MemoryChunk.id,
+            MemoryChunk.memory_id,
+            MemoryChunk.chunk_index,
+            MemoryChunk.content,
+        )
+        .where(MemoryChunk.project_id == project.id)
+        .order_by(MemoryChunk.memory_id, MemoryChunk.chunk_index)
+    ).all():
+        memory_pieces[row.memory_id].append(row)
+
     for mem in memories:
         label = " ".join((mem.content or "").split())
         nodes.append(
@@ -465,6 +509,57 @@ def _build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
                 source=f"project:{project.id}", target=f"memory:{mem.id}", type="contains"
             )
         )
+
+        # Same shape as a file's chunks: contains down, derived_from back up,
+        # and `next` threading consecutive pieces in reading order.
+        #
+        # The id prefix is "memory_chunk:", NOT "chunk:". Both tables use their
+        # own bigserial, so memory_chunks.id 12 and chunks.id 12 both exist -
+        # sharing the prefix would silently MERGE two unrelated nodes into one
+        # and hang a memory's piece off a document.
+        previous_piece_id: str | None = None
+        for piece in memory_pieces.get(mem.id, []):
+            piece_node_id = f"memory_chunk:{piece.id}"
+            piece_label = " ".join((piece.content or "").split())
+            nodes.append(
+                MemoryGraphNode(
+                    id=piece_node_id,
+                    type="memory_chunk",
+                    label=(
+                        piece_label[:60] + "…"
+                        if len(piece_label) > 60
+                        else piece_label or f"piece {piece.chunk_index}"
+                    ),
+                    text=piece.content,
+                    metadata={
+                        "memory_chunk_id": piece.id,
+                        "memory_id": mem.id,
+                        "chunk_index": piece.chunk_index,
+                        "source": mem.source,
+                        "pinned": mem.pinned,
+                    },
+                )
+            )
+            edges.append(
+                MemoryGraphEdge(
+                    source=f"memory:{mem.id}", target=piece_node_id, type="contains"
+                )
+            )
+            edges.append(
+                MemoryGraphEdge(
+                    source=piece_node_id,
+                    target=f"memory:{mem.id}",
+                    type="derived_from",
+                )
+            )
+            if previous_piece_id is not None:
+                edges.append(
+                    MemoryGraphEdge(
+                        source=previous_piece_id, target=piece_node_id, type="next"
+                    )
+                )
+            previous_piece_id = piece_node_id
+
     edges.extend(_memory_related_edges(db, project, len(memories), chunk_count or 0))
 
     project_info = ProjectInfo(

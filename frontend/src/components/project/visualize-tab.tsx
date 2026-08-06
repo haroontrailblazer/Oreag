@@ -78,6 +78,10 @@ const NODE_COLORS: Record<string, string> = {
   section: "#a78bfa",
   chunk: "#64748b",
   memory: "#34d399",
+  /* A dimmer shade of the memory green, not a new hue. A memory piece IS its
+     parent, split - reading it as a separate kind of thing would undo the point
+     of drawing it. Mirrors how a chunk sits beneath its file. */
+  memory_chunk: "#059669",
 }
 const NODE_SIZES: Record<string, number> = {
   project: 10,
@@ -85,6 +89,7 @@ const NODE_SIZES: Record<string, number> = {
   section: 3,
   chunk: 1.5,
   memory: 3,
+  memory_chunk: 1.5,
 }
 /* Radius multiplier for every node, and the ONLY knob that scales them all
    uniformly. nodeVal above is a VOLUME - three-forcegraph derives the radius as
@@ -123,11 +128,19 @@ const LINK_ROUTE_DIRECTIONS = 16
 const LINK_ROUTE_SAFETY = 1.08
 const MAX_LINK_CURVATURE = 0.9
 
+/* Node types are snake_case on the wire, and both the tooltip and the detail
+   badge render them with CSS `capitalize` - which would print "Memory_chunk".
+   One place to turn a type into words, so the two cannot drift apart. */
+function typeLabel(type: string) {
+  return type.replace(/_/g, " ")
+}
+
 const LEGEND = [
   { type: "file", label: "Files" },
   { type: "section", label: "Sections" },
   { type: "chunk", label: "Chunks" },
   { type: "memory", label: "Memories" },
+  { type: "memory_chunk", label: "Memory pieces" },
 ] as const
 
 /* A small camera-facing halo per node keeps the glow centred instead of letting
@@ -146,6 +159,7 @@ const NODE_GLOW: Record<string, { opacity: number; size: number }> = {
   section: { opacity: 0.24, size: 38 },
   chunk: { opacity: 0.1, size: 28 },
   memory: { opacity: 0.28, size: 38 },
+  memory_chunk: { opacity: 0.1, size: 28 },
 }
 
 const GLOW_TEXTURE_SIZE = 64
@@ -1075,7 +1089,7 @@ export function VisualizeTab({
               nodeLabel={(node: GNode) =>
                 `<div style="padding:6px 10px;border-radius:8px;background:rgba(24,24,27,.95);border:1px solid rgba(255,255,255,.12);color:#fafafa;font-size:12px;max-width:280px">
                    <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(node.label)}</div>
-                   <div style="color:#a1a1aa;text-transform:capitalize">${esc(node.type)}</div>
+                   <div style="color:#a1a1aa;text-transform:capitalize">${esc(typeLabel(node.type))}</div>
                  </div>`
               }
               nodeColor={(node: GNode) => NODE_COLORS[node.type] ?? "#e4e4e7"}
@@ -1181,7 +1195,7 @@ export function VisualizeTab({
                       backgroundColor: NODE_COLORS[selected.type] ?? "#71717a",
                     }}
                   />
-                  {selected.type}
+                  {typeLabel(selected.type)}
                 </Badge>
                 <Button
                   type="button"

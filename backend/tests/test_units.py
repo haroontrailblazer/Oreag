@@ -2555,3 +2555,58 @@ class TestMemoryChunking:
         # alone - no rebuild, and above all no re-embedding of its parent.
         assert kept.embedding == [0.5, 0.5]
         assert all(chunk != kept.content for chunk in embedded)
+
+
+class TestMemoryPiecesInTheGraph:
+    """A long memory must LOOK split in the visualisation.
+
+    Before this, every memory rendered as one node whatever its length - the
+    exact picture migration 0025 exists to correct, since a 6000-character
+    memory was indistinguishable from a one-liner. File chunks already hung off
+    their file, so memories were the inconsistent case.
+    """
+
+    def test_piece_ids_do_not_share_the_chunk_namespace(self):
+        """chunks and memory_chunks each have their OWN bigserial, so ids
+        overlap. Sharing the "chunk:" prefix would merge two unrelated nodes
+        into one and hang a memory's piece off a document - and it would not
+        show up until memory_chunks.id grew into the range chunks already
+        occupies, i.e. silently, later, in production."""
+        import inspect
+
+        from app.services import memory_graph
+
+        src = inspect.getsource(memory_graph._build_memory_graph)
+        assert 'f"memory_chunk:{piece.id}"' in src
+        assert 'type="memory_chunk"' in src
+
+    def test_pieces_are_selected_without_their_vectors(self):
+        """The graph is already the priciest GET. A memory_chunks row carries
+        embedding AND embedding_full - tens of KB used by neither nodes nor
+        edges - so the columns are listed explicitly, exactly as the file-chunk
+        query was rewritten to do."""
+        import inspect
+
+        from app.services import memory_graph
+
+        # Comments stripped FIRST. The comment above that query says the words
+        # "select(MemoryChunk)" in order to explain why it is not used, so a
+        # raw substring check fails against the very code it is verifying.
+        src = "\n".join(
+            line
+            for line in inspect.getsource(memory_graph._build_memory_graph).splitlines()
+            if not line.strip().startswith("#")
+        )
+        assert "MemoryChunk.content" in src
+        assert "select(MemoryChunk)" not in src, "would ship both vectors"
+
+    def test_pieces_mirror_the_file_chunk_edge_shape(self):
+        import inspect
+
+        from app.services import memory_graph
+
+        src = inspect.getsource(memory_graph._build_memory_graph)
+        piece_block = src.split("memory_pieces.get(mem.id", 1)[1]
+        # contains down, derived_from back up, next between consecutive pieces
+        for edge_type in ('type="contains"', 'type="derived_from"', 'type="next"'):
+            assert edge_type in piece_block, f"missing {edge_type} on memory pieces"
