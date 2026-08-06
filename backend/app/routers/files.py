@@ -63,6 +63,21 @@ _SHRINK_MEMORIES_SQL = sql_text(
     "WHERE project_id = :project_id AND embedding IS NOT NULL "
     "  AND vector_dims(embedding) > :dims"
 )
+# memory_chunks (migration 0025) holds the split pieces of long memories, and
+# they are searched exactly like the parents are - so every width migration that
+# touches `memories` MUST touch these too. A piece left at the old width is not
+# merely stale: pgvector RAISES when comparing mismatched widths, so memory
+# search would fail outright rather than return fewer results.
+_SHRINK_MEMORY_CHUNKS_SQL = sql_text(
+    "UPDATE memory_chunks SET "
+    "  embedding_full = CASE "
+    "    WHEN embedding_full IS NULL "
+    "      OR vector_dims(embedding_full) < vector_dims(embedding) "
+    "    THEN embedding ELSE embedding_full END, "
+    "  embedding = l2_normalize(subvector(embedding, 1, :dims)) "
+    "WHERE project_id = :project_id AND embedding IS NOT NULL "
+    "  AND vector_dims(embedding) > :dims"
+)
 
 # Grow: restore from the archive instead of re-embedding. Exact bytes back when
 # the archive is the requested width; a prefix of it otherwise (768 -> 1536
@@ -87,6 +102,25 @@ _RESTORE_MEMORIES_SQL = sql_text(
     "                        THEN NULL ELSE embedding_full END "
     "WHERE project_id = :project_id AND embedding_full IS NOT NULL "
     "  AND vector_dims(embedding_full) >= :dims"
+)
+_RESTORE_MEMORY_CHUNKS_SQL = sql_text(
+    "UPDATE memory_chunks SET "
+    "  embedding = CASE WHEN vector_dims(embedding_full) = :dims "
+    "                   THEN embedding_full "
+    "                   ELSE l2_normalize(subvector(embedding_full, 1, :dims)) END, "
+    "  embedding_full = CASE WHEN vector_dims(embedding_full) <= :dims "
+    "                        THEN NULL ELSE embedding_full END "
+    "WHERE project_id = :project_id AND embedding_full IS NOT NULL "
+    "  AND vector_dims(embedding_full) >= :dims"
+)
+# A piece the archive cannot reach is DELETED, not left at the wrong width. It
+# is safe to delete because the parent memory still holds the full text and its
+# own vector - the memory stays findable by gist, and the pieces are rebuilt on
+# the next save or model switch. Leaving it would break search for the project.
+_DROP_UNRESTORABLE_MEMORY_CHUNKS_SQL = sql_text(
+    "DELETE FROM memory_chunks "
+    "WHERE project_id = :project_id AND embedding IS NOT NULL "
+    "  AND vector_dims(embedding) <> :dims"
 )
 # Rows the archive cannot reach - they must be re-embedded, so report them.
 #
@@ -119,6 +153,52 @@ _CLEAR_MEMORY_EMBEDDINGS_SQL = sql_text(
     "UPDATE memories SET embedding = NULL, embedding_full = NULL "
     "WHERE project_id = :project_id"
 )
+# The split pieces are DELETED rather than nulled. Unlike a memory, a chunk row
+# carries nothing but its text and its vector - it is pure derived data, rebuilt
+# from the parent by reembed_project_memories. Nulling would leave rows that are
+# useless until the background pass reaches them and permanently dead if it
+# never does (no key on file), which is how an old-model piece survives to be
+# scored against new-model queries.
+_DROP_MEMORY_CHUNKS_SQL = sql_text(
+    "DELETE FROM memory_chunks WHERE project_id = :project_id"
+)
+
+
+def _memory_chunks_supported(db: Session) -> bool:
+    """Has migration 0025 been applied?
+
+    Separate probe from _archive_supported, not folded into it: 0024 can be
+    applied without 0025, and then every memory_chunks statement below would
+    raise, roll back, and demote a free shrink to a paid re-embed - the exact
+    regression _archive_supported exists to prevent. Same per-request,
+    never-memoised rationale as that probe; see its docstring.
+    """
+    try:
+        return bool(
+            db.execute(
+                sql_text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = 'memory_chunks'"
+                )
+            ).first()
+        )
+    except Exception:
+        return False
+
+
+def clear_memory_vectors(db: Session, project_id: uuid.UUID) -> None:
+    """Drop every memory vector in a project, parents and split pieces alike.
+
+    Called on an embedding MODEL switch, where the old vectors live in a space
+    the new model cannot be compared against. The pieces must go with the
+    parents: they are searched by the same query vector, so one left behind is
+    not stale-but-harmless - it can outrank a correct result, and if its width
+    differs it makes memory search RAISE instead of return.
+    """
+    params = {"project_id": str(project_id)}
+    db.execute(_CLEAR_MEMORY_EMBEDDINGS_SQL, params)
+    if _memory_chunks_supported(db):
+        db.execute(_DROP_MEMORY_CHUNKS_SQL, params)
 
 
 def _plan_embedding_change(
@@ -166,6 +246,15 @@ _LEGACY_TRUNCATE_CHUNKS_SQL = sql_text(
 )
 _LEGACY_TRUNCATE_MEMORIES_SQL = sql_text(
     "UPDATE memories SET embedding = l2_normalize(subvector(embedding, 1, :dims)) "
+    "WHERE project_id = :project_id AND embedding IS NOT NULL "
+    "  AND vector_dims(embedding) > :dims"
+)
+# Reachable only if 0025 were applied without 0024 - out of order, but the cost
+# of covering it is one statement, and the cost of NOT covering it is a memory
+# search that raises on every query for that project.
+_LEGACY_TRUNCATE_MEMORY_CHUNKS_SQL = sql_text(
+    "UPDATE memory_chunks SET "
+    "  embedding = l2_normalize(subvector(embedding, 1, :dims)) "
     "WHERE project_id = :project_id AND embedding IS NOT NULL "
     "  AND vector_dims(embedding) > :dims"
 )
@@ -231,6 +320,17 @@ def _shrink_vectors_in_place(db: Session, project: Project, dims: int) -> bool:
             )
             db.execute(_LEGACY_TRUNCATE_CHUNKS_SQL, params)
             db.execute(_LEGACY_TRUNCATE_MEMORIES_SQL, params)
+        # Shrunk in the same transaction as the parents, never left for a
+        # background pass. The parents are at the new width the moment this
+        # commits, and search scores both in one UNION - a piece still at the old
+        # width would make that query RAISE on the very next memory lookup.
+        if _memory_chunks_supported(db):
+            db.execute(
+                _SHRINK_MEMORY_CHUNKS_SQL
+                if archived
+                else _LEGACY_TRUNCATE_MEMORY_CHUNKS_SQL,
+                params,
+            )
         if archived:
             # Remember the width the vectors were originally computed at, so
             # ingestion keeps banking that width while the project stays shrunk.
@@ -312,6 +412,9 @@ def _restore_vectors_from_archive(
             ),
             params,
         )
+        if _memory_chunks_supported(db):
+            db.execute(_RESTORE_MEMORY_CHUNKS_SQL, params)
+            db.execute(_DROP_UNRESTORABLE_MEMORY_CHUNKS_SQL, params)
         return gap
     except Exception:
         logger.exception(
@@ -453,7 +556,7 @@ async def upload_files(
     if reindex_existing:
         new_ids = {record.id for record in created}
         db.execute(sql_delete(Chunk).where(Chunk.project_id == project.id))
-        db.execute(_CLEAR_MEMORY_EMBEDDINGS_SQL, {"project_id": str(project.id)})
+        clear_memory_vectors(db, project.id)
         bump_content_version(db, project.id)
         existing = [
             f
@@ -641,7 +744,7 @@ def reindex_project(
     else:
         db.execute(sql_delete(Chunk).where(Chunk.project_id == project.id))
     if plan == "reembed":
-        db.execute(_CLEAR_MEMORY_EMBEDDINGS_SQL, {"project_id": str(project.id)})
+        clear_memory_vectors(db, project.id)
     bump_content_version(db, project.id)
     for file in requeue:
         file.status = "pending"  # the durable queue workers pick these up

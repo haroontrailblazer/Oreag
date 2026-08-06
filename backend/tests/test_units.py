@@ -86,6 +86,11 @@ class TestMemoryService:
         def add(self, obj):
             self.added.append(obj)
 
+        def flush(self):
+            # Real save_memory flushes to assign memory.id before writing the
+            # split-piece rows that reference it.
+            pass
+
         def commit(self):
             pass
 
@@ -502,18 +507,36 @@ class TestVectorMigration:
     the new model on a model switch."""
 
     class _RecordingDB:
-        def __init__(self, fail: bool = False, archive_supported: bool = True):
+        def __init__(
+            self,
+            fail: bool = False,
+            archive_supported: bool = True,
+            memory_chunks_supported: bool | None = None,
+        ):
             self.fail = fail
             self.archive_supported = archive_supported
+            # Defaults to tracking the archive flag, but settable on its own:
+            # 0024 can be applied without 0025, and that combination must not
+            # blow up the shrink.
+            self.memory_chunks_supported = (
+                archive_supported
+                if memory_chunks_supported is None
+                else memory_chunks_supported
+            )
             self.statements: list[str] = []
             self.rollbacks = 0
 
         def execute(self, statement, params=None):
             text = str(statement)
-            # _archive_supported probes information_schema; answer that without
-            # recording it as one of the migration statements.
+            # _archive_supported / _memory_chunks_supported probe
+            # information_schema; answer those without recording them as
+            # migration statements.
             if "information_schema" in text:
-                return self._Probe(self.archive_supported)
+                return self._Probe(
+                    self.memory_chunks_supported
+                    if "memory_chunks" in text
+                    else self.archive_supported
+                )
             if self.fail:
                 raise RuntimeError("no subvector on this postgres")
             self.statements.append(text)
@@ -541,13 +564,30 @@ class TestVectorMigration:
         joined = "\n".join(db.statements).lower()
         assert "update chunks" in joined
         assert "update memories" in joined
-        # both tables go through the same MRL prefix + re-normalize
-        assert joined.count("subvector") == 2
-        assert joined.count("l2_normalize") == 2
-        # and both bank the wide original in the SAME statement
-        assert joined.count("embedding_full =") == 2
+        # The split pieces of long memories are searched by the same query
+        # vector as their parents, in one UNION. Leaving them at the old width
+        # would not lose results - it would make every memory lookup RAISE.
+        assert "update memory_chunks" in joined
+        # all three go through the same MRL prefix + re-normalize
+        assert joined.count("subvector") == 3
+        assert joined.count("l2_normalize") == 3
+        # and all three bank the wide original in the SAME statement
+        assert joined.count("embedding_full =") == 3
         # the shrink remembers the width to restore back to
         assert project.embedding_native_dimensions == 3072
+
+    def test_shrink_skips_memory_chunks_without_migration_0025(self):
+        """0024 can land without 0025. Referencing memory_chunks then would
+        raise, roll back and demote the free shrink to a paid re-embed - the
+        same regression _archive_supported exists to prevent."""
+        from app.routers.files import _shrink_vectors_in_place
+
+        db = self._RecordingDB(archive_supported=True, memory_chunks_supported=False)
+        project = Project(id=uuid.uuid4(), embedding_dimensions=3072)
+        assert _shrink_vectors_in_place(db, project, 1024) is True
+        joined = "\n".join(db.statements).lower()
+        assert "memory_chunks" not in joined
+        assert joined.count("subvector") == 2  # chunks + memories, still free
 
     def test_shrink_without_migration_0024_stays_free(self):
         """Deploy-order safety: referencing the archive columns before the SQL
@@ -2063,12 +2103,51 @@ class TestReversibleMatryoshkaShrink:
         """3072 -> 1536 -> 768 must keep the 3072 archive. Overwriting it with
         the 1536 intermediate would make the trip irreversible one step after
         the user was told it was reversible."""
-        from app.routers.files import _SHRINK_CHUNKS_SQL, _SHRINK_MEMORIES_SQL
+        from app.routers.files import (
+            _SHRINK_CHUNKS_SQL,
+            _SHRINK_MEMORIES_SQL,
+            _SHRINK_MEMORY_CHUNKS_SQL,
+        )
 
-        for stmt in (_SHRINK_CHUNKS_SQL, _SHRINK_MEMORIES_SQL):
+        for stmt in (
+            _SHRINK_CHUNKS_SQL,
+            _SHRINK_MEMORIES_SQL,
+            _SHRINK_MEMORY_CHUNKS_SQL,
+        ):
             sql = " ".join(str(stmt).split()).lower()
             assert "case" in sql and "embedding_full is null" in sql
             assert "vector_dims(embedding_full) < vector_dims(embedding)" in sql
+
+    def test_model_switch_drops_the_split_pieces(self):
+        """Same invariant as the archive one above, one level down. A piece
+        embedded with the OLD model is scored against new-model queries by the
+        same UNION - it can outrank a correct result, and at a different width
+        it makes the search raise. Pure derived data, so it is DELETED, not
+        nulled: reembed_project_memories rebuilds it from the parent."""
+        from app.routers.files import _DROP_MEMORY_CHUNKS_SQL, clear_memory_vectors
+
+        assert "delete from memory_chunks" in str(_DROP_MEMORY_CHUNKS_SQL).lower()
+
+        db = TestVectorMigration._RecordingDB(archive_supported=True)
+        clear_memory_vectors(db, uuid.uuid4())
+        joined = "\n".join(db.statements).lower()
+        assert "update memories set embedding = null" in joined
+        assert "delete from memory_chunks" in joined
+
+    def test_restore_grows_the_split_pieces_back(self):
+        """A grow must carry the pieces with the parents. Restoring memories to
+        3072 while their pieces stay at 1536 does not degrade the search - the
+        UNION compares both against one query vector, so it raises."""
+        from app.routers.files import _restore_vectors_from_archive
+
+        db = TestVectorMigration._RecordingDB(archive_supported=True)
+        project = Project(id=uuid.uuid4(), embedding_dimensions=1536)
+        assert _restore_vectors_from_archive(db, project, 3072) == []
+        joined = "\n".join(db.statements).lower()
+        assert "update memory_chunks" in joined
+        # and anything the archive could not reach is removed rather than left
+        # at a width that would break every subsequent memory query
+        assert "delete from memory_chunks" in joined
 
     def test_shrink_archives_and_truncates_in_one_statement(self):
         """Two statements would leave an instant where the tail exists nowhere.
@@ -2322,3 +2401,157 @@ class TestArchiveColumnIsOmittedNotNulled:
         from app.services import memory
 
         assert "embedding_full" not in inspect.getsource(memory)
+
+
+class TestMemoryChunking:
+    """Long memories are split so each piece gets its own vector.
+
+    A memory was one row with ONE embedding regardless of length, and the cap is
+    8000 characters - so several distinct ideas collapsed into a single averaged
+    vector. Measured on the live project: short memories retrieve at 0.70+,
+    while a 697-character one STOPPED MATCHING a query aimed at one of its own
+    clauses. Splitting restores per-idea precision without changing what a
+    memory IS: the parent row still owns pinning, tags, source and deletion.
+    """
+
+    def test_short_memories_are_not_split(self):
+        """The common case must cost nothing - no rows, no extra embeddings."""
+        from app.services.memory import split_memory_content
+
+        assert len(split_memory_content("a short single-idea memory")) == 1
+
+    def test_a_long_memory_is_split(self):
+        from app.services.memory import MEMORY_CHUNK_SIZE, split_memory_content
+
+        pieces = split_memory_content("word. " * 400)  # ~2400 chars
+        assert len(pieces) > 1
+        assert all(len(p) <= MEMORY_CHUNK_SIZE + 40 for p in pieces)
+
+    def test_whitespace_only_never_yields_an_empty_piece(self):
+        """An empty piece would embed to a meaningless vector that still
+        competes for ranking."""
+        from app.services.memory import split_memory_content
+
+        assert split_memory_content("   \n  ") == [""]
+
+    def test_search_keeps_the_BEST_score_per_memory(self):
+        """MAX, not AVG or SUM. A memory answering in one paragraph should rank
+        on that paragraph - averaging would dilute the good score with the
+        unrelated parts, reproducing the original bug one layer up."""
+        from app.services.memory import _SEARCH_SQL
+
+        sql = " ".join(str(_SEARCH_SQL).split()).lower()
+        assert "max(similarity)" in sql
+        assert "group by id" in sql
+        assert "avg(" not in sql and "sum(" not in sql
+
+    def test_search_covers_both_the_parent_and_the_pieces(self):
+        """Either route must find it: the whole-memory gist, or one passage."""
+        from app.services.memory import _SEARCH_SQL
+
+        sql = " ".join(str(_SEARCH_SQL).split()).lower()
+        assert "from memories" in sql
+        assert "from memory_chunks" in sql
+        assert "union all" in sql
+
+    def test_chunk_rebuild_uses_a_savepoint(self):
+        """Postgres aborts the WHOLE transaction on a statement error, so on a
+        database without migration 0025 a bare try/except would still lose the
+        memory itself at commit time."""
+        import inspect
+
+        from app.services import memory
+
+        src = inspect.getsource(memory._rebuild_memory_chunks)
+        assert "begin_nested" in src
+
+    def test_a_model_switch_rebuilds_the_pieces(self):
+        """Pieces share the parent's vector space. Left stale, an old-model
+        chunk would still be scored against new-model queries."""
+        import inspect
+
+        from app.services import memory
+
+        src = inspect.getsource(memory.reembed_project_memories)
+        assert "_rebuild_memory_chunks" in src
+
+    def test_chunks_cascade_from_the_parent(self):
+        from app.models import MemoryChunk
+
+        fk = list(MemoryChunk.__table__.c.memory_id.foreign_keys)[0]
+        assert fk.ondelete == "CASCADE"
+
+    def test_restore_rebuilds_pieces_it_could_not_grow_back(self, monkeypatch):
+        """The archive restores parents and pieces independently, so a parent
+        can come back while its pieces are dropped as unrestorable. That path
+        runs with only_missing=True to avoid paying to overwrite vectors it just
+        restored - and a naive only_missing would skip this memory forever,
+        silently leaving it on the single diluted vector this feature exists to
+        replace. It is also the backfill for memories written before 0025."""
+        from app.models import Memory, Project
+        from app.services import memory as memory_service
+
+        project = Project(
+            id=uuid.uuid4(),
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-large",
+            embedding_dimensions=1024,
+        )
+        long_memory = Memory(id=1, project_id=project.id, content="idea. " * 200)
+        long_memory.embedding = [0.5, 0.5]  # restored from the archive
+        kept = Memory(id=2, project_id=project.id, content="x " * 300)
+        kept.embedding = [0.5, 0.5]
+
+        class _FakeSession:
+            def __init__(self):
+                self.inserted: list[dict] = []
+
+            def get(self, model, key):
+                return project
+
+            def scalars(self, stmt):
+                # the chunk-inventory query vs. the memory listing
+                target = str(stmt).lower()
+                rows = [2] if "memory_chunks" in target else [long_memory, kept]
+                return type("_S", (), {"all": lambda _s: rows,
+                                       "__iter__": lambda _s: iter(rows)})()
+
+            def execute(self, stmt, params=None):
+                if params and isinstance(params, list):
+                    self.inserted.extend(params)
+
+            def begin_nested(self):
+                import contextlib
+
+                return contextlib.nullcontext()
+
+            def commit(self):
+                pass
+
+            def rollback(self):
+                pass
+
+            def close(self):
+                pass
+
+        session = _FakeSession()
+        monkeypatch.setattr(memory_service, "SessionLocal", lambda: session)
+        embedded: list[str] = []
+
+        def fake_embed(db, proj, content):
+            embedded.append(content)
+            return [0.1, 0.2]
+
+        monkeypatch.setattr(memory_service, "_embed", fake_embed)
+
+        memory_service.reembed_project_memories(project.id, only_missing=True)
+
+        # memory 1 lost its pieces, so they are rebuilt...
+        assert [row["memory_id"] for row in session.inserted] == [1] * len(
+            session.inserted
+        )
+        assert session.inserted, "the unrestorable pieces were never rebuilt"
+        # ...and memory 2, whose pieces came back with it, is left completely
+        # alone - no rebuild, and above all no re-embedding of its parent.
+        assert kept.embedding == [0.5, 0.5]
+        assert all(chunk != kept.content for chunk in embedded)

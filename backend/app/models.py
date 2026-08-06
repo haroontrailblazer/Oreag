@@ -211,6 +211,33 @@ class Memory(Base):
     )
 
 
+class MemoryChunk(Base):
+    """A split piece of a LONG memory, with its own embedding (migration 0025).
+
+    Only exists for memories too long to be a single well-focused vector; short
+    ones are served by Memory.embedding alone and have no rows here. Search
+    scores both and keeps the best result per memory, so the parent stays the
+    unit of record for pinning, tags, display and deletion.
+    """
+
+    __tablename__ = "memory_chunks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    memory_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("memories.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(NulSafeText)
+    embedding = mapped_column(Vector)
+    embedding_full = deferred(mapped_column(Vector, nullable=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class SemanticQueryCache(Base):
     """L2 answer cache: similar (not just identical) questions hit by cosine
     similarity on the cached question's embedding. Scoped to everything that

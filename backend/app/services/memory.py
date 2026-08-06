@@ -2,12 +2,13 @@ import logging
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import delete as sql_delete
+from sqlalchemy import func, insert, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import SessionLocal
-from ..models import Memory, Project
+from ..models import Memory, MemoryChunk, Project
 from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
 from ..providers.registry import get_embedder
@@ -56,21 +57,47 @@ def reembed_project_memories(
         project = db.get(Project, project_id)
         if project is None:
             return
-        query = select(Memory).where(Memory.project_id == project_id)
-        if only_missing:
-            query = query.where(Memory.embedding.is_(None))
-        memories = db.scalars(query).all()
+        memories = db.scalars(
+            select(Memory).where(Memory.project_id == project_id)
+        ).all()
+        # Which memories already hold their split pieces. Read once for the
+        # project rather than per memory - the cap is 2000 rows, so this is one
+        # small index scan instead of 2000 COUNT queries.
+        chunked = _memories_with_chunks(db, project_id) if only_missing else set()
+        touched = 0
         for memory in memories:
-            vector = _embed(db, project, memory.content)
-            # Never write a None over an existing vector: _embed returns None
-            # when no key is available, and on the restore path that would
-            # erase a memory that had just been correctly restored.
-            if vector is not None or memory.embedding is None:
-                memory.embedding = vector
+            reembed = memory.embedding is None or not only_missing
+            if reembed:
+                vector = _embed(db, project, memory.content)
+                # Never write a None over an existing vector: _embed returns
+                # None when no key is available, and on the restore path that
+                # would erase a memory that had just been correctly restored.
+                if vector is not None or memory.embedding is None:
+                    memory.embedding = vector
+                touched += 1
+            elif memory.id in chunked:
+                # Parent restored from the archive AND its pieces came back with
+                # it - nothing to do, and re-embedding would spend money to
+                # overwrite exactly the vectors this path exists to preserve.
+                continue
+            # The pieces live in the same vector space as the parent, so a model
+            # switch invalidates them too. Rebuilt rather than left stale: a
+            # piece embedded with the OLD model would still be scored against
+            # new-model queries and could outrank a correct result.
+            #
+            # Reached on the only_missing path as well, for a memory whose
+            # parent restored but whose pieces the archive could not reach and
+            # which were therefore dropped. Skipping it there would leave that
+            # memory permanently reduced to its single diluted vector, with
+            # nothing to ever notice - and it doubles as the backfill for
+            # memories written before migration 0025, which have no pieces yet.
+            if memory.embedding is not None:
+                _rebuild_memory_chunks(db, project, memory)
         bump_content_version(db, project_id)
         db.commit()
         logger.info(
-            "Re-embedded %d memories for project %s with %s/%s",
+            "Re-embedded %d/%d memories for project %s with %s/%s",
+            touched,
             len(memories),
             project_id,
             project.embedding_provider,
@@ -109,10 +136,110 @@ def save_memory(db: Session, project: Project, body: MemoryCreate) -> Memory:
         embedding=_embed(db, project, body.content),
     )
     db.add(memory)
+    db.flush()  # assign memory.id for the chunk rows below
+    _rebuild_memory_chunks(db, project, memory)
     bump_content_version(db, project.id)
     db.commit()
     db.refresh(memory)
     return memory
+
+
+# Roughly a paragraph. Small enough that one piece carries one idea - which is
+# the entire point, since an embedding averages whatever it is given - and large
+# enough that a normal short memory still fits in a single piece and therefore
+# produces no rows at all. The overlap keeps a sentence spanning a boundary
+# findable from either side.
+MEMORY_CHUNK_SIZE = 480
+MEMORY_CHUNK_OVERLAP = 80
+
+
+def split_memory_content(content: str) -> list[str]:
+    """The pieces a memory should be embedded as.
+
+    Returns a SINGLE-ITEM list for anything short enough to be one coherent
+    vector, and callers skip writing chunk rows in that case - the parent's own
+    embedding already serves it, so the common case costs nothing.
+    """
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+    text_value = content.strip()
+    if len(text_value) <= MEMORY_CHUNK_SIZE:
+        return [text_value]
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=MEMORY_CHUNK_SIZE, chunk_overlap=MEMORY_CHUNK_OVERLAP
+    )
+    return [p for p in splitter.split_text(text_value) if p.strip()] or [text_value]
+
+
+def _memories_with_chunks(db: Session, project_id: uuid.UUID) -> set[int]:
+    """Ids of memories that currently hold their split pieces.
+
+    Empty set on a database without migration 0025, which is the safe direction:
+    every memory then looks unchunked, so the caller rebuilds, and the rebuild
+    is itself a no-op savepoint on such a database.
+    """
+    try:
+        with db.begin_nested():
+            return set(
+                db.scalars(
+                    select(MemoryChunk.memory_id)
+                    .where(MemoryChunk.project_id == project_id)
+                    .distinct()
+                )
+            )
+    except Exception:
+        return set()
+
+
+def _rebuild_memory_chunks(db: Session, project: Project, memory: Memory) -> int:
+    """Re-create this memory's chunk rows. Returns how many were written.
+
+    Best-effort by design: the parent's own embedding is always present, so a
+    failure here degrades to exactly today's behaviour (one diluted vector for a
+    long memory) rather than losing the memory. That also covers a database
+    without migration 0025, where the table simply does not exist yet.
+    """
+    pieces = split_memory_content(memory.content)
+    if len(pieces) < 2:
+        return 0  # one coherent vector already - the parent's
+    vectors = []
+    for piece in pieces:
+        vector = _embed(db, project, piece)
+        if vector is None:
+            return 0  # no embedding key - leave it to the parent vector
+        vectors.append(vector)
+    try:
+        # SAVEPOINT, not a bare try/except. Postgres aborts the WHOLE
+        # transaction on a statement error, so on a database without migration
+        # 0025 the DELETE below would poison the caller's transaction and the
+        # memory save itself would fail on commit - catching the exception is
+        # not enough to undo that. A nested transaction confines the damage to
+        # the chunk work, leaving the parent memory to commit normally.
+        with db.begin_nested():
+            db.execute(
+                sql_delete(MemoryChunk).where(MemoryChunk.memory_id == memory.id)
+            )
+            db.execute(
+                insert(MemoryChunk),
+                [
+                    {
+                        "memory_id": memory.id,
+                        "project_id": project.id,
+                        "chunk_index": index,
+                        "content": piece,
+                        "embedding": vector,
+                    }
+                    for index, (piece, vector) in enumerate(zip(pieces, vectors))
+                ],
+            )
+        return len(pieces)
+    except Exception:
+        logger.exception(
+            "Could not split memory %s into chunks - falling back to its single "
+            "whole-content vector",
+            memory.id,
+        )
+        return 0
 
 
 # Deliberately an exact scan, with no HNSW index behind it (migration 0018
@@ -123,12 +250,34 @@ def save_memory(db: Session, project: Project, body: MemoryCreate) -> Memory:
 # row count is capped the project's share of the table is guaranteed tiny -
 # exactly where post-filtering collapses. It would be strictly worse on both
 # axes. Revisit only if that cap moves by an order of magnitude.
+#
+# Scores the whole-memory vector AND the split pieces of long ones, then keeps
+# the BEST score per memory. A memory can therefore be found either by its
+# overall gist or by one specific passage inside it - which is the whole reason
+# the pieces exist, since a single vector over 8000 characters describes none of
+# them well.
+#
+# MAX, not sum or average: a memory that answers the question in one paragraph
+# should rank on that paragraph. Averaging would penalise exactly the long
+# memories this exists to rescue, by diluting the good score with the unrelated
+# parts - reproducing the original bug one layer up.
+#
+# The LEFT-JOIN-free UNION means a database without migration 0025 still works:
+# the memory_chunks branch simply returns nothing.
 _SEARCH_SQL = text(
     """
-    SELECT id, 1 - (embedding <=> CAST(:qvec AS vector)) AS similarity
-    FROM memories
-    WHERE project_id = :project_id AND embedding IS NOT NULL
-    ORDER BY embedding <=> CAST(:qvec AS vector)
+    SELECT id, MAX(similarity) AS similarity FROM (
+        SELECT id, 1 - (embedding <=> CAST(:qvec AS vector)) AS similarity
+        FROM memories
+        WHERE project_id = :project_id AND embedding IS NOT NULL
+        UNION ALL
+        SELECT memory_id AS id,
+               1 - (embedding <=> CAST(:qvec AS vector)) AS similarity
+        FROM memory_chunks
+        WHERE project_id = :project_id AND embedding IS NOT NULL
+    ) scored
+    GROUP BY id
+    ORDER BY similarity DESC
     LIMIT :top_k
     """
 )
