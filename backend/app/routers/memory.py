@@ -13,6 +13,7 @@ from ..schemas import (
     MemoryOut,
     MemorySearchRequest,
     MemorySearchResult,
+    MemoryUpdate,
 )
 from ..services import memory as memory_service
 from ..services.content_version import bump_content_version
@@ -111,6 +112,34 @@ def list_memory(
     db: Session = Depends(get_db),
 ):
     return memory_service.recent_memories(db, project, min(max(limit, 1), 500))
+
+
+@owner_router.patch("/memory/{memory_id}", response_model=MemoryOut)
+def owner_update_memory(
+    memory_id: int,
+    body: MemoryUpdate,
+    project: Project = Depends(get_owned_project),
+    db: Session = Depends(get_db),
+):
+    """Pin or unpin a memory.
+
+    Deliberately does NOT bump content_version. That column keys the answer
+    caches, and pinning changes no text and no vector - every cached answer
+    stays correct, so invalidating them would mean re-running LLM calls to
+    reflect a sort-order flag. The Memory tab reads this list live, so the
+    change is visible immediately where it matters; only the cached memory-graph
+    payload carries the old flag until a real content change moves it.
+    """
+    row = db.scalar(
+        select(Memory).where(Memory.id == memory_id, Memory.project_id == project.id)
+    )
+    if row is None:
+        raise HTTPException(404, "Memory not found")
+    if body.pinned is not None:
+        row.pinned = body.pinned
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @owner_router.delete("/memory/{memory_id}", status_code=204)

@@ -191,9 +191,13 @@ function SourceMark({ source }: { source: string }) {
 function MemoryRow({
   memory,
   onDelete,
+  onTogglePin,
+  pinBusy,
 }: {
   memory: Memory
   onDelete: (memory: Memory) => void
+  onTogglePin: (memory: Memory) => void
+  pinBusy: boolean
 }) {
   return (
     <article className="group px-6 py-4 transition-colors hover:bg-muted/30 [contain-intrinsic-size:auto_9rem] [content-visibility:auto]">
@@ -213,7 +217,7 @@ function MemoryRow({
             {memory.pinned && (
               <span
                 className="inline-flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400"
-                title="Pinned - protected from bulk cleanup"
+                title="Pinned - sorted to the top of this list"
               >
                 <PushPin weight="fill" className="size-3.5" />
                 <span className="sr-only">Pinned</span>
@@ -247,6 +251,35 @@ function MemoryRow({
             )}
           </div>
         </div>
+
+        {/* Pin toggle sits with delete, not in the metadata strip: both are
+            actions on the row, and the strip is read-only information. Always
+            rendered (not hover-only) so a pinned memory can be UNpinned on
+            touch, where there is no hover. */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={pinBusy}
+          aria-pressed={memory.pinned}
+          aria-label={memory.pinned ? "Unpin memory" : "Pin memory"}
+          title={memory.pinned ? "Unpin" : "Pin to the top of the list"}
+          onClick={() => onTogglePin(memory)}
+          className={cn(
+            "-mr-1 shrink-0",
+            memory.pinned
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-muted-foreground opacity-70 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+          )}
+        >
+          {pinBusy ? (
+            <Spin />
+          ) : (
+            <PushPin
+              weight={memory.pinned ? "fill" : "regular"}
+              className="size-4"
+            />
+          )}
+        </Button>
 
         <Button
           variant="ghost"
@@ -282,6 +315,48 @@ export function MemoryTab({ project }: { project: Project }) {
   // second one without ever seeing the first go.
   const [deleteTarget, setDeleteTarget] = useState<Memory | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [pinning, setPinning] = useState<number | null>(null)
+
+  async function togglePin(memory: Memory) {
+    if (pinning !== null) return
+    const next = !memory.pinned
+    setPinning(memory.id)
+    try {
+      // Optimistic, and RE-SORTED locally: pinned rows sort to the top server
+      // side, so flipping the flag without re-ordering would leave the row
+      // sitting where it was until the next fetch - the pin would look applied
+      // but the list would disagree with itself.
+      const reorder = (list: Memory[] = []) =>
+        list
+          .map((m) => (m.id === memory.id ? { ...m, pinned: next } : m))
+          .sort((a, b) =>
+            a.pinned === b.pinned
+              ? +new Date(b.created_at) - +new Date(a.created_at)
+              : a.pinned
+                ? -1
+                : 1
+          )
+      await mutate(
+        async () => {
+          await api(`/api/projects/${project.id}/memory/${memory.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ pinned: next }),
+          })
+          return reorder(memories)
+        },
+        {
+          optimisticData: reorder,
+          rollbackOnError: true,
+          populateCache: true,
+          revalidate: false,
+        }
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update pin")
+    } finally {
+      setPinning(null)
+    }
+  }
 
   async function confirmDelete() {
     const target = deleteTarget
@@ -401,6 +476,8 @@ export function MemoryTab({ project }: { project: Project }) {
                 key={memory.id}
                 memory={memory}
                 onDelete={setDeleteTarget}
+                onTogglePin={togglePin}
+                pinBusy={pinning === memory.id}
               />
             ))}
           </div>

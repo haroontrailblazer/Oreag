@@ -254,6 +254,17 @@ class MemoryCreate(BaseModel):
     source: str = Field(default="mcp", max_length=50)
 
 
+class MemoryUpdate(BaseModel):
+    """Owner-side edits to an existing memory.
+
+    Only `pinned` for now, deliberately. Content is NOT editable here: changing
+    it would leave the stored vector describing the old text, so an edit has to
+    go through re-embedding rather than a field assignment.
+    """
+
+    pinned: bool | None = None
+
+
 class MemoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
