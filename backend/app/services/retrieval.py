@@ -531,29 +531,37 @@ def apply_ann_gucs(db: Session) -> bool:
 
     `relaxed_order` rather than `strict_order`: the rewritten SQL already
     re-sorts its (at most top_k) rows in an outer ORDER BY, so we get strict
-    ordering at relaxed cost. Failure closes the gate for this call - and rolls
-    back, because a failed statement leaves the transaction unusable and the
-    exact query still has to run.
+    ordering at relaxed cost. Failure closes the gate for this call.
+
+    Inside a SAVEPOINT, matching ann_capability() above and for the same reason.
+    A failed statement aborts the WHOLE transaction, so this used to answer with
+    db.rollback() - which does clear the abort, but also discards every
+    uncommitted write the CALLER had already made. By the time retrieval runs,
+    the /v1 routers have already added a UsageEvent (routers/rag_v1.py:78, before
+    the answer flow), so a failed GUC set silently dropped that project's billing
+    record for the request. A savepoint confines the rollback to this statement
+    and leaves the caller's work intact.
+
+    The bare `except` around the savepoint is deliberate: on a Session that
+    cannot open a nested transaction at all we still have to report "no ANN"
+    rather than raise, since the exact query is perfectly able to run.
     """
     try:
-        db.execute(
-            _ANN_GUCS_SQL,
-            {
-                "mode": settings.vector_ann_iterative_scan,
-                "ef_search": str(settings.vector_ann_ef_search),
-                "max_scan_tuples": str(settings.vector_ann_max_scan_tuples),
-            },
-        )
+        with db.begin_nested():
+            db.execute(
+                _ANN_GUCS_SQL,
+                {
+                    "mode": settings.vector_ann_iterative_scan,
+                    "ef_search": str(settings.vector_ann_ef_search),
+                    "max_scan_tuples": str(settings.vector_ann_max_scan_tuples),
+                },
+            )
         return True
     except Exception:
         logger.warning(
             "Could not set HNSW scan settings; using exact vector search",
             exc_info=True,
         )
-        try:
-            db.rollback()
-        except Exception:
-            pass
         return False
 
 

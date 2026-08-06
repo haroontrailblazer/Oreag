@@ -11,7 +11,12 @@ from ..db import SessionLocal
 from ..models import Memory, MemoryChunk, Project
 from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
-from ..providers.registry import get_embedder, prefix_normalize
+from ..providers import registry
+from ..providers.registry import (
+    embed_batch_size,
+    get_embedder,
+    prefix_normalize,
+)
 from ..schemas import MemoryCreate
 from . import retrieval
 from .content_version import bump_content_version
@@ -19,10 +24,86 @@ from .content_version import bump_content_version
 logger = logging.getLogger(__name__)
 
 
+def _embed_many(
+    db: Session, project: Project, texts: list[str]
+) -> list[tuple[list[float], list[float] | None]] | None:
+    """Embed several texts in as FEW provider calls as possible.
+
+    One request per provider batch, not one per text. Splitting a long memory
+    used to embed each piece on its own: a 6000-character memory cost 21
+    sequential HTTPS round trips inside a single API request, all of them with
+    the caller's DB transaction already open. That is seconds of blocked request
+    and a connection pinned across every one of those calls, and it scaled with
+    memory length - exactly the case the splitting exists to support.
+    ingestion.py has batched from the start; this is the same rule.
+
+    Returns None (not a partial list) if no key is available or the provider
+    fails, so callers get one unambiguous "could not embed" answer.
+    """
+    key = resolver.resolve_embedding_key(db, project)
+    if resolver.requires_key(project.embedding_provider) and not key:
+        return None
+    if not texts:
+        return []
+    active_dims = project.embedding_dimensions
+    # Resolved through the registry rather than read straight off the project:
+    # a model switch can leave embedding_native_dimensions pointing at a width
+    # the current model rejects, and get_embedder RAISES on that - which the
+    # except below would swallow into "no embedding", silently, on every write.
+    native_dims = (
+        registry.usable_native_dimensions(
+            project.embedding_provider,
+            project.embedding_model,
+            project.embedding_native_dimensions,
+            active_dims,
+        )
+        if active_dims
+        else active_dims
+    )
+    # embedding_dimensions is NOT NULL in the schema, but a Project constructed
+    # in memory rather than loaded can still carry None, and `None > None` is a
+    # TypeError - which would fail the entire memory save over a comparison
+    # whose only job is to decide whether to bank an archive.
+    archiving = bool(native_dims and active_dims and native_dims > active_dims)
+    try:
+        embedder = get_embedder(
+            project.embedding_provider,
+            project.embedding_model,
+            key,
+            dimensions=native_dims,
+        )
+        # Respect the provider's own comfortable request size - hosted APIs take
+        # large batches, local Ollama prefers small ones. A memory splits into at
+        # most ~20 pieces, so this is usually a single request either way.
+        size = embed_batch_size(embedder)
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), size):
+            vectors.extend(embedder.embed_texts(texts[start : start + size]))
+    except Exception:
+        logger.exception("Memory embedding failed; storing without embedding")
+        return None
+    if len(vectors) != len(texts):
+        # A provider that drops or duplicates rows would silently pair a piece
+        # with another piece's vector - worse than no embedding, because it
+        # retrieves confidently and wrongly.
+        logger.error(
+            "Embedder returned %d vectors for %d texts; storing without embedding",
+            len(vectors),
+            len(texts),
+        )
+        return None
+    if not archiving:
+        return [(v, None) for v in vectors]
+    return [(prefix_normalize(v, active_dims), v) for v in vectors]
+
+
 def _embed(
     db: Session, project: Project, content: str
 ) -> tuple[list[float], list[float] | None] | None:
-    """Best-effort embedding of a memory, as (stored_vector, archive_or_None).
+    """Best-effort embedding of ONE memory, as (stored_vector, archive_or_None).
+
+    Thin wrapper over _embed_many so the batching, the native-width resolution
+    and the archive rule cannot drift between the single and multi cases.
 
     Returns None if no key / on failure.
 
@@ -40,30 +121,8 @@ def _embed(
     It is FREE: embedding APIs bill per TOKEN, not per dimension, so asking for
     3072 costs exactly what asking for 1536 costs.
     """
-    key = resolver.resolve_embedding_key(db, project)
-    if resolver.requires_key(project.embedding_provider) and not key:
-        return None
-    active_dims = project.embedding_dimensions
-    native_dims = project.embedding_native_dimensions or active_dims
-    # embedding_dimensions is NOT NULL in the schema, but a Project constructed
-    # in memory rather than loaded can still carry None, and `None > None` is a
-    # TypeError - which would fail the entire memory save over a comparison
-    # whose only job is to decide whether to bank an archive.
-    archiving = bool(native_dims and active_dims and native_dims > active_dims)
-    try:
-        embedder = get_embedder(
-            project.embedding_provider,
-            project.embedding_model,
-            key,
-            dimensions=native_dims,
-        )
-        vector = embedder.embed_texts([content])[0]
-    except Exception:
-        logger.exception("Memory embedding failed; storing without embedding")
-        return None
-    if not archiving:
-        return vector, None
-    return prefix_normalize(vector, active_dims), vector
+    out = _embed_many(db, project, [content])
+    return out[0] if out else None
 
 
 def reembed_project_memories(
@@ -240,12 +299,11 @@ def _rebuild_memory_chunks(db: Session, project: Project, memory: Memory) -> int
     pieces = split_memory_content(memory.content)
     if len(pieces) < 2:
         return 0  # one coherent vector already - the parent's
-    vectors = []
-    for piece in pieces:
-        embedded = _embed(db, project, piece)
-        if embedded is None:
-            return 0  # no embedding key - leave it to the parent vector
-        vectors.append(embedded)
+    # ONE batched call for every piece. Per-piece calls made a long memory cost
+    # a round trip per paragraph, serially, inside the request.
+    vectors = _embed_many(db, project, pieces)
+    if not vectors:
+        return 0  # no embedding key or a provider failure - the parent serves it
     # Uniform across the batch: `archiving` is a property of the PROJECT, not of
     # a piece, so either every row carries an archive or none does. That matters
     # because SQLAlchemy's executemany requires every dict to have the same

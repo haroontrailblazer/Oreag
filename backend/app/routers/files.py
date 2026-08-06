@@ -469,6 +469,7 @@ async def upload_files(
     # switch re-embeds every existing file (and memories); shrinking the same
     # Matryoshka model's dimensions truncates stored vectors in place instead.
     reindex_existing = False
+    memories_need_backfill = False
     if embedding_provider or embedding_model or embedding_dimensions is not None:
         provider, model, dims, plan = _plan_embedding_change(
             project, embedding_provider, embedding_model, embedding_dimensions
@@ -497,6 +498,13 @@ async def upload_files(
             gap = _restore_vectors_from_archive(db, project, dims)
             if gap is None or gap:
                 plan = "reembed"
+            elif dims >= (project.embedding_native_dimensions or dims):
+                # Back at full fidelity - the restore SQL emptied the archive,
+                # so stop treating the project as shrunk. Without this the
+                # project keeps banking a "wide original" that is the same width
+                # as the active one, and reindex_project's matching branch made
+                # the two endpoints disagree about the project's own state.
+                project.embedding_native_dimensions = None
         if plan in ("truncate", "restore"):
             # A successful migration rewrote every existing vector, so the
             # cache signature has to move even though nothing is re-ingested.
@@ -508,7 +516,18 @@ async def upload_files(
         project.embedding_provider = provider
         project.embedding_model = model
         project.embedding_dimensions = dims
+        if plan == "reembed":
+            # See reindex_project: a native width recorded under the OLD model
+            # names a vector space this path is about to destroy, and the next
+            # write would ask the new model for a width it may reject.
+            project.embedding_native_dimensions = None
         reindex_existing = plan == "reembed"
+        # A completed restore ALSO needs the memory pass, and reindex_existing
+        # only covers "reembed". The restore nulls any memory the archive could
+        # not reach and drops its pieces; without this that memory is left
+        # permanently unsearchable on this route, which is the same defect the
+        # reindex route was just fixed for.
+        memories_need_backfill = plan == "restore"
 
     # top_k is a project/query setting
     if top_k is not None:
@@ -608,6 +627,10 @@ async def upload_files(
     # lose on a restart.
     if reindex_existing:
         background_tasks.add_task(reembed_project_memories, project.id)
+    elif memories_need_backfill:
+        background_tasks.add_task(
+            reembed_project_memories, project.id, only_missing=True
+        )
     return created
 
 
@@ -717,6 +740,38 @@ def reindex_project(
     project.embedding_provider = provider
     project.embedding_model = model
     project.embedding_dimensions = dims
+    if plan == "reembed":
+        # The archive is being destroyed on this path (chunks deleted, memory
+        # vectors nulled), so a "native width" recorded under the OLD model
+        # points at a vector space that no longer exists. Left set, the next
+        # write asks the NEW model for a width it may not support - which raises
+        # inside get_embedder and is swallowed into "no embedding" for every
+        # memory and every file. usable_native_dimensions() also guards that,
+        # but the marker is simply wrong here and clearing it is the honest fix.
+        project.embedding_native_dimensions = None
+
+    # Memory re-embed is queued HERE, before the fast path below can return.
+    #
+    # It used to sit at the end of the function, after that return - so for the
+    # one case it was written for (a complete restore with unchanged chunking,
+    # which IS the fast path's predicate) it never ran, while its comment
+    # asserted it did. Registration order does not matter: FastAPI runs
+    # background tasks only after a successful response.
+    if plan == "reembed":
+        background_tasks.add_task(reembed_project_memories, project.id)
+    elif plan == "restore":
+        # EVERY restore, not just one with a non-empty file gap. restore_gap is
+        # computed from CHUNKS joined to FILES and says nothing about memories:
+        # a memory written while shrunk by a build that did not bank an archive
+        # has its vector nulled and its pieces dropped by the restore, and if
+        # every FILE restored cleanly the gap is empty.
+        #
+        # only_missing keeps this close to free when there is nothing to fix -
+        # it touches only the rows the restore could not reach.
+        background_tasks.add_task(
+            reembed_project_memories, project.id, only_missing=True
+        )
+
     pair = crypto.apply_override(body.embedding_api_key)
     if pair is not None:
         project.embedding_key_encrypted, project.embedding_key_last4 = pair
@@ -785,22 +840,4 @@ def reindex_project(
     # memory vector, but a partial restore has just put correct vectors back and
     # must only fill the NULLs left behind - otherwise the background task pays
     # to overwrite embeddings it was meant to preserve.
-    if plan == "reembed":
-        background_tasks.add_task(reembed_project_memories, project.id)
-    elif plan == "restore":
-        # EVERY restore, not just one with a non-empty file gap.
-        #
-        # restore_gap is computed from CHUNKS joined to FILES - it says nothing
-        # about memories. A memory written while the project was shrunk by a
-        # build older than this one has no archive, so the restore nulls its
-        # vector and drops its pieces; if every FILE restored cleanly the gap is
-        # empty, no task was dispatched, and that memory stayed permanently
-        # unsearchable with nothing to report it.
-        #
-        # only_missing makes this close to free when there is nothing to fix: it
-        # re-embeds solely the rows the restore could not reach, and skips every
-        # memory whose vector and pieces came back intact.
-        background_tasks.add_task(
-            reembed_project_memories, project.id, only_missing=True
-        )
     return files

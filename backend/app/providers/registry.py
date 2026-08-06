@@ -309,6 +309,51 @@ def resolve_embedding_dimensions(
     return requested
 
 
+def embed_batch_size(embedder) -> int:
+    """How many texts to embed per request for this provider.
+
+    Each provider declares its own comfortable request size (hosted APIs take
+    big batches, local Ollama prefers small ones); fall back conservatively for
+    embedders that do not declare one.
+
+    Here rather than in a service because BOTH writers need it - ingestion.py
+    for file chunks and memory.py for a long memory's pieces. It lived in
+    ingestion alone, and memory.py consequently embedded one piece per request:
+    21 serial round trips for a 6000-character memory.
+    """
+    size = getattr(embedder, "batch_size", 0)
+    return size if isinstance(size, int) and size > 0 else 64
+
+
+def usable_native_dimensions(
+    provider: str, model: str, native: int | None, active: int
+) -> int:
+    """The width to EMBED at while a project is shrunk, guaranteed valid.
+
+    `projects.embedding_native_dimensions` records the width a project's vectors
+    were originally computed at, so writes made while it is shrunk can bank the
+    wide original and keep growing back free. It is written by the shrink and is
+    a property of the model that was active THEN.
+
+    A model switch can therefore leave it pointing at a width the CURRENT model
+    does not support - gemini-embedding-001 at 3072, then a switch to
+    text-embedding-3-small, which stops at 1536. Passing that straight to
+    get_embedder raises ValueError, and both callers swallow their exceptions:
+    the memory would be stored with no embedding at all, and the file would fail
+    to ingest. Silent, and on EVERY write.
+
+    Falling back to `active` is the safe direction: the project simply stops
+    banking an archive until it is shrunk again under the new model, which is
+    exactly the pre-archive behaviour rather than a broken one.
+    """
+    if not native or native <= active:
+        return active
+    try:
+        return resolve_embedding_dimensions(provider, model, native)
+    except ValueError:
+        return active
+
+
 def embedding_change_plan(
     current_provider: str,
     current_model: str,

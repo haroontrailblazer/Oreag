@@ -2427,7 +2427,7 @@ class TestArchiveColumnIsOmittedNotNulled:
 
         from app.services import memory
 
-        src = inspect.getsource(memory._embed)
+        src = inspect.getsource(memory._embed_many)
         assert "embedding_native_dimensions" in src
         assert "dimensions=native_dims" in src
 
@@ -2567,11 +2567,13 @@ class TestMemoryChunking:
         monkeypatch.setattr(memory_service, "SessionLocal", lambda: session)
         embedded: list[str] = []
 
-        def fake_embed(db, proj, content):
-            embedded.append(content)
-            return [0.1, 0.2], None
+        def fake_embed_many(db, proj, texts):
+            embedded.extend(texts)
+            return [([0.1, 0.2], None) for _ in texts]
 
-        monkeypatch.setattr(memory_service, "_embed", fake_embed)
+        # the batched primitive - _embed delegates to it, so patching here
+        # covers the parent embed AND the piece rebuild
+        monkeypatch.setattr(memory_service, "_embed_many", fake_embed_many)
 
         memory_service.reembed_project_memories(project.id, only_missing=True)
 
@@ -2806,3 +2808,294 @@ class TestUploadHandlesEveryEmbeddingPlan:
             f"embedding_change_plan's return values changed: {returned} - "
             "upload_files and reindex_project must both be reviewed"
         )
+
+
+class TestMemoryReembedIsActuallyDispatched:
+    """The memory re-embed must be queued on every path that needs it, and must
+    not sit downstream of a return that skips it.
+
+    Both halves of this were wrong at once, and neither was caught:
+
+      * reindex_project queued it AFTER the Matryoshka fast path returned - so
+        for a complete restore with unchanged chunking, which IS that fast
+        path's predicate, it never ran while its comment claimed it did.
+      * upload_files queued it only for `reembed`, so a restore through the
+        Add-files dialog left every archive-less memory nulled and its pieces
+        deleted with nothing to refill them.
+
+    Nothing referenced add_task anywhere in the suite, so both were invisible.
+    These assertions are structural on purpose - "unreachable" is a property of
+    control flow, not of behaviour under one input.
+    """
+
+    @staticmethod
+    def _func(name):
+        import ast
+        import inspect
+
+        from app.routers import files as files_router
+
+        tree = ast.parse(inspect.getsource(files_router))
+        return next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name
+        )
+
+    @classmethod
+    def _dispatch_lines(cls, name):
+        import ast
+
+        return [
+            n.lineno
+            for n in ast.walk(cls._func(name))
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "add_task"
+            and any(
+                isinstance(a, ast.Name) and a.id == "reembed_project_memories"
+                for a in n.args
+            )
+        ]
+
+    @classmethod
+    def _return_lines(cls, name):
+        import ast
+
+        return [
+            n.lineno for n in ast.walk(cls._func(name)) if isinstance(n, ast.Return)
+        ]
+
+    def test_the_scan_finds_something(self):
+        """Guards the guard - a name change would make these vacuously true."""
+        assert self._dispatch_lines("reindex_project"), "no dispatch found at all"
+        assert self._dispatch_lines("upload_files"), "no dispatch found at all"
+
+    def test_reindex_dispatch_precedes_every_return(self):
+        """The fast path returns early for a fully-restored project. A dispatch
+        after it is dead code for exactly the case it was written for."""
+        first_dispatch = min(self._dispatch_lines("reindex_project"))
+        earliest_return = min(self._return_lines("reindex_project"))
+        assert first_dispatch < earliest_return, (
+            f"the memory re-embed is queued at line {first_dispatch} but "
+            f"reindex_project can return at line {earliest_return} - the "
+            "restore fast path would skip it"
+        )
+
+    def test_upload_dispatch_precedes_every_return(self):
+        first_dispatch = min(self._dispatch_lines("upload_files"))
+        earliest_return = min(self._return_lines("upload_files"))
+        assert first_dispatch < earliest_return
+
+    def test_both_routes_handle_restore_not_just_reembed(self):
+        """A restore nulls memories the archive could not reach and deletes
+        their pieces, so it needs the backfill just as much as a model switch."""
+        import ast
+
+        for name in ("reindex_project", "upload_files"):
+            body = ast.unparse(self._func(name))
+            assert "only_missing=True" in body, (
+                f"{name} never queues the restore backfill"
+            )
+
+    def test_a_model_switch_clears_the_stale_native_width(self):
+        """embedding_native_dimensions names a width in the OLD model's vector
+        space. Left set across a model switch, the next write asks the NEW model
+        for a width it may reject - which raises inside get_embedder and is
+        swallowed into 'no embedding' for every memory and every file."""
+        import ast
+
+        for name in ("reindex_project", "upload_files"):
+            body = ast.unparse(self._func(name))
+            assert "project.embedding_native_dimensions = None" in body, (
+                f"{name} leaves a stale native width after a model switch"
+            )
+
+
+class TestUsableNativeDimensions:
+    """The width to embed at while shrunk, guaranteed valid for the CURRENT
+    model. Without this a stale marker fails every write silently."""
+
+    def test_falls_back_when_the_current_model_rejects_the_width(self):
+        from app.providers.registry import usable_native_dimensions
+
+        # shrunk under gemini (native 3072), then switched to a 1536-max model
+        assert (
+            usable_native_dimensions(
+                "openai", "text-embedding-3-small", 3072, 1536
+            )
+            == 1536
+        )
+
+    def test_keeps_the_native_width_when_the_model_supports_it(self):
+        from app.providers.registry import usable_native_dimensions
+
+        assert (
+            usable_native_dimensions(
+                "openai", "text-embedding-3-large", 3072, 1536
+            )
+            == 3072
+        )
+
+    def test_unshrunk_projects_are_unaffected(self):
+        from app.providers.registry import usable_native_dimensions
+
+        for native in (None, 0, 1536):
+            assert (
+                usable_native_dimensions(
+                    "openai", "text-embedding-3-large", native, 1536
+                )
+                == 1536
+            )
+
+    def test_an_unknown_model_does_not_raise(self):
+        """_embed and ingest_file both swallow exceptions, so a raise here
+        becomes a silent 'no embedding' rather than an error anyone sees."""
+        from app.providers.registry import usable_native_dimensions
+
+        assert usable_native_dimensions("nope", "nope", 3072, 1536) == 1536
+
+    def test_the_write_paths_use_it(self):
+        import inspect
+
+        from app.services import ingestion, memory
+
+        assert "usable_native_dimensions" in inspect.getsource(memory._embed_many)
+        assert "usable_native_dimensions" in inspect.getsource(ingestion.ingest_file)
+
+
+class TestMemoryEmbeddingIsBatched:
+    """A long memory must cost ONE provider request for its pieces, not one per
+    piece.
+
+    Splitting shipped with a per-piece embed: a 6000-character memory made 21
+    sequential HTTPS round trips inside a single API request, each with the
+    caller's DB transaction already open. Seconds of blocked request, a
+    connection pinned across every call, and it got WORSE the longer the memory
+    - i.e. precisely the case splitting exists to serve. No test noticed,
+    because the result was correct.
+    """
+
+    class _Embedder:
+        batch_size = 64
+
+        def __init__(self, dims, log):
+            self.dims = dims
+            self.log = log
+
+        def embed_texts(self, texts):
+            self.log.append(len(texts))
+            return [[0.1] * (self.dims or 8) for _ in texts]
+
+    class _DB:
+        def add(self, _o):
+            pass
+
+        def flush(self):
+            pass
+
+        def execute(self, *a, **k):
+            pass
+
+        def begin_nested(self):
+            import contextlib
+
+            return contextlib.nullcontext()
+
+        def scalar(self, *a, **k):
+            return 0
+
+        def commit(self):
+            pass
+
+        def refresh(self, _o):
+            pass
+
+    def _save(self, monkeypatch, content):
+        from app.models import Project
+        from app.schemas import MemoryCreate
+        from app.services import memory
+
+        calls: list[int] = []
+        monkeypatch.setattr(
+            memory, "get_embedder",
+            lambda p, m, k, dimensions=None: self._Embedder(dimensions, calls),
+        )
+        monkeypatch.setattr(memory.resolver, "resolve_embedding_key", lambda d, p: "k")
+        monkeypatch.setattr(memory.resolver, "requires_key", lambda p: False)
+        project = Project(
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+        )
+        memory.save_memory(self._DB(), project, MemoryCreate(content=content))
+        return calls
+
+    def test_a_long_memory_does_not_pay_a_request_per_piece(self, monkeypatch):
+        from app.services.memory import split_memory_content
+
+        content = ("Idea about vectors and widths. " * 10 + "\n\n") * 20
+        content = content[:8000]
+        pieces = len(split_memory_content(content))
+        assert pieces >= 10, "the fixture must actually split"
+
+        calls = self._save(monkeypatch, content)
+        # one for the parent, one batch for every piece
+        assert len(calls) == 2, (
+            f"{pieces} pieces cost {len(calls)} provider requests - "
+            "the pieces are being embedded one at a time"
+        )
+        assert max(calls) == pieces
+
+    def test_a_short_memory_still_costs_exactly_one(self, monkeypatch):
+        calls = self._save(monkeypatch, "one short idea")
+        assert calls == [1]
+
+    def test_batches_respect_the_providers_declared_size(self, monkeypatch):
+        """Local Ollama declares a small batch; exceeding it is a provider
+        error, not a slow path."""
+        from app.models import Project
+        from app.services import memory
+
+        calls: list[int] = []
+
+        class _Small(self._Embedder):
+            batch_size = 3
+
+        monkeypatch.setattr(
+            memory, "get_embedder",
+            lambda p, m, k, dimensions=None: _Small(dimensions, calls),
+        )
+        monkeypatch.setattr(memory.resolver, "resolve_embedding_key", lambda d, p: "k")
+        monkeypatch.setattr(memory.resolver, "requires_key", lambda p: False)
+        project = Project(
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+        )
+        out = memory._embed_many(self._DB(), project, [f"t{i}" for i in range(7)])
+        assert len(out) == 7
+        assert calls == [3, 3, 1]
+
+    def test_a_short_provider_reply_is_rejected_not_mispaired(self, monkeypatch):
+        """Zipping N pieces against fewer vectors would pair a piece with
+        ANOTHER piece's vector - it then retrieves confidently and wrongly,
+        which is worse than not embedding at all."""
+        from app.models import Project
+        from app.services import memory
+
+        class _Lossy:
+            batch_size = 64
+
+            def embed_texts(self, texts):
+                return [[0.1] * 8 for _ in texts[:-1]]  # drops one
+
+        monkeypatch.setattr(memory, "get_embedder", lambda *a, **k: _Lossy())
+        monkeypatch.setattr(memory.resolver, "resolve_embedding_key", lambda d, p: "k")
+        monkeypatch.setattr(memory.resolver, "requires_key", lambda p: False)
+        project = Project(
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+        )
+        assert memory._embed_many(self._DB(), project, ["a", "b", "c"]) is None

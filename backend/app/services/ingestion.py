@@ -11,8 +11,12 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..models import Chunk, File, Project
-from ..providers import resolver
-from ..providers.registry import get_embedder, prefix_normalize
+from ..providers import registry, resolver
+from ..providers.registry import (
+    embed_batch_size,
+    get_embedder,
+    prefix_normalize,
+)
 from . import storage
 from .content_version import bump_content_version
 from .conversion import (
@@ -103,17 +107,6 @@ def audio_transcribers_for(db: Session, project: Project) -> list[tuple[str, obj
         if transcriber is not None:
             chain.append((provider, transcriber))
     return chain
-
-
-def embed_batch_size(embedder) -> int:
-    """How many chunks to embed (and commit) per round for this provider.
-
-    Each provider declares its own comfortable request size (hosted APIs take
-    big batches, local Ollama prefers small ones); fall back conservatively
-    for embedders that don't declare one.
-    """
-    size = getattr(embedder, "batch_size", 0)
-    return size if isinstance(size, int) and size > 0 else 64
 
 
 def parse_pdf(data: bytes) -> list[tuple[int, str]]:
@@ -341,7 +334,16 @@ def ingest_file(file_id: uuid.UUID) -> None:
         # It is free. Embedding APIs bill per TOKEN, not per dimension, so
         # asking for 3072 costs exactly what asking for 1536 costs.
         active_dims = project.embedding_dimensions
-        native_dims = project.embedding_native_dimensions or active_dims
+        # Via the registry, not read straight off the project: a model switch
+        # can leave embedding_native_dimensions at a width the current model
+        # rejects, and get_embedder RAISES on that - which would fail EVERY
+        # file ingest for the project until someone shrank or grew it again.
+        native_dims = registry.usable_native_dimensions(
+            project.embedding_provider,
+            project.embedding_model,
+            project.embedding_native_dimensions,
+            active_dims,
+        )
         archiving = native_dims > active_dims
         embedder = get_embedder(
             project.embedding_provider,

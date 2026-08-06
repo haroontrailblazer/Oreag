@@ -134,6 +134,7 @@ class _FakeSession:
         self.statements = []       # every statement passed to session.execute
         self.core_statements = []  # every statement run on the connection
         self.rollbacks = 0
+        self.savepoint_rollbacks = 0
 
     # -- Session API used by the gate and by retrieve() ----------------------
     def connection(self):
@@ -147,6 +148,23 @@ class _FakeSession:
 
     def rollback(self):
         self.rollbacks += 1
+
+    def begin_nested(self):
+        """A savepoint, like SQLAlchemy's. It does NOT swallow the exception -
+        it rolls back to the savepoint and re-raises, leaving the OUTER
+        transaction (and every uncommitted write in it) intact."""
+        outer = self
+
+        class _SP:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                if exc_type is not None:
+                    outer.savepoint_rollbacks += 1
+                return False  # never suppress
+
+        return _SP()
 
     # -- routing ------------------------------------------------------------
     def _answer(self, statement, params, core):
@@ -601,7 +619,14 @@ class TestGateOpens:
 
         monkeypatch.setattr(db, "execute", _boom)
         assert retrieval.apply_ann_gucs(db) is False
-        assert db.rollbacks == 1
+        # SAVEPOINT, not a full rollback. A failed statement aborts the whole
+        # transaction, so this has to be undone somehow - but db.rollback()
+        # would also discard the caller's uncommitted work, and by this point
+        # the /v1 routers have already added the request's UsageEvent
+        # (routers/rag_v1.py:78). Rolling that back silently drops the billing
+        # record for the request.
+        assert db.savepoint_rollbacks == 1
+        assert db.rollbacks == 0, "the caller's uncommitted writes were discarded"
 
     def test_project_size_is_memoized_on_content_version(self, monkeypatch):
         db = self._open(monkeypatch)
