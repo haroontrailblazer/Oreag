@@ -4,7 +4,14 @@ import {
   BrainIcon as Brain,
   CaretDownIcon as CaretDown,
   CaretUpIcon as CaretUp,
+  CircleDashedIcon as CircleDashed,
+  ClockIcon as Clock,
+  CodeIcon as Code,
   MagnifyingGlassIcon as Search,
+  PlugsConnectedIcon as PlugsConnected,
+  PushPinIcon as PushPin,
+  RobotIcon as Robot,
+  TagIcon,
   TrashIcon as Trash,
 } from "@phosphor-icons/react/dist/ssr"
 import { useEffect, useRef, useState } from "react"
@@ -40,6 +47,7 @@ import { Input } from "@/components/ui/input"
 import { Spin } from "@/components/ui/loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, fetcher } from "@/lib/api"
+import { cn } from "@/lib/utils"
 import type { Memory, Project } from "@/lib/types"
 
 const BEST_PRACTICE_TIPS = [
@@ -131,6 +139,55 @@ function MemoryBody({ memory }: { memory: Memory }) {
   )
 }
 
+/* Who wrote this memory, as one glyph.
+   Colour-coded so a long list separates by origin without reading a word.
+   Unknown sources fall through to a neutral dashed circle rather than being
+   forced into a wrong icon - a memory from a source this build has never heard
+   of should look unfamiliar, not mislabelled. */
+const SOURCE_MARKS: Record<
+  string,
+  { icon: typeof Robot; label: string; className: string }
+> = {
+  mcp: {
+    icon: PlugsConnected,
+    label: "Saved by a connected agent (MCP)",
+    className: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  },
+  api: {
+    icon: Code,
+    label: "Saved through the public API",
+    className: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  },
+  agent: {
+    icon: Robot,
+    label: "Saved by an agent",
+    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  },
+}
+
+function SourceMark({ source }: { source: string }) {
+  const mark = SOURCE_MARKS[source] ?? {
+    icon: CircleDashed,
+    label: `Saved by ${source}`,
+    className: "bg-muted text-muted-foreground",
+  }
+  const Icon = mark.icon
+  return (
+    <span
+      title={mark.label}
+      className={cn(
+        "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg",
+        mark.className
+      )}
+    >
+      <Icon className="size-4" />
+      {/* The title attribute is a hover affordance only - screen readers need
+          the source named in the accessibility tree too. */}
+      <span className="sr-only">{mark.label}</span>
+    </span>
+  )
+}
+
 function MemoryRow({
   memory,
   onDelete,
@@ -140,30 +197,55 @@ function MemoryRow({
 }) {
   return (
     <article className="group px-6 py-4 transition-colors hover:bg-muted/30 [contain-intrinsic-size:auto_9rem] [content-visibility:auto]">
-      <div className="flex items-start gap-4">
-        <div className="min-w-0 flex-1 space-y-3">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            {memory.pinned && <Badge variant="secondary">Pinned</Badge>}
-            <span className="font-medium text-foreground/70">
-              {memory.source}
-            </span>
-            <span aria-hidden="true">·</span>
-            <time dateTime={memory.created_at}>
-              {new Date(memory.created_at).toLocaleDateString()}
-            </time>
-          </div>
+      <div className="flex items-start gap-3">
+        {/* Source as a single glyph in a tinted tile. It replaces the raw
+            string ("mcp", "api", "agent"), which was jargon rendered at the
+            most prominent point of the row - and doubles as the visual anchor
+            that makes a long list scannable by origin at a glance. */}
+        <SourceMark source={memory.source} />
 
+        <div className="min-w-0 flex-1 space-y-2">
           <MemoryBody memory={memory} />
 
-          {memory.tags.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {memory.tags.map((tag) => (
-                <Badge key={tag} variant="outline">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          )}
+          {/* Metadata BELOW the content, not above it. The text is what the
+              user is looking for; provenance is what they check afterwards. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {memory.pinned && (
+              <span
+                className="inline-flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400"
+                title="Pinned - protected from bulk cleanup"
+              >
+                <PushPin weight="fill" className="size-3.5" />
+                <span className="sr-only">Pinned</span>
+              </span>
+            )}
+            <span
+              className="inline-flex items-center gap-1"
+              title={`Created ${new Date(memory.created_at).toLocaleString()}`}
+            >
+              <Clock className="size-3.5" />
+              <time dateTime={memory.created_at}>
+                {new Date(memory.created_at).toLocaleDateString(undefined, {
+                  day: "numeric",
+                  month: "short",
+                })}
+              </time>
+            </span>
+
+            {/* Tags keep their words - they are arbitrary user strings, so no
+                icon can stand in for them. One Tag glyph labels the group
+                instead, which is the honest use of an icon here. */}
+            {memory.tags.length > 0 && (
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
+                <TagIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                {memory.tags.map((tag) => (
+                  <Badge key={tag} variant="outline" className="font-normal">
+                    {tag}
+                  </Badge>
+                ))}
+              </span>
+            )}
+          </div>
         </div>
 
         <Button
