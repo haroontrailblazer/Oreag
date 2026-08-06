@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..db import SessionLocal
 from ..models import Chunk, File, Project
 from ..providers import resolver
-from ..providers.registry import get_embedder
+from ..providers.registry import get_embedder, prefix_normalize
 from . import storage
 from .content_version import bump_content_version
 from .conversion import (
@@ -184,21 +184,6 @@ def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
     except Exception:
         logger.exception("Could not mark file %s as failed", file_id)
         db.rollback()
-
-
-def _prefix_normalize(vector: list[float], dims: int) -> list[float]:
-    """The Matryoshka prefix of a vector, re-normalised to unit length.
-
-    Deliberately the same arithmetic as the SQL shrink
-    (l2_normalize(subvector(v, 1, dims))), so a chunk ingested while a project
-    is shrunk is byte-comparable with one that was shrunk in place. Cosine
-    search assumes unit vectors; a raw prefix is not one.
-    """
-    prefix = vector[:dims]
-    norm = math.sqrt(sum(v * v for v in prefix))
-    if norm == 0:
-        return prefix
-    return [v / norm for v in prefix]
 
 
 def _reuse_converted_markdown(file: File) -> str | None:
@@ -384,7 +369,7 @@ def ingest_file(file_id: uuid.UUID) -> None:
                     # what the partial HNSW index is built on. The wider
                     # original goes to the archive, never to `embedding`.
                     "embedding": (
-                        _prefix_normalize(vector, active_dims) if archiving else vector
+                        prefix_normalize(vector, active_dims) if archiving else vector
                     ),
                 }
                 for (idx, page_number, content), vector in zip(batch, vectors)

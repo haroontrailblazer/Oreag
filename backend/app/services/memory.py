@@ -11,29 +11,59 @@ from ..db import SessionLocal
 from ..models import Memory, MemoryChunk, Project
 from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
-from ..providers.registry import get_embedder
+from ..providers.registry import get_embedder, prefix_normalize
 from ..schemas import MemoryCreate
+from . import retrieval
 from .content_version import bump_content_version
 
 logger = logging.getLogger(__name__)
 
 
-def _embed(db: Session, project: Project, content: str) -> list[float] | None:
-    """Best-effort embedding of a memory. Returns None if no key / on failure."""
+def _embed(
+    db: Session, project: Project, content: str
+) -> tuple[list[float], list[float] | None] | None:
+    """Best-effort embedding of a memory, as (stored_vector, archive_or_None).
+
+    Returns None if no key / on failure.
+
+    While a project is SHRUNK this embeds at the project's NATIVE width and
+    returns the wide vector as the archive, storing only the re-normalised
+    prefix - exactly what ingestion.py:350-366 does for file chunks, and for
+    exactly the same reason.
+
+    Without it, a memory written while shrunk has no wide numbers anywhere, so
+    growing back cannot restore it: _RESTORE_MEMORIES_SQL skips it (the archive
+    is NULL), the follow-up statement nulls its vector because the width no
+    longer matches, and _DROP_UNRESTORABLE_MEMORY_CHUNKS_SQL deletes its pieces.
+    The memory text survives, unsearchable, and nothing reports it.
+
+    It is FREE: embedding APIs bill per TOKEN, not per dimension, so asking for
+    3072 costs exactly what asking for 1536 costs.
+    """
     key = resolver.resolve_embedding_key(db, project)
     if resolver.requires_key(project.embedding_provider) and not key:
         return None
+    active_dims = project.embedding_dimensions
+    native_dims = project.embedding_native_dimensions or active_dims
+    # embedding_dimensions is NOT NULL in the schema, but a Project constructed
+    # in memory rather than loaded can still carry None, and `None > None` is a
+    # TypeError - which would fail the entire memory save over a comparison
+    # whose only job is to decide whether to bank an archive.
+    archiving = bool(native_dims and active_dims and native_dims > active_dims)
     try:
         embedder = get_embedder(
             project.embedding_provider,
             project.embedding_model,
             key,
-            dimensions=project.embedding_dimensions,
+            dimensions=native_dims,
         )
-        return embedder.embed_texts([content])[0]
+        vector = embedder.embed_texts([content])[0]
     except Exception:
         logger.exception("Memory embedding failed; storing without embedding")
         return None
+    if not archiving:
+        return vector, None
+    return prefix_normalize(vector, active_dims), vector
 
 
 def reembed_project_memories(
@@ -68,12 +98,14 @@ def reembed_project_memories(
         for memory in memories:
             reembed = memory.embedding is None or not only_missing
             if reembed:
-                vector = _embed(db, project, memory.content)
+                embedded = _embed(db, project, memory.content)
                 # Never write a None over an existing vector: _embed returns
                 # None when no key is available, and on the restore path that
                 # would erase a memory that had just been correctly restored.
-                if vector is not None or memory.embedding is None:
-                    memory.embedding = vector
+                if embedded is not None:
+                    memory.embedding, archive = embedded
+                    if archive is not None:
+                        memory.embedding_full = archive
                 touched += 1
             elif memory.id in chunked:
                 # Parent restored from the archive AND its pieces came back with
@@ -127,14 +159,20 @@ def save_memory(db: Session, project: Project, body: MemoryCreate) -> Memory:
             f"Project memory limit reached (max {settings.max_memories_per_project}). "
             "Delete old memories to add new ones.",
         )
+    embedded = _embed(db, project, body.content)
     memory = Memory(
         project_id=project.id,
         content=body.content,
         tags=body.tags,
         pinned=body.pinned,
         source=body.source,
-        embedding=_embed(db, project, body.content),
+        embedding=embedded[0] if embedded else None,
     )
+    # Only ASSIGNED when there is something to archive, never set to None.
+    # Same rule as the chunk INSERT in ingestion.py: naming the column makes
+    # SQLAlchemy emit it, which fails on a database without migration 0024.
+    if embedded and embedded[1] is not None:
+        memory.embedding_full = embedded[1]
     db.add(memory)
     db.flush()  # assign memory.id for the chunk rows below
     _rebuild_memory_chunks(db, project, memory)
@@ -204,10 +242,15 @@ def _rebuild_memory_chunks(db: Session, project: Project, memory: Memory) -> int
         return 0  # one coherent vector already - the parent's
     vectors = []
     for piece in pieces:
-        vector = _embed(db, project, piece)
-        if vector is None:
+        embedded = _embed(db, project, piece)
+        if embedded is None:
             return 0  # no embedding key - leave it to the parent vector
-        vectors.append(vector)
+        vectors.append(embedded)
+    # Uniform across the batch: `archiving` is a property of the PROJECT, not of
+    # a piece, so either every row carries an archive or none does. That matters
+    # because SQLAlchemy's executemany requires every dict to have the same
+    # keys - a per-row conditional would split the INSERT or raise.
+    archiving = any(archive is not None for _, archive in vectors)
     try:
         # SAVEPOINT, not a bare try/except. Postgres aborts the WHOLE
         # transaction on a statement error, so on a database without migration
@@ -219,19 +262,25 @@ def _rebuild_memory_chunks(db: Session, project: Project, memory: Memory) -> int
             db.execute(
                 sql_delete(MemoryChunk).where(MemoryChunk.memory_id == memory.id)
             )
-            db.execute(
-                insert(MemoryChunk),
-                [
-                    {
-                        "memory_id": memory.id,
-                        "project_id": project.id,
-                        "chunk_index": index,
-                        "content": piece,
-                        "embedding": vector,
-                    }
-                    for index, (piece, vector) in enumerate(zip(pieces, vectors))
-                ],
-            )
+            rows = [
+                {
+                    "memory_id": memory.id,
+                    "project_id": project.id,
+                    "chunk_index": index,
+                    "content": piece,
+                    "embedding": vector,
+                }
+                for index, (piece, (vector, _archive)) in enumerate(
+                    zip(pieces, vectors)
+                )
+            ]
+            if archiving:
+                # OMITTED, not None, when there is nothing to archive - naming
+                # the column makes SQLAlchemy emit it, which fails on a database
+                # without migration 0024/0025.
+                for row, (_vector, archive) in zip(rows, vectors):
+                    row["embedding_full"] = archive
+            db.execute(insert(MemoryChunk), rows)
         return len(pieces)
     except Exception:
         logger.exception(
@@ -243,13 +292,33 @@ def _rebuild_memory_chunks(db: Session, project: Project, memory: Memory) -> int
 
 
 # Deliberately an exact scan, with no HNSW index behind it (migration 0018
-# indexes `chunks` only). max_memories_per_project caps this at 2000 rows per
-# project and memories_project_idx bounds the scan to those, so it is tens of
-# milliseconds with PERFECT recall. A global HNSW index would have to
-# post-filter by project_id across every tenant, and because the per-project
-# row count is capped the project's share of the table is guaranteed tiny -
-# exactly where post-filtering collapses. It would be strictly worse on both
-# axes. Revisit only if that cap moves by an order of magnitude.
+# indexes `chunks` ONLY - neither `memories` nor `memory_chunks` has one, and
+# this query never consults the ANN gate in retrieval.py, so memory search is
+# exact at every size). PERFECT recall, which the graph edges and the answer
+# blend both depend on.
+#
+# The old justification here was "max_memories_per_project caps this at 2000
+# rows". That bound DIED when the union below was added, and the number is worth
+# writing down rather than re-deriving: a memory can be 8000 characters, which
+# splits into 20 pieces, so the worst case is 2000 * 20 = 40,000 memory_chunks
+# rows - twenty times the stated cap, and double the 20,000 (vector_ann_min_
+# chunks) at which file chunks were judged to need an index.
+#
+# It is still the right call TODAY, on different grounds: real projects hold
+# tens of pieces, not tens of thousands, and a global HNSW index would have to
+# post-filter by project_id across every tenant, where a capped per-project
+# share is exactly the case post-filtering handles worst.
+#
+# Two things must BOTH change before an index would help, and an index alone
+# would be dead weight:
+#   1. This query computes similarity for every row and then groups. An HNSW
+#      index is only chosen when a branch reads `ORDER BY embedding <=> q
+#      LIMIT k` with the operand textually matching the index expression, so
+#      each side of the union would need its own ordered, limited subquery
+#      before being merged - same discipline as 0018's partial indexes.
+#   2. pgvector cannot build HNSW above 2000 dimensions, so a 3072-wide project
+#      gets an exact scan regardless.
+# Revisit when a real project's memory_chunks count reaches four figures.
 #
 # Scores the whole-memory vector AND the split pieces of long ones, then keeps
 # the BEST score per memory. A memory can therefore be found either by its
@@ -283,6 +352,74 @@ _SEARCH_SQL = text(
 )
 
 
+# The indexable sibling of _SEARCH_SQL, used once a project's memory_chunks
+# clear the same gate document chunks clear (services/retrieval.py).
+#
+# Only the PIECES branch is rewritten. `memories` is capped at 2000 rows per
+# project, so its exact scan is already small and stays exactly as it is - the
+# pieces are the side that grows to five figures, and the side an index helps.
+#
+# Three things must line up or the planner silently ignores the index and the
+# cast is paid for nothing: the ORDER BY left operand must be TEXTUALLY the
+# index expression, the WHERE clause must repeat the index predicate verbatim,
+# and both must carry the same dimension. MATERIALIZED pins the ANN scan as its
+# own node so the outer GROUP BY cannot be pushed under the LIMIT.
+#
+# WHY THE PIECE LIMIT IS SAFE, and it is not the usual ANN trade-off: the
+# parents branch is UNLIMITED, so every memory in the project is already a
+# candidate with its own whole-content score. A piece that falls outside the
+# limit therefore cannot make its memory disappear - the memory simply ranks on
+# its parent vector, which is precisely the pre-0025 behaviour. The limit bounds
+# how far down the list the piece-level BOOST reaches, not whether a memory can
+# be found at all.
+_ANN_SEARCH_TEMPLATE = """
+    WITH pieces AS MATERIALIZED (
+        SELECT memory_id AS id,
+               1 - (embedding::vector({dim}) <=> CAST(:qvec AS vector({dim})))
+                 AS similarity
+        FROM memory_chunks
+        WHERE project_id = :project_id
+          AND vector_dims(embedding) = {dim}
+        ORDER BY embedding::vector({dim}) <=> CAST(:qvec AS vector({dim}))
+        LIMIT :piece_limit
+    )
+    SELECT id, MAX(similarity) AS similarity FROM (
+        SELECT id, 1 - (embedding <=> CAST(:qvec AS vector)) AS similarity
+        FROM memories
+        WHERE project_id = :project_id AND embedding IS NOT NULL
+        UNION ALL
+        SELECT id, similarity FROM pieces
+    ) scored
+    GROUP BY id
+    ORDER BY similarity DESC
+    LIMIT :top_k
+    """
+
+# The most pieces ONE memory can split into: the 8000-character content cap
+# divided by the stride (size - overlap). The piece branch is oversampled by
+# this factor so that even if the nearest pieces all belong to a single long
+# memory, top_k DISTINCT memories can still receive a piece-level score. Derived
+# from the constants rather than written as a literal, so changing the chunk
+# size cannot silently invalidate it.
+MAX_PIECES_PER_MEMORY = -(-8000 // (MEMORY_CHUNK_SIZE - MEMORY_CHUNK_OVERLAP))
+
+_ann_sql_cache: dict[int, object] = {}
+
+
+def _ann_search_sql(dim: int):
+    stmt = _ann_sql_cache.get(dim)
+    if stmt is None:
+        # Rendered through retrieval.build_ann_sql, NOT str.format here: the
+        # dimension is part of a TYPE and cannot be a bind parameter, so that
+        # helper's ANN_DIMENSIONS allowlist is the injection guard as well as
+        # the correctness one. Returns None for anything not on it.
+        stmt = retrieval.build_ann_sql(_ANN_SEARCH_TEMPLATE, dim)
+        if stmt is None:
+            return None
+        _ann_sql_cache[dim] = stmt
+    return stmt
+
+
 def search_memories(
     db: Session,
     project: Project,
@@ -310,9 +447,22 @@ def search_memories(
     else:
         query_vector = embed_fn(query)
     qvec = "[" + ",".join(repr(v) for v in query_vector) + "]"
-    rows = db.execute(
-        _SEARCH_SQL, {"qvec": qvec, "project_id": str(project.id), "top_k": top_k}
-    ).all()
+    params = {"qvec": qvec, "project_id": str(project.id), "top_k": top_k}
+
+    # ANN only once this project's PIECES clear the same gate document chunks
+    # clear. Fails closed at every step, including apply_ann_gucs: without
+    # hnsw.iterative_scan a post-filtered HNSW scan stops after ef_search
+    # candidates and returns however few survived the project_id filter, so an
+    # un-tuned ANN run is worse than no ANN at all.
+    statement = _SEARCH_SQL
+    dim = retrieval.memory_ann_dimension(db, project)
+    if dim is not None:
+        ann = _ann_search_sql(dim)
+        if ann is not None and retrieval.apply_ann_gucs(db):
+            statement = ann
+            params["piece_limit"] = top_k * MAX_PIECES_PER_MEMORY
+
+    rows = db.execute(statement, params).all()
     by_id = {
         m.id: m
         for m in db.scalars(select(Memory).where(Memory.id.in_([r.id for r in rows])))

@@ -1,6 +1,28 @@
+import math
 from functools import lru_cache
 
 from .base import EmbeddingProvider, LLMProvider
+
+
+def prefix_normalize(vector: list[float], dims: int) -> list[float]:
+    """The Matryoshka prefix of a vector, re-normalised to unit length.
+
+    Deliberately the same arithmetic as the SQL shrink
+    (l2_normalize(subvector(v, 1, dims))), so a vector written while a project
+    is shrunk is byte-comparable with one that was shrunk in place. Cosine
+    search assumes unit vectors; a raw prefix is not one.
+
+    Lives here rather than in a service because BOTH writers need it -
+    services/ingestion.py for file chunks and services/memory.py for memories
+    and their pieces - and the two must not drift. Memories used the wrong
+    arithmetic (none at all) for exactly as long as this was private to
+    ingestion.
+    """
+    prefix = vector[:dims]
+    norm = math.sqrt(sum(v * v for v in prefix))
+    if norm == 0:
+        return prefix
+    return [v / norm for v in prefix]
 
 # Single source of truth for what the wizard offers and what the backend accepts.
 # "dimensions" is the model's default; "dimension_options" lists the sizes a

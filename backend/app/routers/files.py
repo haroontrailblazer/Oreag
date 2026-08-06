@@ -473,10 +473,32 @@ async def upload_files(
         provider, model, dims, plan = _plan_embedding_change(
             project, embedding_provider, embedding_model, embedding_dimensions
         )
-        if plan == "truncate" and not _truncate_vectors_in_place(db, project, dims):
+        # Both vector migrations must be this request's FIRST write (see the
+        # helper docstrings): each rolls back on failure and would discard
+        # anything written before it.
+        if plan == "truncate" and not _shrink_vectors_in_place(db, project, dims):
             plan = "reembed"
-        elif plan == "truncate":
-            # A successful truncation rewrote every existing vector, so the
+        elif plan == "restore":
+            # Growing back on the same MRL model. This branch did not exist,
+            # and its absence was silent CORRUPTION rather than a missing
+            # feature: the code fell through to set project.embedding_dimensions
+            # to the new width while every stored vector kept the old one, and
+            # pgvector RAISES on a width mismatch - so document search AND
+            # memory search 500 on every subsequent request, with no path back
+            # through the UI (a later reindex at the same value plans "keep").
+            #
+            # Anything short of a COMPLETE restore is demoted to a full
+            # re-embed. Unlike the reindex route this endpoint has no
+            # partial-requeue machinery, and a partial restore that left some
+            # rows at the old width would break search outright rather than
+            # degrade it. Paying for a re-embed in the rare partial case is the
+            # cheap side of that trade; the settings route still does the
+            # free partial restore.
+            gap = _restore_vectors_from_archive(db, project, dims)
+            if gap is None or gap:
+                plan = "reembed"
+        if plan in ("truncate", "restore"):
+            # A successful migration rewrote every existing vector, so the
             # cache signature has to move even though nothing is re-ingested.
             # Bumped HERE rather than relying on the uploaded files bumping it
             # during ingestion: that happens to work today, but it makes a
@@ -765,7 +787,19 @@ def reindex_project(
     # to overwrite embeddings it was meant to preserve.
     if plan == "reembed":
         background_tasks.add_task(reembed_project_memories, project.id)
-    elif restore_gap:
+    elif plan == "restore":
+        # EVERY restore, not just one with a non-empty file gap.
+        #
+        # restore_gap is computed from CHUNKS joined to FILES - it says nothing
+        # about memories. A memory written while the project was shrunk by a
+        # build older than this one has no archive, so the restore nulls its
+        # vector and drops its pieces; if every FILE restored cleanly the gap is
+        # empty, no task was dispatched, and that memory stayed permanently
+        # unsearchable with nothing to report it.
+        #
+        # only_missing makes this close to free when there is nothing to fix: it
+        # re-embeds solely the rows the restore could not reach, and skips every
+        # memory whose vector and pieces came back intact.
         background_tasks.add_task(
             reembed_project_memories, project.id, only_missing=True
         )

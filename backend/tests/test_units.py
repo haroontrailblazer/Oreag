@@ -662,7 +662,7 @@ class TestVectorMigration:
             embedded_with.append(
                 (proj.embedding_model, proj.embedding_dimensions, content)
             )
-            return [0.1, 0.2]
+            return [0.1, 0.2], None
 
         monkeypatch.setattr(memory_service, "_embed", fake_embed)
 
@@ -2223,17 +2223,17 @@ class TestReversibleMatryoshkaShrink:
         place - same prefix, same re-normalisation."""
         import math
 
-        from app.services.ingestion import _prefix_normalize
+        from app.providers.registry import prefix_normalize
 
-        out = _prefix_normalize([3.0, 4.0, 99.0, 99.0], 2)
+        out = prefix_normalize([3.0, 4.0, 99.0, 99.0], 2)
         assert len(out) == 2
         assert math.isclose(math.sqrt(sum(v * v for v in out)), 1.0, rel_tol=1e-9)
         assert math.isclose(out[0], 0.6, rel_tol=1e-9)
 
     def test_prefix_normalize_survives_a_zero_vector(self):
-        from app.services.ingestion import _prefix_normalize
+        from app.providers.registry import prefix_normalize
 
-        assert _prefix_normalize([0.0, 0.0, 1.0], 2) == [0.0, 0.0]
+        assert prefix_normalize([0.0, 0.0, 1.0], 2) == [0.0, 0.0]
 
 
 class TestPartialRestoreScope:
@@ -2393,14 +2393,43 @@ class TestArchiveColumnIsOmittedNotNulled:
         assert "if archiving:" in code
         assert 'row["embedding_full"] = vector' in code
 
-    def test_memory_save_never_writes_the_archive(self):
-        """Memories are archived only by the SQL shrink, never at save time -
-        so save_memory must not name the column either."""
+    def test_memory_save_archives_under_the_same_rule_as_ingestion(self):
+        """This test previously asserted the OPPOSITE - that memories are
+        archived only by the SQL shrink and never at save time. That assumption
+        WAS the bug: a memory written while a project was shrunk had no wide
+        vector anywhere, so growing back could not restore it. The restore
+        nulled its embedding (the width no longer matched) and deleted its
+        pieces, leaving searchable text that no longer matched anything, with
+        nothing to report it.
+
+        File chunks never had this problem - ingestion.py embeds at the NATIVE
+        width and banks the original. Memories now follow the same rule, and it
+        costs nothing: embedding APIs bill per token, not per dimension."""
         import inspect
 
         from app.services import memory
 
-        assert "embedding_full" not in inspect.getsource(memory)
+        src = inspect.getsource(memory)
+        assert "embedding_full" in src, "memories must bank the wide original"
+        code = "\n".join(
+            line for line in src.splitlines() if not line.strip().startswith("#")
+        )
+        # Same omission rule as ingestion: assigned only under the archiving
+        # branch, never carried as an explicit None.
+        assert '"embedding_full": None' not in code
+        assert 'row["embedding_full"] = archive' in code
+        assert "if archiving:" in code
+
+    def test_memory_embeds_at_the_native_width_while_shrunk(self):
+        """The half-fix would be to bank an archive that is merely a copy of the
+        already-narrow vector, which restores nothing."""
+        import inspect
+
+        from app.services import memory
+
+        src = inspect.getsource(memory._embed)
+        assert "embedding_native_dimensions" in src
+        assert "dimensions=native_dims" in src
 
 
 class TestMemoryChunking:
@@ -2540,7 +2569,7 @@ class TestMemoryChunking:
 
         def fake_embed(db, proj, content):
             embedded.append(content)
-            return [0.1, 0.2]
+            return [0.1, 0.2], None
 
         monkeypatch.setattr(memory_service, "_embed", fake_embed)
 
@@ -2610,3 +2639,170 @@ class TestMemoryPiecesInTheGraph:
         # contains down, derived_from back up, next between consecutive pieces
         for edge_type in ('type="contains"', 'type="derived_from"', 'type="next"'):
             assert edge_type in piece_block, f"missing {edge_type} on memory pieces"
+
+
+class TestNoUndefinedHelpers:
+    """Every module-private helper that is CALLED must actually exist.
+
+    This exists because a real one slipped through: `_truncate_vectors_in_place`
+    was renamed to `_shrink_vectors_in_place`, one of the two call sites was
+    missed, and the upload endpoint's shrink branch raised NameError in
+    production for months. The whole test suite passed - 589 tests - because the
+    only test covering that branch (TestTruncatePathBumpsVersion) reads the
+    source with ast.parse and never EXECUTES it, and no linter runs in CI.
+
+    A type checker or pyflakes would catch this; neither is installed. This is
+    the cheap stand-in, and it is deliberately narrow: leading-underscore names
+    called as plain functions are module-local by convention, so resolving them
+    needs no scope analysis and there are no false positives to suppress.
+    """
+
+    MODULES = [
+        "app.routers.files",
+        "app.services.memory",
+        "app.services.memory_graph",
+        "app.services.retrieval",
+        "app.services.ingestion",
+        "app.routers.memory",
+    ]
+
+    @staticmethod
+    def _undefined_private_calls(module):
+        import ast
+        import builtins
+        import inspect
+
+        source = inspect.getsource(module)
+        tree = ast.parse(source)
+        defined = set(vars(module)) | set(vars(builtins))
+        # names bound anywhere in the file: defs, classes, assignments, imports,
+        # comprehension targets, function parameters, walrus, for-loops
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined.add(node.name)
+                args = node.args if hasattr(node, "args") else None
+                if args is not None:
+                    for a in (
+                        list(args.args)
+                        + list(args.posonlyargs)
+                        + list(args.kwonlyargs)
+                        + ([args.vararg] if args.vararg else [])
+                        + ([args.kwarg] if args.kwarg else [])
+                    ):
+                        defined.add(a.arg)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                defined.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    defined.add(alias.asname or alias.name.split(".")[0])
+
+        missing = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id.startswith("_")
+                and node.func.id not in defined
+            ):
+                missing.append((node.func.id, node.lineno))
+        return missing
+
+    def test_the_scan_can_actually_fail(self):
+        """Guards the guard. A scan that resolves everything through a stale
+        import or an over-broad `defined` set would pass vacuously."""
+        import ast
+
+        tree = ast.parse("def f():\n    return _gone(1)\n")
+
+        class _Stub:
+            pass
+
+        stub = _Stub()
+        stub_module = type(ast)("stub")
+        stub_module.__dict__.clear()
+        found = [
+            n.func.id
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        ]
+        assert found == ["_gone"], "the AST walk does not see private calls at all"
+        assert stub is not None
+
+    def test_no_module_calls_a_helper_that_does_not_exist(self):
+        import importlib
+
+        offenders = {}
+        for name in self.MODULES:
+            missing = self._undefined_private_calls(importlib.import_module(name))
+            if missing:
+                offenders[name] = missing
+        assert offenders == {}, f"calls to undefined private helpers: {offenders}"
+
+
+class TestUploadHandlesEveryEmbeddingPlan:
+    """upload_files accepts an embedding_dimensions change (the Add-files dialog
+    always sends one), so it must handle EVERY plan _plan_embedding_change can
+    return - not just the two it happened to be written for.
+
+    The "restore" plan (same MRL model, LARGER size) fell through: the project's
+    embedding_dimensions was updated while every stored vector kept the old
+    width. pgvector RAISES on a width mismatch, so that is not a degraded
+    search - it is a 500 on every subsequent query, with no route back through
+    the UI because a later reindex at the same value plans "keep".
+    """
+
+    @staticmethod
+    def _plan_branches():
+        import ast
+        import inspect
+
+        from app.routers import files as files_router
+
+        tree = ast.parse(inspect.getsource(files_router))
+        upload = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == "upload_files"
+        )
+        return ast.unparse(upload)
+
+    def test_upload_acts_on_the_restore_plan(self):
+        body = self._plan_branches()
+        assert "_restore_vectors_from_archive" in body, (
+            "upload_files ignores plan == 'restore': it would move "
+            "project.embedding_dimensions while the stored vectors keep the old "
+            "width, and every later query raises on the mismatch"
+        )
+
+    def test_upload_never_leaves_a_partial_restore(self):
+        """This endpoint has no partial-requeue machinery, so a non-empty gap
+        must be demoted to a full re-embed rather than left half-migrated."""
+        body = self._plan_branches()
+        assert "gap is None or gap" in body, (
+            "a partial restore in upload_files must fall back to 'reembed'"
+        )
+
+    def test_every_plan_value_is_handled(self):
+        """If registry grows a new plan, this fails rather than silently
+        falling through to 'set the dimension and hope'."""
+        import ast
+        import inspect
+
+        from app.providers import registry
+
+        # Every string literal reachable from a `return`, including the ones
+        # inside a ternary - line 323 is `return "truncate" if ... else
+        # "restore"`, so a line-based scan sees neither.
+        tree = ast.parse(inspect.getsource(registry.embedding_change_plan).strip())
+        returned = {
+            const.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Return) and node.value is not None
+            for const in ast.walk(node.value)
+            if isinstance(const, ast.Constant) and isinstance(const.value, str)
+        }
+        assert returned == {"keep", "truncate", "restore", "reembed"}, (
+            f"embedding_change_plan's return values changed: {returned} - "
+            "upload_files and reindex_project must both be reviewed"
+        )

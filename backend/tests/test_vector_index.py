@@ -69,6 +69,9 @@ class _Rows:
     def scalar(self):
         return self._rows[0] if self._rows else None
 
+    def all(self):
+        return list(self._rows)
+
     def __iter__(self):
         return iter(self._rows)
 
@@ -115,6 +118,9 @@ class _FakeSession:
         total_chunks=1_000_000.0,
         project_chunks=200_000,
         probe_raises=False,
+        memory_indexes=("memory_chunks_embedding_hnsw_1536_idx",),
+        total_memory_chunks=1_000_000.0,
+        project_memory_chunks=200_000,
     ):
         self.capable = capable
         self.vector_version = vector_version
@@ -122,6 +128,9 @@ class _FakeSession:
         self.total_chunks = total_chunks
         self.project_chunks = project_chunks
         self.probe_raises = probe_raises
+        self.memory_indexes = list(memory_indexes)
+        self.total_memory_chunks = total_memory_chunks
+        self.project_memory_chunks = project_memory_chunks
         self.statements = []       # every statement passed to session.execute
         self.core_statements = []  # every statement run on the connection
         self.rollbacks = 0
@@ -153,11 +162,15 @@ class _FakeSession:
                         "vector_version": self.vector_version,
                         "hnsw_indexes": self.indexes,
                         "chunk_reltuples": self.total_chunks,
+                        "memory_hnsw_indexes": self.memory_indexes,
+                        "memory_reltuples": self.total_memory_chunks,
                     }
                 ]
             )
         if "sum(chunk_count)" in sql:
             return _Rows([self.project_chunks])
+        if "from memory_chunks where project_id" in sql.lower():
+            return _Rows([self.project_memory_chunks])
         if "set_config" in sql:
             return _Rows([])
         if "m.tags" in sql:  # a memory-target neighbour query
@@ -849,3 +862,190 @@ class TestTheMigrationRunnerSurfacesNotices:
         assert "NOTICE" in printed
         assert "0018_hnsw_vector_indexes.sql" in printed  # ...and which file said so
         assert len(scope["notices"]) == 1  # counted, so the OK line can say so
+
+
+class TestMemoryChunkAnn:
+    """The pieces of long memories route onto their own HNSW indexes.
+
+    Same gate, same thresholds, same fail-closed rule as document chunks - but
+    on memory_chunks' OWN row counts and memory_chunks' OWN indexes. The bug
+    this guards against is subtle and silent: borrow the document side's
+    numbers and a project with a million document chunks would route its memory
+    search onto an index that does not exist, and the planner would fall back
+    to a seq scan that now ALSO pays a cast per row - strictly slower than the
+    exact query it replaced, while still returning correct rows.
+    """
+
+    def test_ann_sql_lines_up_with_the_index(self):
+        """The three textual conditions. Miss any one and the index is ignored
+        silently - correct rows, worse performance, no signal anywhere."""
+        from app.services import memory
+
+        stmt = memory._ann_search_sql(1536)
+        sql = " ".join(str(stmt).split())
+        # ORDER BY operand is TEXTUALLY the index expression...
+        assert (
+            "ORDER BY embedding::vector(1536) <=> CAST(:qvec AS vector(1536))" in sql
+        )
+        # ...the WHERE repeats the index predicate verbatim...
+        assert "vector_dims(embedding) = 1536" in sql
+        # ...and the ANN scan is pinned as its own node so the outer GROUP BY
+        # cannot be pushed under the LIMIT.
+        assert "MATERIALIZED" in sql
+
+    def test_parents_branch_is_never_limited(self):
+        """What makes the piece LIMIT safe. Every memory stays a candidate via
+        its own vector, so a piece outside the limit costs that memory its
+        piece-level boost - never its findability. Limit both branches and the
+        query silently becomes lossy."""
+        from app.services import memory
+
+        sql = " ".join(str(memory._ann_search_sql(1536)).split())
+        parents = sql.split("UNION ALL")[0].split("FROM memories")[1]
+        assert "LIMIT" not in parents.upper()
+
+    def test_unknown_dimension_gets_no_ann_sql(self):
+        """3072 has no HNSW index (pgvector's limit is 2000 dims) and must not
+        render one. build_ann_sql's allowlist is the injection guard too."""
+        from app.services import memory
+
+        assert memory._ann_search_sql(3072) is None
+        assert memory._ann_search_sql(999) is None
+
+    def test_oversample_is_derived_not_hardcoded(self):
+        """top_k distinct memories must still be reachable when the nearest
+        pieces all belong to one long memory."""
+        from app.services.memory import (
+            MAX_PIECES_PER_MEMORY,
+            MEMORY_CHUNK_OVERLAP,
+            MEMORY_CHUNK_SIZE,
+        )
+
+        assert MAX_PIECES_PER_MEMORY == -(
+            -8000 // (MEMORY_CHUNK_SIZE - MEMORY_CHUNK_OVERLAP)
+        )
+        assert MAX_PIECES_PER_MEMORY > 1
+
+    def test_gate_uses_memory_counts_not_document_counts(self):
+        """A project huge in documents but tiny in memories must stay exact."""
+        from app.services import retrieval
+
+        db = _FakeSession(project_chunks=5_000_000, project_memory_chunks=12)
+        assert retrieval.memory_ann_dimension(db, _project()) is None
+
+    def test_gate_opens_on_memory_counts_alone(self):
+        """...and the mirror image: tiny in documents, huge in memory pieces."""
+        from app.services import retrieval
+
+        db = _FakeSession(project_chunks=3, project_memory_chunks=200_000)
+        assert retrieval.memory_ann_dimension(db, _project()) == 1536
+
+    def test_missing_memory_index_closes_the_gate(self):
+        """Document indexes existing says NOTHING about memory_chunks."""
+        from app.services import retrieval
+
+        db = _FakeSession(memory_indexes=[])
+        assert retrieval.memory_ann_dimension(db, _project()) is None
+        # ...while the document gate is unaffected, proving they are independent
+        assert retrieval.ann_dimension(db, _project()) == 1536
+
+    def test_unanalyzed_memory_table_closes_the_gate(self):
+        """reltuples is -1 until ANALYZE runs. Unknown must never read as
+        'small enough to be a safe share'."""
+        from app.services import retrieval
+
+        db = _FakeSession(total_memory_chunks=-1.0)
+        assert retrieval.memory_ann_dimension(db, _project()) is None
+
+    def test_small_share_closes_the_gate(self):
+        """Post-filter recall depends on the project's SHARE of the table."""
+        from app.services import retrieval
+
+        db = _FakeSession(
+            total_memory_chunks=100_000_000.0, project_memory_chunks=25_000
+        )
+        assert retrieval.memory_ann_dimension(db, _project()) is None
+
+    def test_old_pgvector_closes_the_gate(self):
+        """Without hnsw.iterative_scan a post-filtered scan stops after
+        ef_search candidates and returns however few survived the project
+        filter - worse than not using the index at all."""
+        from app.services import retrieval
+
+        db = _FakeSession(vector_version="0.7.4")
+        assert retrieval.memory_ann_dimension(db, _project()) is None
+
+    def test_capability_defaults_report_no_memory_ann(self):
+        """An AnnCapability built without the memory fields must not inherit
+        the document answer."""
+        from app.services.retrieval import AnnCapability
+
+        cap = AnnCapability(
+            pgvector=(0, 8, 1),
+            dimensions=frozenset({1536}),
+            total_chunks=1_000_000.0,
+        )
+        assert cap.memory_dimensions == frozenset()
+        assert cap.total_memory_chunks == 0.0
+
+
+class TestMemorySearchRouting:
+    """search_memories must actually SWITCH statements, and fall back on any
+    failure. The gate returning a dimension is not the same as the query using
+    it, and a gate that opens onto an un-tuned scan is worse than one that
+    never opened."""
+
+    @staticmethod
+    def _project():
+        p = _project()
+        p.embedding_provider = "openai"
+        p.embedding_model = "text-embedding-3-small"
+        return p
+
+    class _DB(_FakeSession):
+        def __init__(self, gucs_ok=True, **kw):
+            super().__init__(**kw)
+            self.gucs_ok = gucs_ok
+            self.executed = []
+
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            if "set_config" in sql and not self.gucs_ok:
+                raise RuntimeError("cannot set hnsw gucs")
+            if "MAX(similarity)" in sql:
+                self.executed.append((sql, params or {}))
+                return _Rows([])
+            return super().execute(statement, params)
+
+        def scalars(self, stmt):
+            return _Rows([])
+
+    def _run(self, db):
+        from app.services import memory
+
+        memory.search_memories(
+            db, self._project(), "q", 5, embed_fn=lambda _q: [0.1] * 1536
+        )
+        assert db.executed, "the search statement never ran"
+        return db.executed[0]
+
+    def test_open_gate_uses_the_ann_statement(self):
+        sql, params = self._run(self._DB(project_memory_chunks=200_000))
+        assert "vector_dims(embedding) = 1536" in sql
+        # oversampled so top_k distinct memories survive the GROUP BY even when
+        # the nearest pieces all belong to one long memory
+        from app.services.memory import MAX_PIECES_PER_MEMORY
+
+        assert params["piece_limit"] == 5 * MAX_PIECES_PER_MEMORY
+
+    def test_closed_gate_uses_the_exact_statement(self):
+        sql, params = self._run(self._DB(project_memory_chunks=12))
+        assert "vector_dims" not in sql
+        assert "piece_limit" not in params
+
+    def test_failed_gucs_fall_back_to_exact(self):
+        """The gate opened, but the scan could not be tuned. Running ANN anyway
+        would post-filter by project_id and stop after ef_search candidates,
+        returning however few survived - silently fewer memories, no error."""
+        sql, _ = self._run(self._DB(project_memory_chunks=200_000, gucs_ok=False))
+        assert "vector_dims" not in sql

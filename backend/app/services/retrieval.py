@@ -106,6 +106,16 @@ ANN_DIMENSIONS = frozenset({256, 384, 512, 768, 1024, 1536})
 ANN_INDEX_PREFIX = "chunks_embedding_hnsw_"
 _ANN_INDEX_RE = re.compile(rf"^{ANN_INDEX_PREFIX}(\d+)_idx$")
 
+# The same machinery for the split pieces of long memories (migration 0026).
+# A SEPARATE prefix, and separate everything downstream: the two tables have
+# independent row counts and independently buildable indexes, so a project big
+# enough in documents says nothing about whether its memory search should use an
+# index. Sharing one flag would open the gate for a table with no index behind
+# it, and the planner would silently fall back to a seq scan that now also pays
+# a cast per row - slower than the exact path it replaced.
+MEMORY_ANN_INDEX_PREFIX = "memory_chunks_embedding_hnsw_"
+_MEMORY_ANN_INDEX_RE = re.compile(rf"^{MEMORY_ANN_INDEX_PREFIX}(\d+)_idx$")
+
 # How long a per-(project, content_version) chunk count is reused. Per process
 # and NOT Redis: this is only a gate input, cheap to recompute, and a network
 # round trip to decide whether to use an index would defeat the point.
@@ -114,6 +124,10 @@ ANN_SIZE_CACHE_TTL_SECONDS = 600
 
 def ann_index_name(dim: int) -> str:
     return f"{ANN_INDEX_PREFIX}{dim}_idx"
+
+
+def memory_ann_index_name(dim: int) -> str:
+    return f"{MEMORY_ANN_INDEX_PREFIX}{dim}_idx"
 
 
 def _is_ann_dimension(dim) -> bool:
@@ -127,6 +141,11 @@ class AnnCapability:
     pgvector: tuple[int, int, int]
     dimensions: frozenset[int]   # dims with a VALID cosine hnsw index on chunks
     total_chunks: float          # pg_class.reltuples for public.chunks
+    # The same two facts for memory_chunks. Defaulted so any caller that builds
+    # an AnnCapability without them (tests, an older probe) reports "no memory
+    # ANN" rather than inheriting the document answer.
+    memory_dimensions: frozenset[int] = frozenset()
+    total_memory_chunks: float = 0.0
 
 
 NO_ANN = AnnCapability(pgvector=(0, 0, 0), dimensions=frozenset(), total_chunks=0.0)
@@ -167,7 +186,21 @@ _CAPABILITY_SQL = text(
                AND am.amname = 'hnsw'
                AND op.opcname = 'vector_cosine_ops') AS hnsw_indexes,
            (SELECT c.reltuples FROM pg_class c
-             WHERE c.oid = to_regclass('public.chunks')) AS chunk_reltuples
+             WHERE c.oid = to_regclass('public.chunks')) AS chunk_reltuples,
+           (SELECT coalesce(array_agg(c.relname::text), ARRAY[]::text[])
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_index i ON i.indexrelid = c.oid
+              JOIN pg_am am ON am.oid = c.relam
+              JOIN pg_opclass op ON op.oid = i.indclass[0]
+             WHERE n.nspname = 'public'
+               AND strpos(c.relname::text, 'memory_chunks_embedding_hnsw_') = 1
+               AND i.indisvalid
+               AND i.indrelid = to_regclass('public.memory_chunks')
+               AND am.amname = 'hnsw'
+               AND op.opcname = 'vector_cosine_ops') AS memory_hnsw_indexes,
+           (SELECT c.reltuples FROM pg_class c
+             WHERE c.oid = to_regclass('public.memory_chunks')) AS memory_reltuples
     """
 )
 
@@ -269,7 +302,7 @@ def _parse_pgvector_version(raw) -> tuple[int, int, int]:
     return (int(parts[0]), int(parts[1]), int(parts[2]))
 
 
-def _indexed_dimensions(names) -> frozenset[int]:
+def _indexed_dimensions(names, pattern=None) -> frozenset[int]:
     """Read the dimension out of each index name the probe returned.
 
     The name is only a LABEL here: _CAPABILITY_SQL has already proven every
@@ -278,9 +311,10 @@ def _indexed_dimensions(names) -> frozenset[int]:
     unparseable or non-allowlisted name is still dropped - a dimension we would
     not emit SQL for is a dimension we must not claim to have an index for.
     """
+    pattern = pattern or _ANN_INDEX_RE
     found = set()
     for name in names or ():
-        match = _ANN_INDEX_RE.match(str(name))
+        match = pattern.match(str(name))
         if match and int(match.group(1)) in ANN_DIMENSIONS:
             found.add(int(match.group(1)))
     return frozenset(found)
@@ -314,6 +348,10 @@ def ann_capability(db: Session) -> AnnCapability:
                 pgvector=_parse_pgvector_version(row["vector_version"]),
                 dimensions=_indexed_dimensions(row["hnsw_indexes"]),
                 total_chunks=float(row["chunk_reltuples"] or 0.0),
+                memory_dimensions=_indexed_dimensions(
+                    row["memory_hnsw_indexes"], _MEMORY_ANN_INDEX_RE
+                ),
+                total_memory_chunks=float(row["memory_reltuples"] or 0.0),
             )
     except Exception:
         logger.debug(
@@ -393,6 +431,96 @@ def ann_dimension(db: Session, project: Project) -> int | None:
         return None
     logger.debug(
         "retrieval_path=ann project=%s dim=%s chunks=%s share=%.4f",
+        project.id, dim, owned, share,
+    )
+    return dim
+
+
+_PROJECT_MEMORY_CHUNKS_SQL = text(
+    "SELECT count(*) FROM memory_chunks WHERE project_id = :pid"
+)
+
+
+def _project_memory_chunk_count(db: Session, project: Project) -> int:
+    """This project's memory_chunks total, memoized on its content_version.
+
+    A real count(*), not a denormalised sum: `files.chunk_count` gives the
+    document side a free answer, but nothing on `memories` tracks how many
+    pieces it split into, and adding a counter column would be a second source
+    of truth to keep honest for a number used only as a gate input.
+    memory_chunks_project_idx bounds it, the gate only fires above 20,000 rows
+    where one indexed count is noise next to the scan it is deciding about, and
+    the result is cached per content_version - so at most one per write.
+
+    Same fail-closed rule as everywhere else here: unanswerable means 0, which
+    closes the gate rather than guessing an index is safe to use.
+    """
+    key = f"annmemsize:{project.id}:v{project.content_version}"
+    cached = _ann_size_cache.get(key)
+    if cached is not None:
+        try:
+            return int(cached)
+        except (TypeError, ValueError):
+            pass
+    try:
+        connection = db.connection()
+        with connection.begin_nested():
+            total = connection.execute(
+                _PROJECT_MEMORY_CHUNKS_SQL, {"pid": str(project.id)}
+            ).scalar()
+    except Exception:
+        # Includes a database without migration 0025, where the table itself
+        # does not exist. The SAVEPOINT keeps that from aborting the caller's
+        # transaction, exactly as the capability probe does.
+        logger.debug(
+            "Project memory-chunk count unavailable; using exact vector search",
+            exc_info=True,
+        )
+        return 0
+    count = int(total or 0)
+    _ann_size_cache.set(key, str(count), ANN_SIZE_CACHE_TTL_SECONDS)
+    return count
+
+
+def memory_ann_dimension(db: Session, project: Project) -> int | None:
+    """The dimension to run MEMORY ANN at, or None to use the exact SQL.
+
+    Deliberately the same shape, thresholds and ordering as ann_dimension: the
+    reasons a document ANN scan is safe or unsafe are properties of pgvector and
+    of post-filtered HNSW, not of what the rows mean, so a second set of tuning
+    knobs would be two things to keep in sync for no gain.
+
+    What differs is the INPUTS, and they must not be borrowed from the document
+    side: the row count is memory_chunks', the share is memory_chunks', and the
+    indexed dimensions come from indexes proven to sit on public.memory_chunks.
+    A project with a million document chunks and forty memory pieces would
+    otherwise route its memory search onto an index that does not exist.
+
+    The parent `memories` table stays exact regardless. It is capped at 2000
+    rows per project, so it is genuinely small - the pieces are the side that
+    grows, and they are the only side this gate governs.
+    """
+    if not settings.vector_ann_enabled:
+        return None
+    dim = project.embedding_dimensions
+    if not _is_ann_dimension(dim):
+        return None
+    capability = ann_capability(db)
+    if capability.pgvector < (0, 8, 0):
+        return None
+    if dim not in capability.memory_dimensions:
+        return None
+    total = capability.total_memory_chunks
+    if total <= 0:   # reltuples is -1 until the table is analyzed: unknown
+        return None
+    owned = _project_memory_chunk_count(db, project)
+    if owned < settings.vector_ann_min_chunks:
+        return None
+    share = owned / total
+    if share < settings.vector_ann_min_project_share:
+        return None
+    logger.debug(
+        "memory_retrieval_path=ann project=%s dim=%s pieces=%s share=%.4f",
         project.id, dim, owned, share,
     )
     return dim
