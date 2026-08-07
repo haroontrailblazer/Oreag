@@ -4,6 +4,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from ..auth.jwt import get_current_user, get_user_pending_mfa
@@ -110,3 +111,49 @@ def consume_recovery_code(
     """
     if not mfa.consume_recovery_code(db, user_id, body.code):
         raise HTTPException(400, "That recovery code isn't valid.")
+
+
+class SecurityPrefs(BaseModel):
+    """Per-user security preferences the dashboard can read and write."""
+
+    two_factor_prompt: bool
+
+
+@router.get("/security-prefs", response_model=SecurityPrefs)
+def read_security_prefs(
+    user_id: uuid.UUID = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return SecurityPrefs(
+        two_factor_prompt=mfa.two_factor_prompt_enabled(db, user_id)
+    )
+
+
+@router.put("/security-prefs", response_model=SecurityPrefs)
+def update_security_prefs(
+    body: SecurityPrefs,
+    user_id: uuid.UUID = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Turn the sign-in challenge on or off WITHOUT touching the factors.
+
+    Behind `get_current_user`, so a session that still owes its second factor
+    cannot reach this route to switch the factor off - which would be a
+    self-service bypass. Clearing the prompt is therefore something only a
+    fully-authenticated session can do.
+    """
+    db.execute(
+        sql_text(
+            "insert into public.user_security_prefs (user_id, two_factor_prompt) "
+            "values (:uid, :value) "
+            "on conflict (user_id) do update "
+            "  set two_factor_prompt = excluded.two_factor_prompt, "
+            "      updated_at = now()"
+        ),
+        {"uid": str(user_id), "value": body.two_factor_prompt},
+    )
+    db.commit()
+    # The gate caches this for mfa_cache_ttl_seconds. Without the eviction the
+    # switch appears to do nothing for up to a minute.
+    mfa.forget_two_factor_prompt(user_id)
+    return body

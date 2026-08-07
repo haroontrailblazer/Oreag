@@ -119,6 +119,9 @@ class TestGetCurrentUserGate:
         # test in this class keeps testing the aal2 rule and nothing else.
         amr=({"method": "otp"},),
         require_email=True,
+        # The user wants to be challenged unless they say otherwise, so every
+        # pre-existing test keeps exercising the aal2 rule.
+        prompt_enabled=True,
     ):
         user_id = uuid.uuid4()
         claims = {"sub": str(user_id), "aal": aal}
@@ -132,6 +135,9 @@ class TestGetCurrentUserGate:
         )
         monkeypatch.setattr(
             jwt_module, "has_verified_factor", lambda _db, _uid: has_factor
+        )
+        monkeypatch.setattr(
+            jwt_module, "two_factor_prompt_enabled", lambda _db, _uid: prompt_enabled
         )
         return user_id, jwt_module.get_current_user(_creds(), _FakeSession())
 
@@ -277,3 +283,93 @@ def test_both_auth_headers_are_cors_exposed():
     exposed = {h.strip().lower() for h in settings.cors_expose_headers.split(",")}
     assert MFA_REQUIRED_HEADER.lower() in exposed
     assert EMAIL_VERIFICATION_HEADER.lower() in exposed
+
+
+class TestTwoFactorPromptPreference:
+    """Keeping a factor while switching the sign-in challenge off.
+
+    Supabase gives a factor two states, verified and unverified - there is no
+    "keep it but stop asking". So the only way to stop prompting used to be
+    `mfa.unenroll()`, which DELETES the TOTP secret and forces a fresh QR scan
+    to turn it back on. The preference decouples the two.
+    """
+
+    def _gate(self, monkeypatch, **kw):
+        return TestGetCurrentUserGate()._call(monkeypatch, **kw)
+
+    def test_prompt_off_lets_an_aal1_session_through(self, monkeypatch):
+        user_id, result = self._gate(
+            monkeypatch, aal="aal1", has_factor=True, prompt_enabled=False
+        )
+        assert result == user_id
+
+    def test_prompt_on_still_refuses(self, monkeypatch):
+        """The default. Nothing about this feature may weaken the normal case."""
+        with pytest.raises(HTTPException) as exc:
+            self._gate(
+                monkeypatch, aal="aal1", has_factor=True, prompt_enabled=True
+            )
+        assert exc.value.status_code == 403
+        assert exc.value.headers.get(jwt_module.MFA_REQUIRED_HEADER) == "1"
+
+    def test_prompt_off_still_requires_proof_of_the_mailbox(self, monkeypatch):
+        """A factor that is never challenged is not protecting anything, so the
+        account falls back to the same rule as one with no factor at all -
+        otherwise switching the prompt off would be a way to shed BOTH steps."""
+        with pytest.raises(HTTPException) as exc:
+            self._gate(
+                monkeypatch,
+                aal="aal1",
+                has_factor=True,
+                prompt_enabled=False,
+                amr=[{"method": "password"}],
+            )
+        assert exc.value.status_code == 403
+        assert exc.value.headers.get(jwt_module.EMAIL_VERIFICATION_HEADER) == "1"
+
+    def test_the_preference_is_read_only_when_a_factor_exists(self, monkeypatch):
+        """Ordering matters for cost: the overwhelming majority of accounts have
+        no factor, and they must not pay for a second lookup."""
+        calls = []
+        monkeypatch.setattr(
+            jwt_module,
+            "two_factor_prompt_enabled",
+            lambda _db, _uid: calls.append(1) or True,
+        )
+        TestGetCurrentUserGate()._call(monkeypatch, aal="aal1", has_factor=False)
+        assert calls == [], "queried the preference for an account with no factor"
+
+
+class TestPreferenceFailsSafe:
+    """Every failure path must return 'keep prompting'.
+
+    The value is only ever consulted to decide whether to SKIP enforcement, so
+    an unreadable preference must never be the reason a gate opens.
+    """
+
+    def test_missing_function_reports_enabled(self, monkeypatch):
+        from app.services import mfa as mfa_module
+
+        monkeypatch.setattr(mfa_module, "_prompt_function_missing", False)
+        monkeypatch.setattr(mfa_module, "_prompt_cache", {})
+        db = _FakeSession(
+            raises=Exception('function public.two_factor_prompt_enabled(uuid) does not exist')
+        )
+        assert mfa_module.two_factor_prompt_enabled(db, uuid.uuid4()) is True
+
+    def test_a_transient_error_reports_enabled(self, monkeypatch):
+        from app.services import mfa as mfa_module
+
+        monkeypatch.setattr(mfa_module, "_prompt_function_missing", False)
+        monkeypatch.setattr(mfa_module, "_prompt_cache", {})
+        db = _FakeSession(raises=Exception("connection reset by peer"))
+        assert mfa_module.two_factor_prompt_enabled(db, uuid.uuid4()) is True
+        assert db.rolled_back, "a failed lookup must not poison the transaction"
+
+    def test_a_null_result_reports_enabled(self, monkeypatch):
+        """No row means the user never turned it off."""
+        from app.services import mfa as mfa_module
+
+        monkeypatch.setattr(mfa_module, "_prompt_function_missing", False)
+        monkeypatch.setattr(mfa_module, "_prompt_cache", {})
+        assert mfa_module.two_factor_prompt_enabled(_FakeSession(value=None), uuid.uuid4()) is True

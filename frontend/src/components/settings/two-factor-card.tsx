@@ -45,15 +45,18 @@ import {
 } from "@/lib/auth-errors"
 import {
   MFA_FACTORS_KEY,
+  SECURITY_PREFS_KEY,
   PASSKEYS_KEY,
   RECOVERY_KEY,
   TOTP_KEY,
   fetchMfaFactors,
   fetchPasskeys,
   fetchRecoveryCount,
+  fetchSecurityPrefs,
   fetchTotpFactors,
   type MfaFactor,
   type Passkey,
+  type SecurityPrefs,
   type TotpFactor,
 } from "@/lib/settings-data"
 import { usePasskeySupport } from "@/lib/auth-hooks"
@@ -119,6 +122,9 @@ export function TwoFactorCard() {
   // Webauthn factors appear only in listFactors().all, so the TOTP-only
   // fetcher above cannot see a passkey enrolled as a GATE.
   const mfaFactors = useSWR<MfaFactor[]>(MFA_FACTORS_KEY, fetchMfaFactors)
+  // Whether sign-in challenges the factor. Separate from whether one EXISTS -
+  // that is the whole point of the switch below.
+  const prefs = useSWR<SecurityPrefs>(SECURITY_PREFS_KEY, fetchSecurityPrefs)
 
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -174,7 +180,22 @@ export function TwoFactorCard() {
     (f) => f.factor_type === "webauthn" && f.status === "verified"
   )
   const total = passkeyFactors.length + totpList.length
-  const twoFactorOn = total > 0
+  const twoFactorOn = total > 0 && prefs.data?.two_factor_prompt !== false
+
+  /**
+   * Offer "add a passkey" only when the account HAS none - counting login
+   * passkeys as well as factors.
+   *
+   * The two live in different tables and only one of them gates a sign-in, but
+   * the user does not see two kinds of passkey: they see the passkey they
+   * already registered, next to a button telling them to register one. Whatever
+   * the internals, "add" is the wrong word once one exists.
+   */
+  const canAddPasskey =
+    passkeyFactors.length === 0 &&
+    passkeyList.length === 0 &&
+    passkeySupported !== false &&
+    !webauthnUnavailable
   const loading = passkeys.isLoading || totp.isLoading || mfaFactors.isLoading
 
   async function refreshFactors() {
@@ -227,30 +248,28 @@ export function TwoFactorCard() {
   }
 
   /**
-   * Turn two-factor OFF: unenrol every factor.
+   * Turn the sign-in challenge OFF while KEEPING every enrolled factor.
    *
-   * LOGIN passkeys are deliberately left alone. They are a convenience - a
-   * one-step passwordless sign-in - not a gate, so removing them would take
-   * away a sign-in method the user never asked to lose.
+   * It used to unenrol them, because Supabase has no disabled-factor state -
+   * but that deletes the TOTP secret, so switching back on meant scanning a
+   * fresh QR code. Nobody expects a toggle to destroy their setup. The factor
+   * stays; a server-side preference (migration 0027) tells the gate not to ask.
+   *
+   * Written server-side, never in user_metadata: metadata rides in the JWT and
+   * is writable by the user's own token, so a stolen aal1 session could switch
+   * its own second factor off - a complete bypass.
    */
-  async function disableTwoFactor() {
-    setBusy("disable")
+  async function setTwoFactorPrompt(enabled: boolean) {
+    setBusy("prompt")
     try {
-      const all = mfaFactors.data ?? []
-      const results = await Promise.all(
-        all.map((f) =>
-          supabase.auth.mfa
-            .unenroll({ factorId: f.id })
-            .catch(() => ({ error: new Error("unenroll failed") }))
-        )
-      )
-      const failed = results.filter((r) => r.error).length
-      if (failed) {
-        toast.error("Could not remove every method - please try again.")
-      } else {
-        toast.success("Two-factor turned off")
-      }
-      await refreshFactors()
+      await api(SECURITY_PREFS_KEY, {
+        method: "PUT",
+        body: JSON.stringify({ two_factor_prompt: enabled }),
+      })
+      await prefs.mutate()
+      toast.success(enabled ? "Two-factor turned on" : "Two-factor turned off")
+    } catch (err) {
+      toast.error(authErrorMessage(err, "Could not change that setting."))
     } finally {
       setBusy(null)
       setDisableOpen(false)
@@ -499,11 +518,18 @@ export function TwoFactorCard() {
           <Switch
             label="Two-factor authentication"
             checked={twoFactorOn}
-            busy={busy === "disable"}
+            busy={busy === "prompt"}
             disabled={loading}
-            onCheckedChange={(next) =>
-              next ? setChooseOpen(true) : setDisableOpen(true)
-            }
+            onCheckedChange={(next) => {
+              // ON with a factor already enrolled just re-enables the prompt -
+              // no need to make them add a second one they did not ask for.
+              if (next) {
+                if (total > 0) void setTwoFactorPrompt(true)
+                else setChooseOpen(true)
+                return
+              }
+              setDisableOpen(true)
+            }}
           />
         </div>
 
@@ -554,7 +580,7 @@ export function TwoFactorCard() {
               // open invitation to keep adding. Remove the passkey and it
               // comes back.
               action={
-                passkeyFactors.length > 0 ? null : webauthnUnavailable ? (
+                !canAddPasskey && (passkeyFactors.length > 0 || passkeyList.length > 0) ? null : webauthnUnavailable ? (
                   <p className="max-w-56 text-right text-xs text-muted-foreground">
                     Not enabled as a second factor on this project
                   </p>
@@ -805,55 +831,68 @@ export function TwoFactorCard() {
           plain terms: it is the faster one and the one most people already have
           hardware for. */}
       <Dialog open={chooseOpen} onOpenChange={setChooseOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Turn on two-factor</DialogTitle>
             <DialogDescription>
-              Pick how you want to confirm it&rsquo;s you. One is enough - you
-              can add the other later.
+              Pick how you want to confirm it&rsquo;s you when signing in.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            {passkeySupported !== false && !webauthnUnavailable && (
-              <Button
+
+          {/* Plain <button> elements, not <Button>. The shadcn button centres
+              its content and sets whitespace-nowrap, so a two-line label inside
+              it collapsed and overflowed - these are cards, not buttons, and
+              styling them directly is less code than overriding all of that. */}
+          <div className="grid gap-2">
+            {canAddPasskey && (
+              <button
                 type="button"
-                variant="outline"
-                className="h-auto w-full justify-start gap-3 py-3 text-left"
                 disabled={busy === "passkey" || passkeySupported === null}
                 onClick={() => {
                   setChooseOpen(false)
                   void addPasskeyFactor()
                 }}
+                className="flex w-full items-start gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <Fingerprint weight="duotone" className="size-5 shrink-0" />
-                <span className="min-w-0">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+                  <Fingerprint weight="duotone" className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium">Passkey</span>
-                  <span className="block text-xs font-normal text-muted-foreground">
-                    Face, fingerprint or device PIN
+                  <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                    Face, fingerprint or device PIN. Nothing to type.
                   </span>
                 </span>
-              </Button>
+              </button>
             )}
-            <Button
+
+            <button
               type="button"
-              variant="outline"
-              className="h-auto w-full justify-start gap-3 py-3 text-left"
               onClick={() => {
                 setChooseOpen(false)
                 void beginTotp()
               }}
+              className="flex w-full items-start gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <DeviceMobile weight="duotone" className="size-5 shrink-0" />
-              <span className="min-w-0">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+                <DeviceMobile weight="duotone" className="size-5" />
+              </span>
+              <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium">
                   Authenticator app
                 </span>
-                <span className="block text-xs font-normal text-muted-foreground">
-                  A 6-digit code from Google Authenticator, 1Password, Authy
+                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                  A 6-digit code from Google Authenticator, 1Password or Authy.
                 </span>
               </span>
-            </Button>
+            </button>
           </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChooseOpen(false)}>
+              Cancel
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -862,16 +901,14 @@ export function TwoFactorCard() {
           <DialogHeader>
             <DialogTitle>Turn off two-factor?</DialogTitle>
             <DialogDescription>
-              Your password alone will sign you in. Every second factor on this
-              account is removed - {total === 1 ? "1 method" : `${total} methods`}.
+              Your password alone will sign you in.
             </DialogDescription>
           </DialogHeader>
-          {passkeyList.length > 0 && (
-            <p className="text-sm text-muted-foreground">
-              Your one-step passkey sign-in keeps working - only the second-factor
-              prompt goes away.
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground">
+            {total > 0
+              ? "Your methods stay set up - we just stop asking for them. Turn this back on any time without scanning anything again."
+              : "You can turn this back on whenever you like."}
+          </p>
           <DialogFooter>
             <Button
               variant="outline"
@@ -881,11 +918,10 @@ export function TwoFactorCard() {
               Cancel
             </Button>
             <Button
-              variant="destructive"
-              disabled={busy === "disable"}
-              onClick={disableTwoFactor}
+              disabled={busy === "prompt"}
+              onClick={() => void setTwoFactorPrompt(false)}
             >
-              {busy === "disable" ? <Spin /> : null}
+              {busy === "prompt" ? <Spin /> : null}
               Turn off
             </Button>
           </DialogFooter>

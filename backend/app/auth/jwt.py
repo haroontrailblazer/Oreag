@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
-from ..services.mfa import has_verified_factor
+from ..services.mfa import has_verified_factor, two_factor_prompt_enabled
 from ..services.rate_limit import enforce_user_rate_limit
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -152,7 +152,15 @@ def get_current_user(
     # not cleared the second factor. A 401 would read as "signed out" to every
     # client and trigger a re-login that lands in exactly the same state.
     if settings.mfa_enforce_aal2 and payload.get("aal") != "aal2":
-        if has_verified_factor(db, user_id):
+        # `and two_factor_prompt_enabled(...)` - the user may keep a factor
+        # enrolled while asking not to be challenged. Supabase has no
+        # disabled-factor state, so before this the only way to stop the prompt
+        # was to DELETE the factor and lose the enrolment. The preference is
+        # read second, so the cheap "has a factor at all" check still
+        # short-circuits for the overwhelming majority who have none.
+        if has_verified_factor(db, user_id) and two_factor_prompt_enabled(
+            db, user_id
+        ):
             raise HTTPException(
                 status_code=403,
                 detail="Two-factor authentication required for this session.",

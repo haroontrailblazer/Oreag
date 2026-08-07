@@ -96,3 +96,25 @@ export async function verifyPasskeyFactor(
   const { error } = await supabase.auth.mfa.webauthn.authenticate({ factorId })
   if (error) throw error
 }
+
+/**
+ * Does this account want to be challenged at sign-in?
+ *
+ * Read through the API rather than from Supabase: the preference is server-side
+ * on purpose (see migration 0027), because a value the browser could write
+ * would be a self-service 2FA bypass.
+ *
+ * TRUE on any failure - the same fail-safe direction as the backend. This is
+ * only ever used to decide whether to SKIP a prompt.
+ */
+export async function twoFactorPromptEnabled(): Promise<boolean> {
+  try {
+    const { api } = await import("@/lib/api")
+    const prefs = await api<{ two_factor_prompt: boolean }>(
+      "/api/account/security-prefs"
+    )
+    return prefs.two_factor_prompt !== false
+  } catch {
+    return true
+  }
+}

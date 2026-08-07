@@ -21,6 +21,7 @@ import {
   NO_FACTORS,
   loadSecondFactors,
   preferredFactor,
+  twoFactorPromptEnabled,
   verifyPasskeyFactor,
   type SecondFactors,
 } from "@/lib/mfa"
@@ -57,8 +58,19 @@ export default function TwoFactorPage() {
 
   useEffect(() => {
     let alive = true
-    void loadSecondFactors(supabase).then((found) => {
+    void Promise.all([
+      loadSecondFactors(supabase),
+      twoFactorPromptEnabled(),
+    ]).then(([found, prompt]) => {
       if (!alive) return
+      // The middleware redirects on "a verified factor exists", which it reads
+      // from the session cookie - it cannot see the preference. So an account
+      // that switched the prompt off lands here anyway; send it on rather than
+      // demanding a code the API no longer wants.
+      if (!prompt) {
+        window.location.replace("/dashboard")
+        return
+      }
       setFactors(found)
       const preferred = preferredFactor(found)
       if (preferred === "totp" && found.totp) {

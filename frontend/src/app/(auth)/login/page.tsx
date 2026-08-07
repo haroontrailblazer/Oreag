@@ -34,6 +34,7 @@ import {
   NO_FACTORS,
   loadSecondFactors,
   preferredFactor,
+  twoFactorPromptEnabled,
   verifyPasskeyFactor,
   type SecondFactors,
 } from "@/lib/mfa"
@@ -198,6 +199,13 @@ export default function LoginPage() {
       }
     }
     if (data.nextLevel === "aal2" && data.nextLevel !== data.currentLevel) {
+      // The account may keep its factors while asking not to be challenged.
+      // Checked here as well as server-side: without it the UI would demand a
+      // code the API would not have required anyway.
+      if (!(await twoFactorPromptEnabled())) {
+        finish()
+        return
+      }
       setCode("")
       setCodeError(false)
       setStep("mfa")

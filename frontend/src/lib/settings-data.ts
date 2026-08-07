@@ -39,6 +39,7 @@ export type MfaFactor = {
 export const PASSKEYS_KEY = "auth:passkeys"
 export const TOTP_KEY = "auth:totp"
 export const MFA_FACTORS_KEY = "auth:mfa-factors"
+export const SECURITY_PREFS_KEY = "/api/account/security-prefs"
 export const RECOVERY_KEY = "auth:recovery"
 export const PROVIDER_KEYS_KEY = "/api/provider-keys"
 
@@ -89,6 +90,23 @@ export async function fetchMfaFactors(): Promise<MfaFactor[]> {
   }
 }
 
+export type SecurityPrefs = { two_factor_prompt: boolean }
+
+/**
+ * Whether sign-in should challenge this account's second factor.
+ *
+ * Defaults to TRUE on any failure, matching the backend: the value is only
+ * consulted to decide whether to SKIP a prompt, so an unreadable preference
+ * must never be the reason one is dropped.
+ */
+export async function fetchSecurityPrefs(): Promise<SecurityPrefs> {
+  try {
+    return await api<SecurityPrefs>(SECURITY_PREFS_KEY)
+  } catch {
+    return { two_factor_prompt: true }
+  }
+}
+
 export async function fetchRecoveryCount(): Promise<{ remaining: number }> {
   try {
     return await api<{ remaining: number }>("/api/account/recovery-codes")
@@ -114,5 +132,6 @@ export function warmSettingsData(): void {
   preload(PASSKEYS_KEY, fetchPasskeys)
   preload(TOTP_KEY, fetchTotpFactors)
   preload(MFA_FACTORS_KEY, fetchMfaFactors)
+  preload(SECURITY_PREFS_KEY, fetchSecurityPrefs)
   preload(RECOVERY_KEY, fetchRecoveryCount)
 }
