@@ -235,7 +235,7 @@ export default function SignupPage() {
             Already have an account?
             <Link
               href="/login"
-              className="rounded-lg border bg-muted/60 px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              className="font-medium text-primary underline-offset-4 hover:underline"
             >
               Login
             </Link>

@@ -23,6 +23,7 @@ import {
   RetryViz,
   SlidersViz,
 } from "@/components/ui/best-practice-visuals"
+import { Badge } from "@/components/ui/badge"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
@@ -57,24 +58,24 @@ const FILE_STATUS = {
     label: "Queued",
     icon: Clock3,
     className:
-      "border-transparent bg-transparent text-amber-700 dark:text-amber-400",
+      "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400",
   },
   processing: {
     label: "Indexing",
     icon: Loader2,
     className:
-      "border-transparent bg-transparent text-sky-600 dark:text-sky-400",
+      "border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-400",
   },
   indexed: {
     label: "Indexed",
     icon: CheckCircle2,
-    className: "border-transparent bg-transparent text-muted-foreground",
+    className: "border-border/70 bg-muted/50 text-muted-foreground",
   },
   failed: {
     label: "Needs review",
     icon: AlertCircle,
     className:
-      "border-transparent bg-transparent text-red-700 dark:text-red-400",
+      "border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400",
   },
 } satisfies Record<
   FileRecord["status"],
@@ -168,20 +169,19 @@ function FileStatus({ status }: { status: FileRecord["status"] }) {
   const Icon = config.icon
 
   return (
-    <span
+    <Badge
+      variant="outline"
       aria-label={config.label}
       title={config.label}
-      className={cn(
-        "inline-flex size-8 shrink-0 items-center justify-center rounded-full border",
-        config.className
-      )}
+      className={cn("h-7 gap-1.5 px-2 font-medium", config.className)}
     >
       {status === "processing" ? (
         <SquaresLoader size={3} />
       ) : (
-        <Icon className="size-3.5" />
+        <Icon />
       )}
-    </span>
+      <span className="hidden sm:inline">{config.label}</span>
+    </Badge>
   )
 }
 
@@ -478,92 +478,111 @@ export function FilesTab({
         // min-h-0 is what makes that shrink legal: a flex child defaults to
         // min-height:auto and refuses to go below its content, which is
         // exactly how a list overflows instead of scrolling.
-        <div className="min-h-0 overflow-y-auto">
-        <ul className="divide-y">
-          {(files ?? []).map((file) => {
-            const meta = [
-              (file.source_extension ?? "").replace(".", "").toUpperCase() || null,
-              formatSize(file.size_bytes),
-              file.page_count != null
-                ? `${file.page_count} page${file.page_count === 1 ? "" : "s"}`
-                : null,
-              `${file.chunk_count} chunk${file.chunk_count === 1 ? "" : "s"}`,
-            ]
-              .filter(Boolean)
-              .join(" · ")
-            return (
-              <li
-                key={file.id}
-                id={`file-${file.id}`}
-                className={cn(
-                  "flex scroll-mt-24 items-center gap-4 px-6 py-3.5 transition-colors hover:bg-muted/40",
-                  highlightId === file.id &&
-                    "bg-primary/10 ring-1 ring-inset ring-primary/30"
-                )}
-              >
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <FileText className="size-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
-                    {file.filename}
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {meta}
-                  </div>
-                  {file.error && (
-                    <p className="mt-0.5 truncate text-xs text-destructive">
-                      {file.error}
-                    </p>
+        <div className="min-h-0 overflow-y-auto bg-muted/20 p-2 sm:p-3">
+          <ul className="flex flex-col gap-2">
+            {(files ?? []).map((file) => {
+              const meta = [
+                (file.source_extension ?? "")
+                  .replace(".", "")
+                  .toUpperCase() || null,
+                formatSize(file.size_bytes),
+                file.page_count != null
+                  ? `${file.page_count} page${file.page_count === 1 ? "" : "s"}`
+                  : null,
+                `${file.chunk_count} chunk${file.chunk_count === 1 ? "" : "s"}`,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+              return (
+                <li
+                  key={file.id}
+                  id={`file-${file.id}`}
+                  className={cn(
+                    "group flex scroll-mt-24 items-center gap-3 rounded-xl border bg-card px-3 py-3.5 shadow-xs transition-[background-color,border-color,box-shadow] hover:border-foreground/15 hover:bg-accent/25 hover:shadow-sm sm:gap-4 sm:px-4",
+                    highlightId === file.id &&
+                      "bg-primary/10 ring-1 ring-inset ring-primary/30"
                   )}
-                  {file.conversion_error &&
-                    file.conversion_error !== file.error && (
-                      <p className="mt-0.5 truncate text-xs text-destructive">
-                        {file.conversion_error}
+                >
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-muted/50 text-muted-foreground shadow-xs transition-colors group-hover:bg-background">
+                    <FileText className="size-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold leading-5 text-foreground">
+                      {file.filename}
+                    </div>
+                    <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] leading-4 text-muted-foreground sm:text-xs">
+                      {meta.split(" · ").map((item, index) => (
+                        <span
+                          key={item}
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          {index > 0 && (
+                            <span aria-hidden="true" className="text-border">
+                              ·
+                            </span>
+                          )}
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                    {file.error && (
+                      <p className="mt-1 truncate text-xs text-destructive">
+                        {file.error}
                       </p>
                     )}
-                  {file.conversion_note && !file.error && (
-                    <p
-                      className="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400"
-                      title={file.conversion_note}
-                    >
-                      {file.conversion_note}
-                    </p>
-                  )}
-                </div>
-                <FileStatus status={file.status} />
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`${file.filename} actions`}
-                    >
-                      <MoreHorizontal className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      disabled={file.status === "processing"}
-                      onSelect={() => handleRetry(file)}
-                    >
-                      <RotateCcw className="size-4" />
-                      {file.status === "failed" ? "Retry indexing" : "Re-index file"}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onSelect={() => setDeleteTarget(file)}
-                    >
-                      <Trash2 className="size-4" />
-                      Delete file
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </li>
-            )
-          })}
-        </ul>
+                    {file.conversion_error &&
+                      file.conversion_error !== file.error && (
+                        <p className="mt-1 truncate text-xs text-destructive">
+                          {file.conversion_error}
+                        </p>
+                      )}
+                    {file.conversion_note && !file.error && (
+                      <p
+                        className="mt-1 truncate text-xs text-amber-600 dark:text-amber-400"
+                        title={file.conversion_note}
+                      >
+                        {file.conversion_note}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <FileStatus status={file.status} />
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`${file.filename} actions`}
+                          className="text-muted-foreground group-hover:text-foreground"
+                        >
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          disabled={file.status === "processing"}
+                          onSelect={() => handleRetry(file)}
+                        >
+                          <RotateCcw className="size-4" />
+                          {file.status === "failed"
+                            ? "Retry indexing"
+                            : "Re-index file"}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => setDeleteTarget(file)}
+                        >
+                          <Trash2 className="size-4" />
+                          Delete file
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
         </div>
       )}
 

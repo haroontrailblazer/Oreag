@@ -2,8 +2,6 @@
 
 import {
   BrainIcon as Brain,
-  CaretDownIcon as CaretDown,
-  CaretUpIcon as CaretUp,
   CircleDashedIcon as CircleDashed,
   ClockIcon as Clock,
   CodeIcon as Code,
@@ -109,7 +107,7 @@ function MemoryBody({ memory }: { memory: Memory }) {
   const contentId = `memory-${memory.id}-content`
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <p
         ref={contentRef}
         id={contentId}
@@ -125,14 +123,9 @@ function MemoryBody({ memory }: { memory: Memory }) {
           aria-expanded={expanded}
           aria-controls={contentId}
           onClick={() => setExpanded((open) => !open)}
-          className="h-auto gap-1 p-0 text-xs"
+          className="h-auto self-start p-0"
         >
           {expanded ? "Show less" : "Show more"}
-          {expanded ? (
-            <CaretUp className="size-3" />
-          ) : (
-            <CaretDown className="size-3" />
-          )}
         </Button>
       )}
     </div>
@@ -176,11 +169,11 @@ function SourceMark({ source }: { source: string }) {
     <span
       title={mark.label}
       className={cn(
-        "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg",
+        "mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl border border-current/10 shadow-xs",
         mark.className
       )}
     >
-      <Icon className="size-4" />
+      <Icon className="size-4.5" />
       {/* The title attribute is a hover affordance only - screen readers need
           the source named in the accessibility tree too. */}
       <span className="sr-only">{mark.label}</span>
@@ -200,15 +193,20 @@ function MemoryRow({
   pinBusy: boolean
 }) {
   return (
-    <article className="group px-6 py-4 transition-colors hover:bg-muted/30 [contain-intrinsic-size:auto_9rem] [content-visibility:auto]">
-      <div className="flex items-start gap-3">
+    <article
+      className={cn(
+        "group rounded-xl border bg-card px-3 py-4 shadow-xs transition-[background-color,border-color,box-shadow] hover:border-foreground/15 hover:bg-accent/25 hover:shadow-sm sm:px-4 [contain-intrinsic-size:auto_9rem] [content-visibility:auto]",
+        memory.pinned && "border-amber-500/25 bg-amber-500/[0.035]"
+      )}
+    >
+      <div className="flex items-start gap-3 sm:gap-4">
         {/* Source as a single glyph in a tinted tile. It replaces the raw
             string ("mcp", "api", "agent"), which was jargon rendered at the
             most prominent point of the row - and doubles as the visual anchor
             that makes a long list scannable by origin at a glance. */}
         <SourceMark source={memory.source} />
 
-        <div className="min-w-0 flex-1 space-y-2">
+        <div className="min-w-0 flex-1">
           <MemoryBody memory={memory} />
 
           {/* Metadata BELOW the content, not above it. The text is what the
@@ -219,7 +217,7 @@ function MemoryRow({
               invited clicks that did nothing. State and its control belong in
               one place. Screen readers get it from aria-pressed on the button,
               which is why nothing was lost with the sr-only label. */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/60 pt-2.5 text-xs text-muted-foreground">
             <span
               className="inline-flex items-center gap-1"
               title={`Created ${new Date(memory.created_at).toLocaleString()}`}
@@ -253,41 +251,43 @@ function MemoryRow({
             actions on the row, and the strip is read-only information. Always
             rendered (not hover-only) so a pinned memory can be UNpinned on
             touch, where there is no hover. */}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled={pinBusy}
-          aria-pressed={memory.pinned}
-          aria-label={memory.pinned ? "Unpin memory" : "Pin memory"}
-          title={memory.pinned ? "Unpin" : "Pin to the top of the list"}
-          onClick={() => onTogglePin(memory)}
-          className={cn(
-            "-mr-1 shrink-0",
-            memory.pinned
-              ? "text-amber-600 dark:text-amber-400"
-              : "text-muted-foreground opacity-70 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-          )}
-        >
-          {pinBusy ? (
-            <Spin />
-          ) : (
-            <PushPin
-              weight={memory.pinned ? "fill" : "regular"}
-              className="size-4"
-            />
-          )}
-        </Button>
+        <div className="flex shrink-0 items-center gap-0.5 rounded-lg border bg-background/70 p-0.5 shadow-xs">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={pinBusy}
+            aria-pressed={memory.pinned}
+            aria-label={memory.pinned ? "Unpin memory" : "Pin memory"}
+            title={memory.pinned ? "Unpin" : "Pin to the top of the list"}
+            onClick={() => onTogglePin(memory)}
+            className={cn(
+              "shrink-0",
+              memory.pinned
+                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground opacity-70 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+            )}
+          >
+            {pinBusy ? (
+              <Spin />
+            ) : (
+              <PushPin
+                weight={memory.pinned ? "fill" : "regular"}
+                className="size-4"
+              />
+            )}
+          </Button>
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Delete memory"
-          title="Delete memory"
-          onClick={() => onDelete(memory)}
-          className="-mr-1 shrink-0 text-muted-foreground opacity-70 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-        >
-          <Trash className="size-4" />
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Delete memory"
+            title="Delete memory"
+            onClick={() => onDelete(memory)}
+            className="shrink-0 text-muted-foreground opacity-70 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <Trash className="size-4" />
+          </Button>
+        </div>
       </div>
     </article>
   )
@@ -408,8 +408,8 @@ export function MemoryTab({ project }: { project: Project }) {
     // (h-[calc(100dvh-6.25rem)] in projects/[id]/page.tsx). Derived from that
     // rather than carrying its own calc, because a hardcoded number goes wrong
     // the moment anything above it changes height.
-    <Card className="flex max-h-full min-h-0 flex-col">
-      <CardHeader className="shrink-0">
+    <Card className="flex max-h-full min-h-0 flex-col gap-0 overflow-hidden p-0">
+      <CardHeader className="shrink-0 px-5 pb-3 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <CardTitle>Agent memory</CardTitle>
@@ -424,7 +424,7 @@ export function MemoryTab({ project }: { project: Project }) {
       {/* The filter belongs to the pinned frame, not the scrolling list -
           scrolling away the box you are filtering with is worse than useless
           on a long list. */}
-      <CardContent className="shrink-0 pb-3">
+      <CardContent className="shrink-0 border-b px-5 pb-4">
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -467,7 +467,7 @@ export function MemoryTab({ project }: { project: Project }) {
             No memories match &ldquo;{filter.trim()}&rdquo;.
           </p>
         ) : (
-          <div className="divide-y border-y">
+          <div className="flex flex-col gap-2 bg-muted/20 p-2 sm:p-3">
             {shown.map((memory) => (
               <MemoryRow
                 key={memory.id}

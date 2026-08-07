@@ -839,7 +839,7 @@ export default function LoginPage() {
           Don&apos;t have an account?
           <Link
             href="/signup"
-            className="rounded-lg border bg-muted/60 px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            className="font-medium text-primary underline-offset-4 hover:underline"
           >
             Sign up
           </Link>
