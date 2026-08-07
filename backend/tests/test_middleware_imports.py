@@ -109,3 +109,67 @@ def test_the_scan_actually_walks_past_the_entry_file():
     reached = _graph(MIDDLEWARE)
     assert len(reached) > 1, "the import graph never left proxy.ts"
     assert any("lib" in str(m) for m in reached), "no lib/* module was resolved"
+
+
+# --- redirect targets must actually be routable ---------------------------
+#
+# The middleware redirected to /auth/verify-email while that page did not
+# exist, so a signed-in user with a password-only session was bounced to a 404
+# they could not navigate away from - the redirect fires again on every
+# protected path, and the page that clears the state IS the missing one.
+#
+# Nothing caught it: tsc and `next build` only see files that exist, and the
+# route is unreachable until you are signed in AND lack a second factor.
+
+_REDIRECT_RE = re.compile(r'new URL\(\s*(?:"([^"]+)"|([A-Z_]+))\s*,')
+
+
+def _redirect_targets() -> set[str]:
+    """Literal paths and PATH-style constants used in middleware redirects."""
+    source = MIDDLEWARE.read_text(encoding="utf-8")
+    consts = dict(
+        re.findall(r'const\s+([A-Z_]+)\s*=\s*"(/[^"]*)"', source)
+    )
+    targets = set()
+    for literal, name in _REDIRECT_RE.findall(source):
+        if literal:
+            targets.add(literal)
+        elif name in consts:
+            targets.add(consts[name])
+    return targets
+
+
+def _route_exists(path: str) -> bool:
+    """Does an app-router page or route handler serve this path?"""
+    rel = path.strip("/")
+    base = SRC / "app" / rel if rel else SRC / "app"
+    if any((base / f"{n}.{e}").is_file() for n in ("page", "route") for e in ("tsx", "ts")):
+        return True
+    # Route groups - (auth)/login serves /login - so try every group folder.
+    app = SRC / "app"
+    for group in app.glob("(*)"):
+        candidate = group / rel
+        if any(
+            (candidate / f"{n}.{e}").is_file()
+            for n in ("page", "route")
+            for e in ("tsx", "ts")
+        ):
+            return True
+    return False
+
+
+def test_the_redirect_scan_finds_targets():
+    """Guards the guard - a regex that matched nothing would pass silently."""
+    targets = _redirect_targets()
+    assert len(targets) >= 2, f"only found {targets}"
+    assert "/login" in targets
+
+
+def test_every_middleware_redirect_target_is_routable():
+    missing = sorted(t for t in _redirect_targets() if not _route_exists(t))
+    assert missing == [], (
+        "middleware redirects to routes that do not exist: "
+        + ", ".join(missing)
+        + " - a signed-in user sent there gets a 404 they cannot leave, because "
+        "the redirect fires again on every protected path"
+    )
