@@ -51,6 +51,65 @@ export class ApiError extends Error {
     this.status = status
     this.mfaRequired = mfaRequired
   }
+  /**
+   * The session is gone, not the request. Signing out on another device, an
+   * expired refresh token, or a revoked session all land here.
+   *
+   * Callers MUST NOT render this. "Missing bearer token" is a message written
+   * for whoever is holding a debugger, and it appeared at the top of the page
+   * as a red error for a user whose only problem was that they were signed
+   * out. A redirect to /login is already in flight by the time this is thrown,
+   * so the correct UI is the loading state, not an error.
+   */
+  get sessionExpired() {
+    return this.status === 401
+  }
+}
+
+/** True when this failure means "you are signed out", not "the request failed". */
+export function isSessionExpired(error: unknown): boolean {
+  return error instanceof ApiError && error.sessionExpired
+}
+
+/* Anything that wants to show a "signing you out" affordance subscribes here.
+   A module-level set rather than React context: `api()` is called from loaders,
+   event handlers and SWR internals, none of which sit inside a provider. */
+type SessionExpiredListener = () => void
+const sessionExpiredListeners = new Set<SessionExpiredListener>()
+
+export function onSessionExpired(listener: SessionExpiredListener): () => void {
+  sessionExpiredListeners.add(listener)
+  // Braces, not a concise body: Set.delete returns a boolean, and a useEffect
+  // cleanup must return void or a destructor.
+  return () => {
+    sessionExpiredListeners.delete(listener)
+  }
+}
+
+/**
+ * Leave for /login, once.
+ *
+ * Same single-shot guard as the MFA bounce and for the same reason: every
+ * in-flight SWR request fails together, so an unguarded redirect fires a burst
+ * of them. The dead token is cleared FIRST - otherwise /login can read a stale
+ * session from storage and bounce straight back to the dashboard, which reads
+ * as the app ignoring the click.
+ *
+ * `scope: "local"` matters even here: this device's session is already void
+ * server-side, and a global sign-out would take the user's OTHER devices down
+ * with it - turning one expired tab into an account-wide sign-out.
+ */
+let redirectingToLogin = false
+async function redirectToLogin() {
+  if (redirectingToLogin || typeof window === "undefined") return
+  redirectingToLogin = true
+  for (const listener of sessionExpiredListeners) listener()
+  try {
+    await createClient().auth.signOut({ scope: "local" })
+  } catch {
+    // Already unusable - the redirect is what matters.
+  }
+  window.location.replace("/login")
 }
 
 /**
@@ -105,6 +164,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     }
     const mfaRequired = res.headers.get(MFA_REQUIRED_HEADER) === "1"
     if (mfaRequired) redirectToMfa()
+    // 401 on a dashboard route can only mean the session is gone - every
+    // /api/* route requires one. Bounce rather than surface the backend's
+    // wording ("Missing bearer token") to someone who is simply signed out.
+    else if (res.status === 401) void redirectToLogin()
     throw new ApiError(res.status, detail, mfaRequired)
   }
   if (res.status === 204) return undefined as T
@@ -155,6 +218,8 @@ export async function apiStream(
     } catch {
       // non-JSON error body
     }
+    // Same rule as api(): a 401 here is a dead session, not a failed stream.
+    if (res.status === 401) void redirectToLogin()
     throw new ApiError(res.status, detail)
   }
 

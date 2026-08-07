@@ -13,7 +13,7 @@ import { VisualizeTab } from "@/components/project/visualize-tab"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { fetcher } from "@/lib/api"
+import { fetcher, isSessionExpired } from "@/lib/api"
 import type { Project } from "@/lib/types"
 
 const TABS = [
@@ -116,7 +116,10 @@ export default function ProjectPage({
     globalMutate("/api/projects")
   }
 
-  if (error) {
+  // A signed-out session is NOT a load failure. isSessionExpired means a
+  // redirect to /login is already in flight, so fall through to the skeleton
+  // below rather than flashing the backend's "Missing bearer token" in red.
+  if (error && !isSessionExpired(error)) {
     return (
       <p className="text-sm text-destructive">
         Could not load project: {error.message}

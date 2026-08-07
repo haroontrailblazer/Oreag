@@ -743,7 +743,8 @@ export default function LoginPage() {
                 factor, after which aal1 is acceptable and the reset completes. */}
             <RecoveryCodeForm
               onSignOut={async () => {
-                await supabase.auth.signOut()
+                // This device only - see components/user-menu.tsx.
+                await supabase.auth.signOut({ scope: "local" })
                 backToEmail()
               }}
             />
@@ -826,7 +827,8 @@ export default function LoginPage() {
                 the option existed only on a page they had no reason to visit. */}
             <RecoveryCodeForm
               onSignOut={async () => {
-                await supabase.auth.signOut()
+                // This device only - see components/user-menu.tsx.
+                await supabase.auth.signOut({ scope: "local" })
                 backToEmail()
               }}
             />

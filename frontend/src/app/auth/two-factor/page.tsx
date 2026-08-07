@@ -95,7 +95,8 @@ export default function TwoFactorPage() {
   )
 
   async function signOut() {
-    await supabase.auth.signOut()
+    // This device only - see components/user-menu.tsx.
+    await supabase.auth.signOut({ scope: "local" })
     router.push("/login")
     router.refresh()
   }

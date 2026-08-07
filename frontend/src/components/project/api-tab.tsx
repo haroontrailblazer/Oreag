@@ -807,7 +807,7 @@ print(data["answer"])`
           if (!open) setUploadTarget(null)
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-h-[90dvh]">
           <DialogHeader>
             <div className="mb-1 flex size-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
               <ShieldWarning className="size-5" weight="fill" />
@@ -821,7 +821,7 @@ print(data["answer"])`
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 text-sm">
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain pr-1 text-sm no-scrollbar">
             <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3">
               <p className="font-medium text-foreground">
                 This enables indirect prompt injection
@@ -839,7 +839,7 @@ print(data["answer"])`
               </p>
             </div>
 
-            <ul className="space-y-1.5 text-muted-foreground">
+            <ul className="flex flex-col gap-1.5 text-muted-foreground">
               <li className="flex gap-2">
                 <span aria-hidden="true">•</span>
                 <span>

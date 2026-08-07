@@ -44,7 +44,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Spin } from "@/components/ui/loader"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api, fetcher } from "@/lib/api"
+import { api, fetcher, isSessionExpired } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Memory, Project } from "@/lib/types"
 
@@ -442,7 +442,8 @@ export function MemoryTab({ project }: { project: Project }) {
           empty space back. Natural height, shrinking (and so scrolling) only
           once the card reaches its cap - min-h-0 is what permits the shrink. */}
       <CardContent className="min-h-0 overflow-y-auto px-0">
-        {error ? (
+        {/* Signed out is not a load failure - see lib/api.ts isSessionExpired. */}
+        {error && !isSessionExpired(error) ? (
           <p className="text-sm text-destructive">
             Could not load memories: {error.message}
           </p>

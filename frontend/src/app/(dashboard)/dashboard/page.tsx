@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { fetcher } from "@/lib/api"
+import { fetcher, isSessionExpired } from "@/lib/api"
 import { useProjectNavPending } from "@/lib/nav-pending"
 import type { Project } from "@/lib/types"
 
@@ -125,7 +125,8 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {error && (
+      {/* Signed out is not a load failure - see projects/[id]/page.tsx. */}
+      {error && !isSessionExpired(error) && (
         <p className="shrink-0 text-sm text-destructive">
           Could not load projects: {error.message}
         </p>

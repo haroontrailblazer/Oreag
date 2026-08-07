@@ -47,7 +47,13 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
 
   async function handleSignOut() {
     setSigningOut(true)
-    await createClient().auth.signOut()
+    // scope: "local" - sign out THIS device only. Supabase defaults signOut()
+    // to scope: "global", which revokes every refresh token on the account, so
+    // the ordinary sidebar sign-out was silently signing the user out of their
+    // phone, their other laptop and every open tab. Signing out everywhere is a
+    // deliberate, separately-labelled action on the profile page; it must not
+    // be what the everyday button does.
+    await createClient().auth.signOut({ scope: "local" })
     // HARD navigation, not router.push. SWR's cache and its preload map are
     // module-level and survive a soft navigation, so signing out and signing
     // back in as a DIFFERENT account in the same tab would serve the previous
