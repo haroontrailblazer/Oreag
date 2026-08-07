@@ -19,9 +19,6 @@ import { NextResponse, type NextRequest } from "next/server"
  */
 const PUBLIC_PATHS = [
   "/",
-  "/email-preview/verify-email-email.html",
-  "/email-preview/sign-in-code-email.html",
-  "/email-preview/password-reset-email.html",
   "/docs",
   "/login",
   "/signup",
