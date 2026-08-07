@@ -120,6 +120,14 @@ async function redirectToLogin() {
 const MFA_REQUIRED_HEADER = "x-mfa-required"
 
 /**
+ * Sent with a 403 when the account has NO second factor and the session was
+ * minted from a password or an OAuth provider alone. A DIFFERENT header from
+ * the one above because the two lead to different pages - sending someone to
+ * the authenticator prompt when they have no authenticator is a dead end.
+ */
+const EMAIL_VERIFICATION_HEADER = "x-email-verification-required"
+
+/**
  * Bounce to the two-factor step, once.
  *
  * A session in this state is valid but unusable, and every in-flight SWR
@@ -134,6 +142,15 @@ function redirectToMfa() {
   if (window.location.pathname === "/auth/two-factor") return
   redirectingForMfa = true
   window.location.assign("/auth/two-factor")
+}
+
+/** Same single-shot guard, for the email-confirmation step. */
+let redirectingForEmail = false
+function redirectToEmailVerification() {
+  if (redirectingForEmail || typeof window === "undefined") return
+  if (window.location.pathname === "/auth/verify-email") return
+  redirectingForEmail = true
+  window.location.assign("/auth/verify-email")
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -164,6 +181,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     }
     const mfaRequired = res.headers.get(MFA_REQUIRED_HEADER) === "1"
     if (mfaRequired) redirectToMfa()
+    else if (res.headers.get(EMAIL_VERIFICATION_HEADER) === "1") {
+      redirectToEmailVerification()
+    }
     // 401 on a dashboard route can only mean the session is gone - every
     // /api/* route requires one. Bounce rather than surface the backend's
     // wording ("Missing bearer token") to someone who is simply signed out.

@@ -34,6 +34,7 @@ import {
   NO_FACTORS,
   loadSecondFactors,
   preferredFactor,
+  provedEmailControl,
   verifyPasskeyFactor,
   type SecondFactors,
 } from "@/lib/mfa"
@@ -135,6 +136,35 @@ export default function LoginPage() {
   }, [router])
 
   /**
+   * Email a sign-in code. Never creates an account - see shouldCreateUser.
+   *
+   * A useCallback, and declared ABOVE routeAfterSignIn, because that callback
+   * now calls it: as a plain function it changed identity every render, which
+   * either churned routeAfterSignIn's dependencies or forced the dependency
+   * warning to be silenced.
+   */
+  const sendLoginCode = useCallback(async () => {
+    const ok = await resend.send(async () => {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        // Load-bearing: without this an unknown address silently gets a NEW
+        // account, turning the login form into a signup and enumeration vector.
+        options: { shouldCreateUser: false },
+      })
+      if (error) {
+        toast.error(authErrorMessage(error))
+        return false
+      }
+      return true
+    })
+    if (ok) {
+      setCode("")
+      setCodeError(false)
+      setStep("code")
+    }
+  }, [email, resend, supabase])
+
+  /**
    * Route to the second factor when the account has one and this session
    * hasn't cleared it.
    *
@@ -154,6 +184,19 @@ export default function LoginPage() {
       finish()
       return
     }
+    // No second factor on the account? Then the emailed code IS the second
+    // step. Sent from here rather than letting the user reach the dashboard
+    // and be bounced by the backend's 403: they would see a protected page
+    // flash and an error they did nothing to cause.
+    if (data.nextLevel !== "aal2") {
+      // getClaims(), not getSession().user: `amr` is a JWT CLAIM recording how
+      // this session was minted, not a property of the user.
+      const { data: claims } = await supabase.auth.getClaims()
+      if (!provedEmailControl(claims?.claims?.amr)) {
+        await sendLoginCode()
+        return
+      }
+    }
     if (data.nextLevel === "aal2" && data.nextLevel !== data.currentLevel) {
       setCode("")
       setCodeError(false)
@@ -168,7 +211,7 @@ export default function LoginPage() {
       return
     }
     finish()
-  }, [supabase, finish])
+  }, [supabase, finish, sendLoginCode])
 
   async function handleContinue(e: React.FormEvent) {
     e.preventDefault()
@@ -245,28 +288,6 @@ export default function LoginPage() {
       return
     }
     await routeAfterSignIn()
-  }
-
-  /** Email a sign-in code. Never creates an account - see shouldCreateUser. */
-  async function sendLoginCode() {
-    const ok = await resend.send(async () => {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
-        // Load-bearing: without this an unknown address silently gets a NEW
-        // account, turning the login form into a signup and enumeration vector.
-        options: { shouldCreateUser: false },
-      })
-      if (error) {
-        toast.error(authErrorMessage(error))
-        return false
-      }
-      return true
-    })
-    if (ok) {
-      setCode("")
-      setCodeError(false)
-      setStep("code")
-    }
   }
 
   const verifyLoginCode = useCallback(

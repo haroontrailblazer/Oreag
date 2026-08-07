@@ -97,3 +97,32 @@ export function authErrorMessage(
   const message = (error as { message?: string }).message
   return message && message.trim() ? message : fallback
 }
+
+/**
+ * Did the SERVER refuse to enrol a webauthn factor, as opposed to the ceremony
+ * failing on the device?
+ *
+ * The two look identical in a toast and need opposite advice: "try again" for a
+ * device problem, "this is switched off in your project" for the other. WebAuthn
+ * as an MFA FACTOR is a separate GoTrue setting from login passkeys
+ * (`passkeys_enabled`), and it defaults to OFF - so a project where the passkey
+ * SIGN-IN button works perfectly can still reject factor enrolment, which is the
+ * confusing case this exists to name.
+ *
+ * Matched on the message because the SDK collapses these into a generic
+ * AuthUnknownError / AuthApiError with no distinguishing code.
+ */
+export function isWebauthnFactorUnsupported(error: unknown): boolean {
+  const message = (
+    error instanceof Error ? error.message : String(error ?? "")
+  ).toLowerCase()
+  if (!message) return false
+  return (
+    message.includes("webauthn") &&
+    (message.includes("not enabled") ||
+      message.includes("disabled") ||
+      message.includes("unsupported") ||
+      message.includes("not supported") ||
+      message.includes("invalid factor type"))
+  )
+}

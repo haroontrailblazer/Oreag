@@ -38,7 +38,11 @@ import { Label } from "@/components/ui/label"
 import { Spin } from "@/components/ui/loader"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
-import { authErrorMessage, isPasskeyCancellation } from "@/lib/auth-errors"
+import {
+  authErrorMessage,
+  isPasskeyCancellation,
+  isWebauthnFactorUnsupported,
+} from "@/lib/auth-errors"
 import {
   MFA_FACTORS_KEY,
   PASSKEYS_KEY,
@@ -139,6 +143,11 @@ export function TwoFactorCard() {
   // Confirmation for the master switch. Turning 2FA off removes every factor,
   // so it is spelled out rather than flipped silently.
   const [disableOpen, setDisableOpen] = useState(false)
+  // Set once the server refuses a webauthn ENROLMENT, so the option stops
+  // being offered instead of failing the same way every time. Not probed up
+  // front: the only way to ask is to attempt an enrolment, which would leave a
+  // factor row behind on every page load.
+  const [webauthnUnavailable, setWebauthnUnavailable] = useState(false)
   const [chooseOpen, setChooseOpen] = useState(false)
 
   const [removal, setRemoval] = useState<
@@ -172,19 +181,46 @@ export function TwoFactorCard() {
     await Promise.all([mfaFactors.mutate(), totp.mutate(), passkeys.mutate()])
   }
 
-  /** Enrol a passkey as a SECOND FACTOR (challenge + verify in one ceremony). */
+  /**
+   * Enrol a passkey as a SECOND FACTOR (challenge + verify in one ceremony).
+   *
+   * A UNIQUE friendly name, resolved against the factors already on the
+   * account. Supabase rejects a duplicate, and an abandoned ceremony leaves an
+   * `unverified` factor holding the name - so the second attempt from the same
+   * device would fail on a collision with the wreckage of the first, which
+   * reads to the user as "passkeys are broken". Same rule the authenticator
+   * enrolment below already follows.
+   */
   async function addPasskeyFactor() {
     setBusy("passkey")
     try {
+      const taken = new Set(
+        (mfaFactors.data ?? []).map((f) => f.friendly_name).filter(Boolean)
+      )
+      const base = suggestPasskeyName()
+      let friendlyName = base
+      for (let n = 2; taken.has(friendlyName); n += 1) {
+        friendlyName = `${base} ${n}`
+      }
+
       const { error } = await supabase.auth.mfa.webauthn.register({
-        friendlyName: suggestPasskeyName(),
+        friendlyName,
       })
       if (error) throw error
       toast.success("Passkey added - you will be asked for it when you sign in")
       await refreshFactors()
     } catch (err) {
       if (isPasskeyCancellation(err)) return
-      toast.error(authErrorMessage(err, "Could not add that passkey."))
+      setWebauthnUnavailable(isWebauthnFactorUnsupported(err))
+      toast.error(
+        isWebauthnFactorUnsupported(err)
+          ? "Passkeys aren't enabled as a second factor on this project yet. Use an authenticator app, or enable WebAuthn under Auth → Multi-Factor in Supabase."
+          : authErrorMessage(err, "Could not add that passkey.")
+      )
+      // The ceremony can die after the factor row exists. Refresh so an
+      // `unverified` leftover is visible to the name-collision guard above
+      // rather than silently poisoning the next attempt.
+      await refreshFactors()
     } finally {
       setBusy(null)
     }
@@ -518,7 +554,11 @@ export function TwoFactorCard() {
               // open invitation to keep adding. Remove the passkey and it
               // comes back.
               action={
-                passkeyFactors.length > 0 ? null : passkeySupported === false ? (
+                passkeyFactors.length > 0 ? null : webauthnUnavailable ? (
+                  <p className="max-w-56 text-right text-xs text-muted-foreground">
+                    Not enabled as a second factor on this project
+                  </p>
+                ) : passkeySupported === false ? (
                   <p className="text-xs text-muted-foreground">
                     Not supported in this browser
                   </p>
@@ -774,7 +814,7 @@ export function TwoFactorCard() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            {passkeySupported !== false && (
+            {passkeySupported !== false && !webauthnUnavailable && (
               <Button
                 type="button"
                 variant="outline"
