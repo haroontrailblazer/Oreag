@@ -512,7 +512,7 @@ export default function LoginPage() {
           ? "Enter the code from your authenticator app"
           : "Sign in to your workspace to continue"
       }
-      keyboardCompact={
+      keyboardStable={
         step === "code" ||
         step === "mfa" ||
         (step === "reset" && !recovered)
@@ -836,7 +836,7 @@ export default function LoginPage() {
         )}
       </div>
 
-      {step !== "mfa" && (
+      {step === "email" && (
         <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
           Don&apos;t have an account?
           <Link

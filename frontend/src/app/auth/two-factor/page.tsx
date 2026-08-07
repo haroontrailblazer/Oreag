@@ -109,6 +109,7 @@ export default function TwoFactorPage() {
           ? "This account needs a second factor to continue"
           : "Enter the code from your authenticator app"
       }
+      keyboardStable={state === "ready"}
     >
       <div className="space-y-5">
         <div className="flex justify-center">

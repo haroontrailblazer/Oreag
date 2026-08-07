@@ -124,6 +124,7 @@ export default function SignupPage() {
     <AuthShell
       title="Create your account"
       subtitle="Start building RAG APIs over your documents"
+      keyboardStable={emailSent}
     >
       {emailSent ? (
         <div className="space-y-4">

@@ -11,56 +11,37 @@ export function AuthShell({
   title,
   subtitle,
   badge = "RAG & Memory API",
-  keyboardCompact = false,
+  keyboardStable = false,
   children,
 }: {
   title: string
   subtitle: string
   badge?: string
-  /** Compact nonessential chrome while a mobile text input has focus. */
-  keyboardCompact?: boolean
+  /** Anchor keypad-based steps on mobile so focusing a code does not pan the card. */
+  keyboardStable?: boolean
   children: React.ReactNode
 }) {
   return (
-    // min-h-dvh (not min-h-screen/100vh): on mobile 100vh includes the
-    // address-bar area, so the page ends up taller than the visible viewport
-    // and scrolls even when the content fits. dvh tracks the real visible
-    // height. overflow-x-hidden guards against any stray horizontal scroll.
-    <div className="flex min-h-dvh items-center justify-center overflow-x-hidden bg-muted/40 p-4">
-      <Card
-        className={cn(
-          "group w-full max-w-md rounded-3xl py-5 sm:py-8",
-          keyboardCompact && "max-sm:focus-within:py-3"
-        )}
-      >
-        <CardContent
-          className={cn(
-            "space-y-4 sm:space-y-6",
-            keyboardCompact && "max-sm:group-focus-within:space-y-3"
-          )}
-        >
-          <div
-            className={cn(
-              "flex flex-col items-center gap-2 text-center",
-              keyboardCompact && "max-sm:group-focus-within:gap-1"
-            )}
-          >
-            <div
-              className={cn(
-                "contents",
-                keyboardCompact &&
-                  "max-sm:group-focus-within:hidden sm:group-focus-within:contents"
-              )}
-            >
-              <BrandMark
-                className="size-11 rounded-2xl sm:size-12"
-                imgClassName="scale-150"
-              />
-              <span className="rounded-full border bg-muted/60 px-3 py-1 text-[11px] font-medium text-muted-foreground">
-                {badge}
-              </span>
-            </div>
-            <div className="space-y-1">
+    // svh stays stable when the mobile keypad opens. Keeping the card inside a
+    // stable viewport and scrolling only its contents prevents the whole page
+    // from re-centering while a code field is focused.
+    <div
+      className={cn(
+        "flex h-svh justify-center overflow-hidden bg-muted/40 p-4",
+        keyboardStable ? "items-start sm:items-center" : "items-center"
+      )}
+    >
+      <Card className="w-full max-w-md max-h-[calc(100svh-2rem)] overflow-y-auto rounded-3xl py-5 no-scrollbar sm:py-8">
+        <CardContent className="flex flex-col gap-4 sm:gap-6">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <BrandMark
+              className="size-11 shrink-0 rounded-2xl sm:size-12"
+              imgClassName="scale-150"
+            />
+            <span className="rounded-full border bg-muted/60 px-3 py-1 text-[11px] font-medium text-muted-foreground">
+              {badge}
+            </span>
+            <div className="flex flex-col gap-1">
               <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
                 {title}
               </h1>
