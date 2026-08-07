@@ -38,11 +38,7 @@ import { Label } from "@/components/ui/label"
 import { Spin } from "@/components/ui/loader"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
-import {
-  authErrorMessage,
-  isPasskeyCancellation,
-  isWebauthnFactorUnsupported,
-} from "@/lib/auth-errors"
+import { authErrorMessage, isPasskeyCancellation } from "@/lib/auth-errors"
 import {
   MFA_FACTORS_KEY,
   SECURITY_PREFS_KEY,
@@ -83,23 +79,28 @@ function suggestPasskeyName(): string {
 /**
  * Two-factor settings: a master switch over passkeys and an authenticator app.
  *
- * THE TWO PASSKEY SURFACES, because they look identical to a user and are not:
+ * Both are the mechanisms that already worked here:
  *
- * - **Adding** a passkey here calls `mfa.webauthn.register()`, which enrols it
- *   in `auth.mfa_factors` as a real SECOND FACTOR. That is the only kind the
- *   assurance level and `backend/app/auth/jwt.py` can see, so it is the only
- *   kind that actually gates a sign-in.
- * - **Existing** entries from `auth.passkey.*` (`auth.webauthn_credentials`)
- *   are LOGIN passkeys: they sign in on their own but gate nothing. They stay
- *   listed, labelled with that role, and removable - hiding them would
- *   overstate how protected the account is.
+ * - **Passkeys** go through `auth.passkey.*` / `registerPasskey()`. One signs
+ *   in on its own, in a single step, and lands at aal2 - so nothing is asked
+ *   for behind it.
+ * - **The authenticator app** is a TOTP factor in `auth.mfa_factors`, and it is
+ *   the one the sign-in challenge actually presents.
+ *
+ * NOT `mfa.webauthn.register()` - enrolling a passkey as a second FACTOR is a
+ * separate Supabase feature, and this project answers
+ * `422 "MFA enroll is disabled for WebAuthn"` for it. Verified against the live
+ * API; TOTP enrols 200 on the same account, which ruled out the browser and the
+ * call shape.
+ *
+ * THE SWITCH controls whether sign-in asks for a second step at all. Turning it
+ * off keeps every method enrolled and simply stops the prompt (migration 0027),
+ * because `mfa.unenroll()` would delete the TOTP secret and force a fresh QR
+ * scan to turn it back on.
  *
  * Rules this card enforces:
  *
- * - **The switch reflects reality, not a stored flag.** It is derived from
- *   "does a verified factor exist", because a separate boolean could disagree
- *   with what sign-in actually does - and users would trust the boolean.
- * - **Removing the last factor is spelled out, not just confirmed.** Supabase
+ * - **Removing the last method is spelled out, not just confirmed.** Supabase
  *   ships no backup codes, so recovery codes are the recovery story.
  * - **One method is a finished state.** A passkey and an authenticator are
  *   alternatives, not a set to complete, so nothing nags for the second.
@@ -149,18 +150,12 @@ export function TwoFactorCard() {
   // Confirmation for the master switch. Turning 2FA off removes every factor,
   // so it is spelled out rather than flipped silently.
   const [disableOpen, setDisableOpen] = useState(false)
-  // Set once the server refuses a webauthn ENROLMENT, so the option stops
-  // being offered instead of failing the same way every time. Not probed up
-  // front: the only way to ask is to attempt an enrolment, which would leave a
-  // factor row behind on every page load.
-  const [webauthnUnavailable, setWebauthnUnavailable] = useState(false)
   const [chooseOpen, setChooseOpen] = useState(false)
 
   const [removal, setRemoval] = useState<
     | {
-        /** passkey = LOGIN credential; factor = webauthn SECOND factor. Each
-            is a different table and a different removal API. */
-        kind: "passkey" | "factor" | "totp"
+        /** Different tables, different removal APIs. */
+        kind: "passkey" | "totp"
         id: string
         label: string
       }
@@ -176,10 +171,7 @@ export function TwoFactorCard() {
   // Passkeys enrolled as a SECOND FACTOR. Distinct from passkeyList above,
   // which holds LOGIN passkeys (auth.webauthn_credentials) - those sign in on
   // their own and cannot gate anything. See lib/mfa.ts.
-  const passkeyFactors = (mfaFactors.data ?? []).filter(
-    (f) => f.factor_type === "webauthn" && f.status === "verified"
-  )
-  const total = passkeyFactors.length + totpList.length
+  const total = passkeyList.length + totpList.length
   const twoFactorOn = total > 0 && prefs.data?.two_factor_prompt !== false
 
   /**
@@ -191,11 +183,14 @@ export function TwoFactorCard() {
    * already registered, next to a button telling them to register one. Whatever
    * the internals, "add" is the wrong word once one exists.
    */
-  const canAddPasskey =
-    passkeyFactors.length === 0 &&
-    passkeyList.length === 0 &&
-    passkeySupported !== false &&
-    !webauthnUnavailable
+  /**
+   * Offer "add a passkey" only when the account has none.
+   *
+   * Deliberately NOT folding in browser support: the two are different answers
+   * to the user - "you already have one" hides the row, "this browser cannot"
+   * has to be SAID, or the option looks arbitrarily missing on that device.
+   */
+  const canAddPasskey = passkeyList.length === 0
   const loading = passkeys.isLoading || totp.isLoading || mfaFactors.isLoading
 
   async function refreshFactors() {
@@ -203,45 +198,36 @@ export function TwoFactorCard() {
   }
 
   /**
-   * Enrol a passkey as a SECOND FACTOR (challenge + verify in one ceremony).
+   * Add a LOGIN passkey - `registerPasskey()`, the same call that has always
+   * worked here.
    *
-   * A UNIQUE friendly name, resolved against the factors already on the
-   * account. Supabase rejects a duplicate, and an abandoned ceremony leaves an
-   * `unverified` factor holding the name - so the second attempt from the same
-   * device would fail on a collision with the wreckage of the first, which
-   * reads to the user as "passkeys are broken". Same rule the authenticator
-   * enrolment below already follows.
+   * NOT `mfa.webauthn.register()`. That enrols a passkey as a second FACTOR,
+   * which is a different table and a different Supabase feature - and this
+   * project returns `422 "MFA enroll is disabled for WebAuthn"` for it, so
+   * every attempt failed. Verified directly against the API; TOTP enrols 200 on
+   * the same account, which is what ruled out the browser and the call shape.
+   *
+   * A login passkey signs in on its own and lands at aal2, so it needs no
+   * second step behind it - and its `webauthn` entry in `amr` also satisfies
+   * the email-confirmation gate in backend/app/auth/jwt.py.
    */
-  async function addPasskeyFactor() {
+  async function addPasskey() {
     setBusy("passkey")
     try {
-      const taken = new Set(
-        (mfaFactors.data ?? []).map((f) => f.friendly_name).filter(Boolean)
-      )
-      const base = suggestPasskeyName()
-      let friendlyName = base
-      for (let n = 2; taken.has(friendlyName); n += 1) {
-        friendlyName = `${base} ${n}`
-      }
-
-      const { error } = await supabase.auth.mfa.webauthn.register({
-        friendlyName,
-      })
+      const { data, error } = await supabase.auth.registerPasskey({})
       if (error) throw error
-      toast.success("Passkey added - you will be asked for it when you sign in")
-      await refreshFactors()
+      // React the instant the ceremony returns. Putting the naming dialog
+      // behind a full refetch left the UI frozen for a beat after the
+      // fingerprint, with nothing to show for it.
+      if (data?.id) {
+        setNamingId(data.id)
+        setNameDraft(suggestPasskeyName())
+      }
+      toast.success("Passkey added")
+      void passkeys.mutate()
     } catch (err) {
       if (isPasskeyCancellation(err)) return
-      setWebauthnUnavailable(isWebauthnFactorUnsupported(err))
-      toast.error(
-        isWebauthnFactorUnsupported(err)
-          ? "Passkeys aren't switched on as a second factor for this project. An authenticator app works now; passkeys need WebAuthn enabled in Supabase under Authentication → Sign In / Providers → Multi-Factor Authentication."
-          : authErrorMessage(err, "Could not add that passkey.")
-      )
-      // The ceremony can die after the factor row exists. Refresh so an
-      // `unverified` leftover is visible to the name-collision guard above
-      // rather than silently poisoning the next attempt.
-      await refreshFactors()
+      toast.error(authErrorMessage(err, "Could not add that passkey."))
     } finally {
       setBusy(null)
     }
@@ -549,43 +535,21 @@ export function TwoFactorCard() {
               icon={<Fingerprint weight="duotone" className="size-5" />}
               title="Passkeys"
               hint="Face, fingerprint or device PIN. Asked for after your password."
-              items={[
-                ...passkeyFactors.map((f) => ({
-                  id: f.id,
-                  label: f.friendly_name || "Passkey",
-                  meta: `Second factor - added ${new Date(f.created_at).toLocaleDateString()}`,
-                })),
-                // LOGIN passkeys, listed with their real role rather than
-                // hidden. They sign in one-step and do NOT gate anything, so
-                // showing them in the same list without saying so would
-                // misrepresent how protected the account is.
-                ...passkeyList.map((p) => ({
-                  id: p.id,
-                  label: p.friendly_name || "Passkey",
-                  meta: "One-step sign-in - does not act as a second factor",
-                })),
-              ]}
+              items={passkeyList.map((p) => ({
+                id: p.id,
+                label: p.friendly_name || "Passkey",
+                meta: p.last_used_at
+                  ? `Last used ${new Date(p.last_used_at).toLocaleDateString()}`
+                  : `Added ${new Date(p.created_at).toLocaleDateString()}`,
+              }))}
               busy={busy}
-              onRemove={(id, label) =>
-                setRemoval({
-                  kind: passkeyFactors.some((f) => f.id === id)
-                    ? "factor"
-                    : "passkey",
-                  id,
-                  label,
-                })
-              }
+              onRemove={(id, label) => setRemoval({ kind: "passkey", id, label })}
               // Once one is enrolled the button goes away: this method is
               // set up, and the card should read as done rather than as an
               // open invitation to keep adding. Remove the passkey and it
               // comes back.
               action={
-                !canAddPasskey && (passkeyFactors.length > 0 || passkeyList.length > 0) ? null : webauthnUnavailable ? (
-                  <p className="max-w-64 text-right text-xs leading-5 text-muted-foreground">
-                    Needs WebAuthn switched on in Supabase &rarr; Authentication
-                    &rarr; Multi-Factor
-                  </p>
-                ) : passkeySupported === false ? (
+                !canAddPasskey ? null : passkeySupported === false ? (
                   <p className="text-xs text-muted-foreground">
                     Not supported in this browser
                   </p>
@@ -595,7 +559,7 @@ export function TwoFactorCard() {
                     variant="outline"
                     size="sm"
                     disabled={busy === "passkey" || passkeySupported === null}
-                    onClick={addPasskeyFactor}
+                    onClick={addPasskey}
                   >
                     {busy === "passkey" ? <Spin /> : <Key className="size-4" />}
                     Add passkey
@@ -851,7 +815,7 @@ export function TwoFactorCard() {
                 disabled={busy === "passkey" || passkeySupported === null}
                 onClick={() => {
                   setChooseOpen(false)
-                  void addPasskeyFactor()
+                  void addPasskey()
                 }}
                 className="flex w-full items-start gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
               >

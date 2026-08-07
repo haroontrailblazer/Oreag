@@ -17,11 +17,16 @@ import type { SupabaseClient } from "@supabase/supabase-js"
  *     enrolled with `auth.webauthn.register()`. This is the one the assurance
  *     level and the backend both understand.
  *
- * Gating on the first would have been theatre: `signInWithPassword` already
- * returns a fully valid session, and `backend/app/auth/jwt.py` only rejects
- * aal1 when a verified *factor* exists - so with only a login passkey the API
- * accepts the session regardless of what the UI drew. Anyone calling the API
- * directly, or closing the prompt, would be straight in.
+ * Only the SECOND kind can be challenged, and this project has that Supabase
+ * feature switched off (`422 "MFA enroll is disabled for WebAuthn"`), so in
+ * practice `passkey` is always null here and the authenticator is what the gate
+ * presents. The branch is kept because it costs nothing and becomes correct the
+ * moment WebAuthn factors are enabled.
+ *
+ * Gating on a LOGIN passkey instead would have been theatre:
+ * `signInWithPassword` already returns a fully valid session, and
+ * `backend/app/auth/jwt.py` only rejects aal1 when a verified *factor* exists -
+ * so the API would accept the session regardless of what the UI drew.
  */
 export type SecondFactors = {
   /** Verified TOTP factor, if any. */
