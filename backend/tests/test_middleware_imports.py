@@ -103,11 +103,19 @@ def test_middleware_imports_nothing_node_only():
     assert offenders == {}, f"Node-only imports in the edge bundle: {offenders}"
 
 
-def test_the_scan_actually_walks_past_the_entry_file():
+def test_the_resolver_actually_follows_local_imports():
     """A resolver that silently returned None for everything would make both
-    assertions above pass on any codebase."""
-    reached = _graph(MIDDLEWARE)
-    assert len(reached) > 1, "the import graph never left proxy.ts"
+    assertions above pass on any codebase.
+
+    Proved against a file known to import local modules rather than against the
+    middleware itself: middleware with NO local imports is a perfectly good
+    state - and the version that had them is exactly the one that broke - so
+    asserting it reaches something would fail for the healthy case.
+    """
+    entry = SRC / "app" / "(auth)" / "login" / "page.tsx"
+    assert entry.is_file(), f"fixture moved: {entry}"
+    reached = _graph(entry)
+    assert len(reached) > 1, "the import graph never left the entry file"
     assert any("lib" in str(m) for m in reached), "no lib/* module was resolved"
 
 

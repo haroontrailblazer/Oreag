@@ -369,7 +369,7 @@ Oreag/
 │       └── models.py, schemas.py, config.py, db.py, main.py
 ├── mcp-server/               # Oreag MCP server (FastMCP) - 9 agent memory + docs tools
 ├── supabase/
-│   ├── migrations/           # 0001…0027 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering, HNSW vector indexes, MFA enforcement, passkey-aware login lookup, MFA recovery codes, per-key model listings, conversion reuse, reversible Matryoshka archive, memory chunking + its HNSW indexes, two-factor prompt preference)
+│   ├── migrations/           # 0001…0026 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering, HNSW vector indexes, MFA enforcement, passkey-aware login lookup, MFA recovery codes, per-key model listings, conversion reuse, reversible Matryoshka archive, memory chunking + its HNSW indexes)
 │   └── templates/            # branded auth email templates
 ├── scripts/
 │   └── check_docs_sync.py    # documentation drift harness - see below
