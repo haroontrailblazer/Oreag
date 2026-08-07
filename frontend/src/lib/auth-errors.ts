@@ -111,6 +111,18 @@ export function authErrorMessage(
  *
  * Matched on the message because the SDK collapses these into a generic
  * AuthUnknownError / AuthApiError with no distinguishing code.
+ *
+ * VERIFIED against a live project (GoTrue v2.195.0) by enrolling both factor
+ * types as a throwaway user:
+ *
+ *   POST /auth/v1/factors {"factor_type":"webauthn"}
+ *     -> 422 "MFA enroll is disabled for WebAuthn"
+ *   POST /auth/v1/factors {"factor_type":"totp"}
+ *     -> 200
+ *
+ * So the string to match is "disabled" + "webauthn". The others below are kept
+ * as reasonable variants, not guesses dressed as facts - only the first is
+ * confirmed.
  */
 export function isWebauthnFactorUnsupported(error: unknown): boolean {
   const message = (

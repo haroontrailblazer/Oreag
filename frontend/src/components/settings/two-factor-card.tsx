@@ -235,7 +235,7 @@ export function TwoFactorCard() {
       setWebauthnUnavailable(isWebauthnFactorUnsupported(err))
       toast.error(
         isWebauthnFactorUnsupported(err)
-          ? "Passkeys aren't enabled as a second factor on this project yet. Use an authenticator app, or enable WebAuthn under Auth → Multi-Factor in Supabase."
+          ? "Passkeys aren't switched on as a second factor for this project. An authenticator app works now; passkeys need WebAuthn enabled in Supabase under Authentication → Sign In / Providers → Multi-Factor Authentication."
           : authErrorMessage(err, "Could not add that passkey.")
       )
       // The ceremony can die after the factor row exists. Refresh so an
@@ -581,8 +581,9 @@ export function TwoFactorCard() {
               // comes back.
               action={
                 !canAddPasskey && (passkeyFactors.length > 0 || passkeyList.length > 0) ? null : webauthnUnavailable ? (
-                  <p className="max-w-56 text-right text-xs text-muted-foreground">
-                    Not enabled as a second factor on this project
+                  <p className="max-w-64 text-right text-xs leading-5 text-muted-foreground">
+                    Needs WebAuthn switched on in Supabase &rarr; Authentication
+                    &rarr; Multi-Factor
                   </p>
                 ) : passkeySupported === false ? (
                   <p className="text-xs text-muted-foreground">
