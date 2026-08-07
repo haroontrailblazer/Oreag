@@ -27,8 +27,18 @@ export type TotpFactor = {
   created_at: string
 }
 
+/** Any second factor: `totp` or `webauthn` (a passkey used as a GATE). */
+export type MfaFactor = {
+  id: string
+  factor_type: "totp" | "phone" | "webauthn"
+  status: "verified" | "unverified"
+  friendly_name?: string
+  created_at: string
+}
+
 export const PASSKEYS_KEY = "auth:passkeys"
 export const TOTP_KEY = "auth:totp"
+export const MFA_FACTORS_KEY = "auth:mfa-factors"
 export const RECOVERY_KEY = "auth:recovery"
 export const PROVIDER_KEYS_KEY = "/api/provider-keys"
 
@@ -61,6 +71,24 @@ export async function fetchTotpFactors(): Promise<TotpFactor[]> {
   }
 }
 
+/**
+ * EVERY MFA factor, not just TOTP.
+ *
+ * `listFactors()` splits its response into `totp` / `phone` / `all`, and a
+ * webauthn factor appears only in `all` - so the TOTP-only fetcher above is
+ * blind to a passkey enrolled as a second factor. Reading `all` is what lets
+ * the settings card show one honest list.
+ */
+export async function fetchMfaFactors(): Promise<MfaFactor[]> {
+  try {
+    const { data, error } = await createClient().auth.mfa.listFactors()
+    if (error) return []
+    return (data?.all ?? []) as MfaFactor[]
+  } catch {
+    return []
+  }
+}
+
 export async function fetchRecoveryCount(): Promise<{ remaining: number }> {
   try {
     return await api<{ remaining: number }>("/api/account/recovery-codes")
@@ -85,5 +113,6 @@ export function warmSettingsData(): void {
   preload(PROVIDER_KEYS_KEY, fetcher)
   preload(PASSKEYS_KEY, fetchPasskeys)
   preload(TOTP_KEY, fetchTotpFactors)
+  preload(MFA_FACTORS_KEY, fetchMfaFactors)
   preload(RECOVERY_KEY, fetchRecoveryCount)
 }

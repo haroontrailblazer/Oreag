@@ -30,6 +30,13 @@ import {
   isPasskeyCancellation,
 } from "@/lib/auth-errors"
 import { usePasskeySupport, useResendCooldown } from "@/lib/auth-hooks"
+import {
+  NO_FACTORS,
+  loadSecondFactors,
+  preferredFactor,
+  verifyPasskeyFactor,
+  type SecondFactors,
+} from "@/lib/mfa"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
@@ -109,6 +116,9 @@ export default function LoginPage() {
   // listFactors() is a network round trip; doing it on the click put three
   // sequential auth requests between the button and any visible progress.
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null)
+  // Which second factor this account actually has. A webauthn FACTOR is not
+  // the same thing as a login passkey - see lib/mfa.ts.
+  const [factors, setFactors] = useState<SecondFactors>(NO_FACTORS)
   const resend = useResendCooldown()
 
   // NOTE: do NOT prefetch /dashboard from here. It is behind the middleware,
@@ -148,11 +158,12 @@ export default function LoginPage() {
       setCode("")
       setCodeError(false)
       setStep("mfa")
-      // Deliberately not awaited: show the code field immediately and resolve
-      // the factor in the background while the user reaches for their phone.
-      void supabase.auth.mfa.listFactors().then(({ data: list }) => {
-        const factor = list?.totp?.[0]
-        if (factor) setMfaFactorId(factor.id)
+      // Deliberately not awaited: show the gate immediately and resolve which
+      // factor it is in the background while the user reaches for their phone
+      // (or their fingerprint reader).
+      void loadSecondFactors(supabase).then((found) => {
+        setFactors(found)
+        if (found.totp) setMfaFactorId(found.totp.id)
       })
       return
     }
@@ -357,6 +368,30 @@ export default function LoginPage() {
     [supabase, email, loading]
   )
 
+  /**
+   * Clear the gate with a webauthn FACTOR instead of a TOTP code.
+   *
+   * This raises the session to aal2 exactly as a code would, so the backend
+   * check in jwt.py is satisfied by the same mechanism - there is no
+   * client-only branch that a caller could skip.
+   */
+  const verifyPasskeyGate = useCallback(async () => {
+    const factorId = factors.passkey?.id
+    if (!factorId || loading) return
+    setLoading(true)
+    try {
+      await verifyPasskeyFactor(supabase, factorId)
+      finish()
+    } catch (err) {
+      // Dismissing the system sheet is a normal action, not an error.
+      if (!isPasskeyCancellation(err)) {
+        toast.error(authErrorMessage(err, "That passkey didn't work."))
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [factors.passkey?.id, loading, supabase, finish])
+
   const verifyMfa = useCallback(
     async (value: string) => {
       if (loading) return
@@ -508,9 +543,11 @@ export default function LoginPage() {
     <AuthShell
       title={step === "mfa" ? "One more step" : "Welcome back"}
       subtitle={
-        step === "mfa"
-          ? "Enter the code from your authenticator app"
-          : "Sign in to your workspace to continue"
+        step !== "mfa"
+          ? "Sign in to your workspace to continue"
+          : preferredFactor(factors) === "passkey"
+            ? "Confirm with the passkey on this device"
+            : "Enter the code from your authenticator app"
       }
       keyboardStable={
         step === "code" ||
@@ -789,7 +826,45 @@ export default function LoginPage() {
             </div>
           ))}
 
-        {step === "mfa" && (
+        {step === "mfa" && preferredFactor(factors) === "passkey" && (
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <span className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <Fingerprint weight="duotone" className="size-6" />
+              </span>
+            </div>
+            <p className="text-center text-sm text-muted-foreground">
+              Confirm it&rsquo;s you with{" "}
+              {factors.passkey?.friendlyName || "your passkey"}.
+            </p>
+            <Button
+              type="button"
+              className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
+              disabled={loading}
+              onClick={verifyPasskeyGate}
+            >
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  Verifying
+                  <Spin />
+                </span>
+              ) : (
+                "Use passkey"
+              )}
+            </Button>
+            <RecoveryCodeForm
+              onSignOut={async () => {
+                await supabase.auth.signOut({ scope: "local" })
+                backToEmail()
+              }}
+            />
+          </div>
+        )}
+
+        {/* TOTP keeps the gate whenever it is enrolled, even alongside a
+            passkey factor - an account holding both sees exactly the flow it
+            had before passkeys became a factor. */}
+        {step === "mfa" && preferredFactor(factors) !== "passkey" && (
           <div className="space-y-4">
             <div className="flex justify-center">
               <span className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
