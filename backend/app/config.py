@@ -50,11 +50,6 @@ class Settings(BaseSettings):
     # opts in. MFA_ENFORCE_AAL2=false disables it with a restart and no
     # redeploy, for the case where a bad enrolment locks people out.
     mfa_enforce_aal2: bool = True
-    # Require a method stronger than password/OAuth alone (an emailed code, a
-    # magic link, a passkey) for sessions on accounts with NO second factor.
-    # A kill switch for an incident, not a rollout flag - default on, or the
-    # protection is invisible.
-    email_verification_required: bool = True
     # How long "does this user have a factor?" is memoised per process. Short,
     # because it bounds how long a freshly enrolled factor takes to start being
     # enforced and how long a removed one keeps being demanded.
@@ -103,13 +98,7 @@ class Settings(BaseSettings):
     #   X-MFA-Required  - the 403 that means "finish two-factor", which the
     #                     client uses to redirect instead of showing a raw
     #                     "two-factor authentication required" error.
-    # Every header the BROWSER must be able to read. A response header the
-    # browser cannot see is a header that does not exist as far as the frontend
-    # is concerned - omitting X-Email-Verification-Required here would make the
-    # 403 indistinguishable from any other and bounce users into a login loop.
-    cors_expose_headers: str = (
-        "Retry-After,X-MFA-Required,X-Email-Verification-Required"
-    )
+    cors_expose_headers: str = "Retry-After,X-MFA-Required"
     # Access-Control-Allow-Credentials. False is what makes a mistakenly
     # allowed origin harmless, because the preview regex over the shared
     # *.vercel.app namespace is a SHAPE filter and cannot prove ownership.

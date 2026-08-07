@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
-from ..services.mfa import has_verified_factor, two_factor_prompt_enabled
+from ..services.mfa import has_verified_factor
 from ..services.rate_limit import enforce_user_rate_limit
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -18,52 +18,6 @@ bearer_scheme = HTTPBearer(auto_error=False)
 # this wrong bounces users to the login page in a loop: they sign in, get a
 # 403, get logged out, sign in again.
 MFA_REQUIRED_HEADER = "X-MFA-Required"
-
-# Sent with the 403 when the session has no second factor AND has not proved
-# control of the mailbox. A separate header from the one above because the two
-# lead to DIFFERENT pages - a user sent to the authenticator prompt with no
-# authenticator has nowhere to go.
-EMAIL_VERIFICATION_HEADER = "X-Email-Verification-Required"
-
-# Sign-in methods that prove only "knows a secret" or "has a linked account".
-# Neither demonstrates control of the mailbox at THIS sign-in:
-#
-#   - `password` is a shared secret that leaks in breaches, which is the exact
-#     attack an emailed code is being added to stop.
-#   - `oauth` proves the Google/GitHub account, and those addresses can differ
-#     from the one on file or be re-pointed at the provider.
-#
-# Anything else in `amr` - otp, magiclink, a passkey, a cleared factor - is
-# accepted, so a user with a real factor or a passkey is never asked for a code
-# on top.
-_WEAK_AMR_METHODS = frozenset({"password", "oauth", "sso/saml", "web3", "anonymous"})
-
-
-def _proved_email_control(payload: dict) -> bool:
-    """Did this session use a method stronger than password/OAuth alone?
-
-    Reads the `amr` claim, which lists every method the session was minted
-    with. A missing or unparseable claim returns True - FAIL OPEN.
-
-    That direction is deliberate. This check is a hardening step, and the cost
-    of the two failure modes is wildly asymmetric: failing open lets a session
-    through that should have seen one extra email, while failing closed on an
-    unexpected token shape locks EVERY user out of the product with no way back
-    in, because the remedy is behind the same gate. A claim we cannot read is a
-    surprise about Supabase, not evidence of an attack.
-    """
-    amr = payload.get("amr")
-    if not isinstance(amr, list) or not amr:
-        return True
-    methods = set()
-    for entry in amr:
-        if isinstance(entry, dict) and isinstance(entry.get("method"), str):
-            methods.add(entry["method"])
-        elif isinstance(entry, str):
-            methods.add(entry)
-    if not methods:
-        return True
-    return bool(methods - _WEAK_AMR_METHODS)
 
 _jwk_client: PyJWKClient | None = None
 
@@ -152,36 +106,11 @@ def get_current_user(
     # not cleared the second factor. A 401 would read as "signed out" to every
     # client and trigger a re-login that lands in exactly the same state.
     if settings.mfa_enforce_aal2 and payload.get("aal") != "aal2":
-        # `and two_factor_prompt_enabled(...)` - the user may keep a factor
-        # enrolled while asking not to be challenged. Supabase has no
-        # disabled-factor state, so before this the only way to stop the prompt
-        # was to DELETE the factor and lose the enrolment. The preference is
-        # read second, so the cheap "has a factor at all" check still
-        # short-circuits for the overwhelming majority who have none.
-        if has_verified_factor(db, user_id) and two_factor_prompt_enabled(
-            db, user_id
-        ):
+        if has_verified_factor(db, user_id):
             raise HTTPException(
                 status_code=403,
                 detail="Two-factor authentication required for this session.",
                 headers={MFA_REQUIRED_HEADER: "1"},
-            )
-        # No factor enrolled. An emailed code is then the ONLY thing standing
-        # between a leaked password (or a compromised Google/GitHub account)
-        # and this session, so require it here rather than in the UI - a
-        # client-side prompt is skipped by anyone calling the API directly,
-        # which is precisely the caller worth stopping.
-        #
-        # Checked in this branch only: an account WITH a factor already had a
-        # real challenge, and asking it for a code as well would be a second
-        # gate for no extra assurance.
-        elif settings.email_verification_required and not _proved_email_control(
-            payload
-        ):
-            raise HTTPException(
-                status_code=403,
-                detail="Confirm your email to finish signing in.",
-                headers={EMAIL_VERIFICATION_HEADER: "1"},
             )
 
     # Per-user budget for the whole dashboard API. Applied here for the same

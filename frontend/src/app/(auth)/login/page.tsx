@@ -30,15 +30,6 @@ import {
   isPasskeyCancellation,
 } from "@/lib/auth-errors"
 import { usePasskeySupport, useResendCooldown } from "@/lib/auth-hooks"
-import {
-  NO_FACTORS,
-  loadSecondFactors,
-  preferredFactor,
-  twoFactorPromptEnabled,
-  verifyPasskeyFactor,
-  type SecondFactors,
-} from "@/lib/mfa"
-import { provedEmailControl } from "@/lib/amr"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
@@ -118,9 +109,6 @@ export default function LoginPage() {
   // listFactors() is a network round trip; doing it on the click put three
   // sequential auth requests between the button and any visible progress.
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null)
-  // Which second factor this account actually has. A webauthn FACTOR is not
-  // the same thing as a login passkey - see lib/mfa.ts.
-  const [factors, setFactors] = useState<SecondFactors>(NO_FACTORS)
   const resend = useResendCooldown()
 
   // NOTE: do NOT prefetch /dashboard from here. It is behind the middleware,
@@ -135,35 +123,6 @@ export default function LoginPage() {
     router.replace("/dashboard")
     router.refresh()
   }, [router])
-
-  /**
-   * Email a sign-in code. Never creates an account - see shouldCreateUser.
-   *
-   * A useCallback, and declared ABOVE routeAfterSignIn, because that callback
-   * now calls it: as a plain function it changed identity every render, which
-   * either churned routeAfterSignIn's dependencies or forced the dependency
-   * warning to be silenced.
-   */
-  const sendLoginCode = useCallback(async () => {
-    const ok = await resend.send(async () => {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
-        // Load-bearing: without this an unknown address silently gets a NEW
-        // account, turning the login form into a signup and enumeration vector.
-        options: { shouldCreateUser: false },
-      })
-      if (error) {
-        toast.error(authErrorMessage(error))
-        return false
-      }
-      return true
-    })
-    if (ok) {
-      setCode("")
-      setCodeError(false)
-      setStep("code")
-    }
-  }, [email, resend, supabase])
 
   /**
    * Route to the second factor when the account has one and this session
@@ -185,41 +144,20 @@ export default function LoginPage() {
       finish()
       return
     }
-    // No second factor on the account? Then the emailed code IS the second
-    // step. Sent from here rather than letting the user reach the dashboard
-    // and be bounced by the backend's 403: they would see a protected page
-    // flash and an error they did nothing to cause.
-    if (data.nextLevel !== "aal2") {
-      // getClaims(), not getSession().user: `amr` is a JWT CLAIM recording how
-      // this session was minted, not a property of the user.
-      const { data: claims } = await supabase.auth.getClaims()
-      if (!provedEmailControl(claims?.claims?.amr)) {
-        await sendLoginCode()
-        return
-      }
-    }
     if (data.nextLevel === "aal2" && data.nextLevel !== data.currentLevel) {
-      // The account may keep its factors while asking not to be challenged.
-      // Checked here as well as server-side: without it the UI would demand a
-      // code the API would not have required anyway.
-      if (!(await twoFactorPromptEnabled())) {
-        finish()
-        return
-      }
       setCode("")
       setCodeError(false)
       setStep("mfa")
-      // Deliberately not awaited: show the gate immediately and resolve which
-      // factor it is in the background while the user reaches for their phone
-      // (or their fingerprint reader).
-      void loadSecondFactors(supabase).then((found) => {
-        setFactors(found)
-        if (found.totp) setMfaFactorId(found.totp.id)
+      // Deliberately not awaited: show the code field immediately and resolve
+      // the factor in the background while the user reaches for their phone.
+      void supabase.auth.mfa.listFactors().then(({ data: list }) => {
+        const factor = list?.totp?.[0]
+        if (factor) setMfaFactorId(factor.id)
       })
       return
     }
     finish()
-  }, [supabase, finish, sendLoginCode])
+  }, [supabase, finish])
 
   async function handleContinue(e: React.FormEvent) {
     e.preventDefault()
@@ -296,6 +234,28 @@ export default function LoginPage() {
       return
     }
     await routeAfterSignIn()
+  }
+
+  /** Email a sign-in code. Never creates an account - see shouldCreateUser. */
+  async function sendLoginCode() {
+    const ok = await resend.send(async () => {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        // Load-bearing: without this an unknown address silently gets a NEW
+        // account, turning the login form into a signup and enumeration vector.
+        options: { shouldCreateUser: false },
+      })
+      if (error) {
+        toast.error(authErrorMessage(error))
+        return false
+      }
+      return true
+    })
+    if (ok) {
+      setCode("")
+      setCodeError(false)
+      setStep("code")
+    }
   }
 
   const verifyLoginCode = useCallback(
@@ -396,30 +356,6 @@ export default function LoginPage() {
     },
     [supabase, email, loading]
   )
-
-  /**
-   * Clear the gate with a webauthn FACTOR instead of a TOTP code.
-   *
-   * This raises the session to aal2 exactly as a code would, so the backend
-   * check in jwt.py is satisfied by the same mechanism - there is no
-   * client-only branch that a caller could skip.
-   */
-  const verifyPasskeyGate = useCallback(async () => {
-    const factorId = factors.passkey?.id
-    if (!factorId || loading) return
-    setLoading(true)
-    try {
-      await verifyPasskeyFactor(supabase, factorId)
-      finish()
-    } catch (err) {
-      // Dismissing the system sheet is a normal action, not an error.
-      if (!isPasskeyCancellation(err)) {
-        toast.error(authErrorMessage(err, "That passkey didn't work."))
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [factors.passkey?.id, loading, supabase, finish])
 
   const verifyMfa = useCallback(
     async (value: string) => {
@@ -572,11 +508,9 @@ export default function LoginPage() {
     <AuthShell
       title={step === "mfa" ? "One more step" : "Welcome back"}
       subtitle={
-        step !== "mfa"
-          ? "Sign in to your workspace to continue"
-          : preferredFactor(factors) === "passkey"
-            ? "Confirm with the passkey on this device"
-            : "Enter the code from your authenticator app"
+        step === "mfa"
+          ? "Enter the code from your authenticator app"
+          : "Sign in to your workspace to continue"
       }
       keyboardStable={
         step === "code" ||
@@ -855,45 +789,7 @@ export default function LoginPage() {
             </div>
           ))}
 
-        {step === "mfa" && preferredFactor(factors) === "passkey" && (
-          <div className="space-y-4">
-            <div className="flex justify-center">
-              <span className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <Fingerprint weight="duotone" className="size-6" />
-              </span>
-            </div>
-            <p className="text-center text-sm text-muted-foreground">
-              Confirm it&rsquo;s you with{" "}
-              {factors.passkey?.friendlyName || "your passkey"}.
-            </p>
-            <Button
-              type="button"
-              className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
-              disabled={loading}
-              onClick={verifyPasskeyGate}
-            >
-              {loading ? (
-                <span className="inline-flex items-center gap-2">
-                  Verifying
-                  <Spin />
-                </span>
-              ) : (
-                "Use passkey"
-              )}
-            </Button>
-            <RecoveryCodeForm
-              onSignOut={async () => {
-                await supabase.auth.signOut({ scope: "local" })
-                backToEmail()
-              }}
-            />
-          </div>
-        )}
-
-        {/* TOTP keeps the gate whenever it is enrolled, even alongside a
-            passkey factor - an account holding both sees exactly the flow it
-            had before passkeys became a factor. */}
-        {step === "mfa" && preferredFactor(factors) !== "passkey" && (
+        {step === "mfa" && (
           <div className="space-y-4">
             <div className="flex justify-center">
               <span className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">

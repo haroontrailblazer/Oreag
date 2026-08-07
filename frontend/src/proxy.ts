@@ -1,6 +1,4 @@
 import { createServerClient } from "@supabase/ssr"
-
-import { provedEmailControl } from "@/lib/amr"
 import { NextResponse, type NextRequest } from "next/server"
 
 /**
@@ -35,12 +33,6 @@ const PUBLIC_PATHS = [
  * the step-up page to itself is an infinite loop.
  */
 const STEP_UP_PATH = "/auth/two-factor"
-
-/**
- * Where a session with NO second factor but no proof of mailbox control is
- * sent. Excluded from its own redirect for the same loop reason as above.
- */
-const VERIFY_EMAIL_PATH = "/auth/verify-email"
 
 
 export async function proxy(request: NextRequest) {
@@ -113,18 +105,6 @@ export async function proxy(request: NextRequest) {
     )
     if (owesSecondFactor) {
       return NextResponse.redirect(new URL(STEP_UP_PATH, request.url))
-    }
-    // No factor enrolled. Then the emailed code is the only step between a
-    // leaked password - or a compromised Google/GitHub account - and this
-    // session, so require proof of the mailbox before anything protected
-    // renders. The backend refuses these sessions regardless
-    // (X-Email-Verification-Required); this only decides whether the user
-    // meets a form or an error.
-    if (
-      path !== VERIFY_EMAIL_PATH &&
-      !provedEmailControl(claimsData?.claims?.amr)
-    ) {
-      return NextResponse.redirect(new URL(VERIFY_EMAIL_PATH, request.url))
     }
   }
   // Signed-in users have no business on the SIGN-IN pages. "/" is deliberately

@@ -1,9 +1,6 @@
 "use client"
 
-import {
-  FingerprintIcon as Fingerprint,
-  ShieldCheckIcon as ShieldCheck,
-} from "@phosphor-icons/react/dist/ssr"
+import { ShieldCheckIcon as ShieldCheck} from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
 
@@ -16,15 +13,7 @@ import {
 } from "@/components/auth/otp-field"
 import { Button } from "@/components/ui/button"
 import { Spin } from "@/components/ui/loader"
-import { authErrorMessage, isPasskeyCancellation } from "@/lib/auth-errors"
-import {
-  NO_FACTORS,
-  loadSecondFactors,
-  preferredFactor,
-  twoFactorPromptEnabled,
-  verifyPasskeyFactor,
-  type SecondFactors,
-} from "@/lib/mfa"
+import { authErrorMessage } from "@/lib/auth-errors"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
@@ -37,11 +26,8 @@ import { toast } from "@/lib/toast"
  * /login would be wrong twice over: they are not signed out, and the middleware
  * would bounce them straight to /dashboard and back into the same 403.
  *
- * Both factor types are challengeable here. A webauthn FACTOR raises the
- * session to aal2 exactly as a code does, so an OAuth or emailed-code sign-in
- * on a passkey-protected account steps up in place rather than being told to
- * start over. (A LOGIN passkey is different - that signs in at aal2 already and
- * never reaches this page. See lib/mfa.ts.)
+ * Only the authenticator-app factor is challenged here. A passkey sign-in
+ * already lands at aal2, so a passkey user never arrives on this page.
  */
 export default function TwoFactorPage() {
   const router = useRouter()
@@ -51,59 +37,24 @@ export default function TwoFactorPage() {
   const [invalid, setInvalid] = useState(false)
   const [loading, setLoading] = useState(false)
   const [factorId, setFactorId] = useState<string | null>(null)
-  const [factors, setFactors] = useState<SecondFactors>(NO_FACTORS)
-  const [state, setState] = useState<"loading" | "ready" | "passkey" | "none">(
-    "loading"
-  )
+  const [state, setState] = useState<"loading" | "ready" | "none">("loading")
 
   useEffect(() => {
     let alive = true
-    void Promise.all([
-      loadSecondFactors(supabase),
-      twoFactorPromptEnabled(),
-    ]).then(([found, prompt]) => {
+    supabase.auth.mfa.listFactors().then(({ data, error }) => {
       if (!alive) return
-      // The middleware redirects on "a verified factor exists", which it reads
-      // from the session cookie - it cannot see the preference. So an account
-      // that switched the prompt off lands here anyway; send it on rather than
-      // demanding a code the API no longer wants.
-      if (!prompt) {
-        window.location.replace("/dashboard")
+      const totp = data?.totp?.[0]
+      if (error || !totp) {
+        setState("none")
         return
       }
-      setFactors(found)
-      const preferred = preferredFactor(found)
-      if (preferred === "totp" && found.totp) {
-        setFactorId(found.totp.id)
-        setState("ready")
-      } else if (preferred === "passkey") {
-        setState("passkey")
-      } else {
-        setState("none")
-      }
+      setFactorId(totp.id)
+      setState("ready")
     })
     return () => {
       alive = false
     }
   }, [supabase])
-
-  /** Clear the gate with a webauthn factor. Same aal2 outcome as a code. */
-  const verifyPasskey = useCallback(async () => {
-    const id = factors.passkey?.id
-    if (!id || loading) return
-    setLoading(true)
-    try {
-      await verifyPasskeyFactor(supabase, id)
-      // Hard navigation for the same reason as the code path below: SWR caches
-      // are holding 403s from before the step-up.
-      window.location.replace("/dashboard")
-    } catch (err) {
-      setLoading(false)
-      if (!isPasskeyCancellation(err)) {
-        toast.error(authErrorMessage(err, "That passkey didn't work."))
-      }
-    }
-  }, [factors.passkey?.id, loading, supabase])
 
   const verify = useCallback(
     async (value: string) => {
@@ -156,20 +107,14 @@ export default function TwoFactorPage() {
       subtitle={
         state === "none"
           ? "This account needs a second factor to continue"
-          : state === "passkey"
-            ? "Confirm with the passkey on this device"
-            : "Enter the code from your authenticator app"
+          : "Enter the code from your authenticator app"
       }
       keyboardStable={state === "ready"}
     >
       <div className="space-y-5">
         <div className="flex justify-center">
           <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            {state === "passkey" ? (
-              <Fingerprint weight="duotone" className="size-6" />
-            ) : (
-              <ShieldCheck weight="duotone" className="size-6" />
-            )}
+            <ShieldCheck weight="duotone" className="size-6" />
           </span>
         </div>
 
@@ -177,39 +122,15 @@ export default function TwoFactorPage() {
           <p className="text-center text-sm text-muted-foreground">Loading…</p>
         )}
 
-        {state === "passkey" && (
-          <div className="space-y-4">
-            <p className="text-center text-sm text-muted-foreground">
-              Confirm it&rsquo;s you with{" "}
-              {factors.passkey?.friendlyName || "your passkey"}.
-            </p>
-            <Button
-              className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
-              disabled={loading}
-              onClick={verifyPasskey}
-            >
-              {loading ? (
-                <span className="inline-flex items-center gap-2">
-                  Verifying
-                  <Spin />
-                </span>
-              ) : (
-                "Use passkey"
-              )}
-            </Button>
-            <RecoveryCodeForm onSignOut={signOut} />
-          </div>
-        )}
-
         {state === "none" && (
-          // Enforcement is on and the API refused, but this account has no
-          // factor we can challenge - an unverified enrolment, or a factor
-          // removed on another device since the token was minted. Signing in
-          // again is the only honest instruction.
+          // Enforcement is on and a verified factor exists (that is why the API
+          // refused), but none of them is a TOTP factor we can challenge here -
+          // a passkey-only account signed in some other way. Signing in again
+          // with the passkey is the fix, so don't pretend a code will help.
           <div className="space-y-4 text-center">
             <p className="text-sm">
-              Sign in again to continue - this session can&apos;t be upgraded
-              from here.
+              Sign in again with your passkey to continue - this session
+              can&apos;t be upgraded from here.
             </p>
             <Button className="w-full" onClick={signOut}>
               Back to sign in
