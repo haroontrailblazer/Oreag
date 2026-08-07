@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr"
 
-import { provedEmailControl } from "@/lib/mfa"
+import { provedEmailControl } from "@/lib/amr"
 import { NextResponse, type NextRequest } from "next/server"
 
 /**

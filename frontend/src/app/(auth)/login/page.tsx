@@ -34,10 +34,10 @@ import {
   NO_FACTORS,
   loadSecondFactors,
   preferredFactor,
-  provedEmailControl,
   verifyPasskeyFactor,
   type SecondFactors,
 } from "@/lib/mfa"
+import { provedEmailControl } from "@/lib/amr"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
