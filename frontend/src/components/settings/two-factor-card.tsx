@@ -171,8 +171,18 @@ export function TwoFactorCard() {
   // Passkeys enrolled as a SECOND FACTOR. Distinct from passkeyList above,
   // which holds LOGIN passkeys (auth.webauthn_credentials) - those sign in on
   // their own and cannot gate anything. See lib/mfa.ts.
-  const total = passkeyList.length + totpList.length
-  const twoFactorOn = total > 0 && prefs.data?.two_factor_prompt !== false
+  /**
+   * What the sign-in challenge can actually ASK FOR.
+   *
+   * TOTP only. A login passkey is a sign-in METHOD, not a gate: it signs you in
+   * on its own and lands at aal2, so no prompt ever sits behind it. Counting it
+   * here made the switch read "Two-factor is on" for an account with nothing to
+   * challenge - and then turning it off changed nothing observable, which is
+   * indistinguishable from a broken toggle.
+   */
+  const challengeable = totpList.length
+  const twoFactorOn =
+    challengeable > 0 && prefs.data?.two_factor_prompt !== false
 
   /**
    * Offer "add a passkey" only when the account HAS none - counting login
@@ -463,7 +473,7 @@ export function TwoFactorCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           Two-factor authentication
-          {total > 0 ? (
+          {twoFactorOn ? (
             <Badge
               variant="outline"
               className="gap-1 text-emerald-600 dark:text-emerald-400"
@@ -510,7 +520,9 @@ export function TwoFactorCard() {
               // ON with a factor already enrolled just re-enables the prompt -
               // no need to make them add a second one they did not ask for.
               if (next) {
-                if (total > 0) void setTwoFactorPrompt(true)
+                // Something to challenge already? Just re-enable the prompt.
+                // Otherwise there is nothing to turn on yet, so ask what to add.
+                if (challengeable > 0) void setTwoFactorPrompt(true)
                 else setChooseOpen(true)
                 return
               }
@@ -568,7 +580,7 @@ export function TwoFactorCard() {
               }
             />
 
-            {total > 0 && (
+            {challengeable > 0 && (
               <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border bg-muted/30 p-3">
                 <div className="flex gap-2.5">
                   <Key weight="duotone" className="mt-0.5 size-5 text-muted-foreground" />
@@ -870,8 +882,8 @@ export function TwoFactorCard() {
             </DialogDescription>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {total > 0
-              ? "Your methods stay set up - we just stop asking for them. Turn this back on any time without scanning anything again."
+            {challengeable > 0
+              ? "Your authenticator stays set up - we just stop asking for it. Turn this back on any time without scanning anything again."
               : "You can turn this back on whenever you like."}
           </p>
           <DialogFooter>
@@ -898,9 +910,11 @@ export function TwoFactorCard() {
           <DialogHeader>
             <DialogTitle>Remove {removal?.label}?</DialogTitle>
             <DialogDescription>
-              {total <= 1
-                ? "This is your only second factor. Removing it turns two-factor authentication off for this account."
-                : "You can add it again later. Your other methods keep working."}
+              {removal?.kind === "totp" && challengeable <= 1
+                ? "This is your only authenticator. Removing it turns the sign-in challenge off for this account."
+                : removal?.kind === "passkey"
+                  ? "You can add it again later. Your password still signs you in."
+                  : "You can add it again later. Your other methods keep working."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
