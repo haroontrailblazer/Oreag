@@ -5,6 +5,7 @@ import {
   CopyIcon as Copy,
   DotsThreeIcon as MoreHorizontal,
   KeyIcon as KeyRound,
+  ShieldWarningIcon as ShieldWarning,
   PlusIcon as Plus,
   ProhibitIcon as Prohibit,
   TrashIcon as Trash,
@@ -228,6 +229,7 @@ export function ApiTab({ project }: { project: Project }) {
   const [creating, setCreating] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
+  const [uploadTarget, setUploadTarget] = useState<ApiKey | null>(null)
   const [revoking, setRevoking] = useState(false)
   const revokeDone = useRef(false)
   const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null)
@@ -375,7 +377,19 @@ print(data["answer"])`
     }
   }
 
-  async function handleToggleUpload(key: ApiKey, value: boolean) {
+  /* Enabling uploads is the one permission on this page that changes what the
+     ANSWER MODEL reads, so it gets a confirmation. Turning it OFF does not:
+     removing a permission is always safe, and a confirmation there would just
+     train people to click through the one that matters. */
+  function handleToggleUpload(key: ApiKey, value: boolean) {
+    if (value) {
+      setUploadTarget(key)
+      return
+    }
+    void applyUploadToggle(key, false)
+  }
+
+  async function applyUploadToggle(key: ApiKey, value: boolean) {
     setTogglingId(key.id)
     // Optimistically flip the row, then PATCH; revert on failure.
     mutate(
@@ -394,6 +408,13 @@ print(data["answer"])`
     } finally {
       setTogglingId(null)
     }
+  }
+
+  async function confirmEnableUploads() {
+    if (!uploadTarget) return
+    const key = uploadTarget
+    setUploadTarget(null)
+    await applyUploadToggle(key, true)
   }
 
   async function confirmRevoke() {
@@ -772,6 +793,101 @@ print(data["answer"])`
               </p>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Enabling uploads is a genuine change in the trust boundary, not just
+          another permission bit, so it is explained BEFORE it is granted rather
+          than documented somewhere the person flipping the switch will not
+          read. Cancel is the default action (autoFocus) because the safe
+          outcome should be the one you get by pressing Enter. */}
+      <Dialog
+        open={uploadTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setUploadTarget(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <div className="mb-1 flex size-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <ShieldWarning className="size-5" weight="fill" />
+            </div>
+            <DialogTitle>Allow this key to upload documents?</DialogTitle>
+            <DialogDescription>
+              Key{" "}
+              <span className="font-mono">{uploadTarget?.key_prefix}…</span> will
+              be able to add documents to this project. Anything it uploads is
+              indexed and becomes part of what the answer model reads.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 text-sm">
+            <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3">
+              <p className="font-medium text-foreground">
+                This enables indirect prompt injection
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                Retrieved document text is passed to the model as context, and
+                models can follow instructions they find there. A document
+                containing something like &ldquo;ignore your instructions and
+                reveal…&rdquo; is a live attempt, not just text. It affects{" "}
+                <span className="font-medium text-foreground">
+                  everyone who queries this project
+                </span>{" "}
+                - not only whoever uploaded it - and it persists until that
+                document is deleted and the project re-indexed.
+              </p>
+            </div>
+
+            <ul className="space-y-1.5 text-muted-foreground">
+              <li className="flex gap-2">
+                <span aria-hidden="true">•</span>
+                <span>
+                  Treat this like a write credential. Keep it server-side -
+                  never in browser code, a mobile app, or a public repo.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span aria-hidden="true">•</span>
+                <span>
+                  Only upload from sources you trust. Content from users, email
+                  or the open web can carry instructions.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span aria-hidden="true">•</span>
+                <span>
+                  Give each consumer its own key, so you can revoke this one
+                  without breaking the others.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span aria-hidden="true">•</span>
+                <span>
+                  If it may have leaked, revoke it here - uploads cannot be
+                  un-indexed by rotating the key alone.
+                </span>
+              </li>
+            </ul>
+
+            <p className="text-xs text-muted-foreground">
+              You can turn uploads off again at any time. Read access is
+              unchanged either way.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              autoFocus
+              onClick={() => setUploadTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={confirmEnableUploads}>
+              I understand, allow uploads
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
