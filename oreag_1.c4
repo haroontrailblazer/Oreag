@@ -365,6 +365,18 @@ model {
             authoritative 'Langfuse mirrors, it does not own. usage_events stays the billing record, so Langfuse being unreachable loses graphs, never invoices.'
           }
         }
+        judges = component 'LLM-as-Judge' 'Scores a sampled slice of answered queries for groundedness and retrieval relevance, attached to the trace that earned them.' {
+          #guard
+          technology 'services/judges.py · project own LLM · scores pushed to Langfuse'
+          metadata {
+            why 'tokens, cost and latency say the system was fast or expensive; they cannot say the answer was WRONG - that the model asserted something the sources never supported, or that retrieval returned material about the wrong topic. Neither failure leaves a trace in usage_events.'
+            whose-money 'unlike every other observability feature here, a judge call is a REAL model call on the project own provider key. Hence off by default, sampled at 5% when on, and metered under its own judge endpoint so it appears on the Usage page as a line the user can decide to stop paying for - never folded into query.'
+            two-criteria 'groundedness judges the ANSWER, relevance judges the SOURCES. Keeping them apart is what separates a retrieval problem from a generation problem. A judge with ten criteria returns ten mediocre numbers.'
+            cache-hits-skipped 'a cached answer came from a run that was already eligible for judging, so scoring it again spends real money re-evaluating text nothing has changed about.'
+            scores-not-local 'scores attach to the trace, so a bad score is one click from the question, the chunks and the answer. Stored in our own table they would be numbers with nothing to look at.'
+            after-the-answer 'runs as a background task once the response has been sent. A judge that fails, times out or returns nonsense must never affect an answer the user already has.'
+          }
+        }
         mfa = component 'Two-Factor Enforcement' 'Decides whether an access token that has not cleared a second factor may be used. The prompt in the browser is a courtesy; this is the control.' {
           #guard
           technology 'services/mfa.py · reads the aal claim · 60 s memoised probe · fails open'
@@ -581,6 +593,7 @@ model {
   usageReport -[persist]-> db 'aggregates usage_events, and query_logs joined through projects.owner_id'
   generation -[internal]-> tracing 'records the model call, its tokens and its cost'
   usage -[internal]-> embeddingUsage 'reads the request embedding tally when writing the row'
+  judges -[internal]-> tracing 'attaches groundedness and relevance scores to the trace'
   contentVersion -[persist]-> db 'projects.content_version'
   maintenance -[persist]-> db 'prunes logs, usage and expired cache rows'
   publicApi -[persist]-> db 'query_logs with the cache layer that served it'

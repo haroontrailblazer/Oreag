@@ -71,6 +71,17 @@ class Settings(BaseSettings):
     langfuse_content_sample_rate: float = 0.1
     # Blank means "detect": production on Render, development anywhere else.
     langfuse_environment: str = ""
+    # LLM-as-judge. OFF by default and sampled when on, because a judge call is
+    # a REAL model call billed to the project's OWN provider key - turning it
+    # on for everyone would silently double the spend this phase exists to
+    # measure. Judged requests are metered like any other, under the "judge"
+    # endpoint, so the cost is visible rather than hidden.
+    langfuse_judge_enabled: bool = False
+    langfuse_judge_sample_rate: float = 0.05
+    # Prompts served from Langfuse's prompt management, with the in-repo text
+    # as the fallback. Off by default: a network fetch on the answer path is
+    # only worth it once someone is actually editing prompts there.
+    langfuse_prompts_enabled: bool = False
 
     mfa_enforce_aal2: bool = True
     # How long "does this user have a factor?" is memoised per process. Short,

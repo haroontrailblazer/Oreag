@@ -3,7 +3,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from fastapi import File as FastAPIFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
@@ -30,7 +30,7 @@ from ..services import explore, retrieval, storage
 from ..services.conversion import content_type_for, is_ingestable, source_extension
 from ..services.query import run_query, run_query_stream
 from ..services.rate_limit import enforce_rate_limit
-from ..services import tracing
+from ..services import judges, tracing
 from ..services.usage import record_usage
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,7 @@ def _get_project(db: Session, project_id: uuid.UUID) -> Project:
 def public_query(
     project_id: uuid.UUID,
     body: QueryRequest,
+    background: BackgroundTasks,
     api_key: ApiKey = Depends(require_api_key),
     db: Session = Depends(get_db),
 ):
@@ -95,6 +96,9 @@ def public_query(
                 output={"answer": response.answer, "sources": len(response.sources)},
                 metadata={"cache_layer": usage_out.get("cache_layer")},
             )
+            # Captured INSIDE the context: outside it the current trace is gone
+            # and the judge would have nothing to attach its scores to.
+            usage_out["trace_id"] = tracing.current_trace_id()
     record_usage(
         db,
         project=project,
@@ -105,7 +109,48 @@ def public_query(
         saved=usage_out.get("saved"),
         cache_layer=usage_out.get("cache_layer"),
     )
+    # Judged AFTER the row is written and only on a sampled slice - see
+    # services/judges. A background task so the caller never waits for an
+    # evaluation of an answer they already have.
+    _maybe_judge(background, db, project, body.question, response, usage_out)
     return response
+
+
+def _maybe_judge(background, db, project, question, response, usage_out) -> None:
+    """Queue an LLM-as-judge pass for this answer, if it was sampled.
+
+    A cache hit is skipped deliberately: the answer came from a previous run
+    that was already eligible for judging, so scoring it again would spend real
+    money re-evaluating text nothing has changed about.
+    """
+    if usage_out.get("cache_layer") is not None:
+        return
+    if not judges.should_judge():
+        return
+    trace_id = usage_out.get("trace_id")
+    if not trace_id:
+        return
+
+    def run() -> None:
+        judge_usage = judges.judge_answer(
+            db,
+            project,
+            question=question,
+            answer=response.answer or "",
+            sources=[s.model_dump() if hasattr(s, "model_dump") else dict(s)
+                     for s in response.sources],
+            trace_id=trace_id,
+        )
+        if judge_usage is not None:
+            # Its own endpoint, never folded into "query": the judge is a cost
+            # the user can choose to stop paying, and that decision needs the
+            # number to be visible on its own.
+            record_usage(
+                db, project=project, api_key_id=None,
+                endpoint="judge", usage=judge_usage,
+            )
+
+    background.add_task(run)
 
 
 @router.post("/query/stream")

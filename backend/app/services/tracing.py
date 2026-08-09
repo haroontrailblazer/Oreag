@@ -475,3 +475,20 @@ def forget_user(user_id) -> int:
         logger.warning("Langfuse cleanup failed for user %s", user_id, exc_info=True)
         return 0
     return len(ids)
+
+
+def current_trace_id() -> str | None:
+    """The id of the trace currently in scope, or None.
+
+    Must be called while the root span is still open: once its context manager
+    exits there is no current trace, and a judge or score attached afterwards
+    would have nowhere to land.
+    """
+    lf = client()
+    if lf is None:
+        return None
+    try:
+        return lf.get_current_trace_id()
+    except Exception:
+        logger.debug("Could not read the current trace id", exc_info=True)
+        return None
