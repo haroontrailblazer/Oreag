@@ -2,9 +2,16 @@
 
 import {
   ChartBarIcon as ChartBar,
+  ChartDonutIcon as ChartDonut,
+  DatabaseIcon as Database,
+  GaugeIcon as Gauge,
+  LightningIcon as Lightning,
+  PiggyBankIcon as PiggyBank,
+  ReceiptIcon as Receipt,
+  StackIcon as Stack,
   InfoIcon as Info,
 } from "@phosphor-icons/react/dist/ssr"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -86,6 +93,22 @@ function formatCost(value: number): string {
   return `$${value.toFixed(2)}`
 }
 
+function formatPercent(value: number): string {
+  return `${value.toFixed(value >= 10 ? 1 : 2)}%`
+}
+
+/** A ratio is only useful when every input is measured. This keeps frontend
+ * insights from turning a provider's unknown value into an implied zero. */
+function measuredSum(values: (number | null)[]): number | null {
+  if (values.some((value) => value == null)) return null
+  return values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+}
+
+function shareOf(value: number | null, total: number | null): number | null {
+  if (value == null || total == null || total <= 0) return null
+  return (value / total) * 100
+}
+
 /** "Aug 3" from "2026-08-03", parsed as local (new Date("YYYY-MM-DD") is UTC
  *  midnight and can shift a day in negative-offset timezones). */
 function dayLabel(date: string): string {
@@ -127,17 +150,42 @@ function SimilarityCell({ value }: { value: number | null }) {
  * Small display pieces
  * ------------------------------------------------------------------------- */
 
-function StatTile({
+function MetricTile({
   label,
   value,
+  detail,
+  icon,
+  accent,
+  format = "number",
 }: {
   label: string
   value: number | null
+  detail: ReactNode
+  icon: ReactNode
+  accent: string
+  format?: "number" | "cost"
 }) {
   return (
-    <Card className="gap-1 py-4">
-      <CardHeader className="px-4">
-        <CardDescription>{label}</CardDescription>
+    <Card className="relative gap-3 overflow-hidden py-4">
+      <span
+        aria-hidden="true"
+        className="absolute inset-x-0 top-0 h-0.5"
+        style={{ background: accent }}
+      />
+      <CardHeader className="grid grid-cols-[1fr_auto] items-center px-4">
+        <CardDescription className="font-medium text-foreground/70">
+          {label}
+        </CardDescription>
+        <span
+          aria-hidden="true"
+          className="flex size-8 items-center justify-center rounded-lg"
+          style={{
+            background: `color-mix(in oklab, ${accent} 12%, transparent)`,
+            color: accent,
+          }}
+        >
+          {icon}
+        </span>
       </CardHeader>
       <CardContent className="px-4">
         {value == null ? (
@@ -145,32 +193,17 @@ function StatTile({
             Not measured
           </div>
         ) : (
-          // Proportional figures on purpose - tabular-nums makes a large
-          // standalone number look loose; it is for aligned columns only.
-          <div className="text-2xl font-semibold" title={intFmt.format(value)}>
-            {compactFmt.format(value)}
+          <div
+            className="text-2xl font-semibold tracking-tight"
+            title={format === "cost" ? formatCost(value) : intFmt.format(value)}
+          >
+            {format === "cost" ? formatCost(value) : compactFmt.format(value)}
           </div>
         )}
       </CardContent>
-    </Card>
-  )
-}
-
-function CostTile({ label, value }: { label: string; value: number | null }) {
-  return (
-    <Card className="gap-1 py-4">
-      <CardHeader className="px-4">
-        <CardDescription>{label}</CardDescription>
-      </CardHeader>
-      <CardContent className="px-4">
-        {value == null ? (
-          <div className="text-base font-medium italic text-muted-foreground">
-            Not measured
-          </div>
-        ) : (
-          <div className="text-2xl font-semibold">{formatCost(value)}</div>
-        )}
-      </CardContent>
+      <CardFooter className="min-h-5 px-4 text-xs text-muted-foreground">
+        {detail}
+      </CardFooter>
     </Card>
   )
 }
@@ -202,7 +235,13 @@ function HitRateMeter({ rate }: { rate: number }) {
  * Sections
  * ------------------------------------------------------------------------- */
 
-function TotalsRow({ totals }: { totals: UsageTotals }) {
+function TotalsRow({
+  totals,
+  days,
+}: {
+  totals: UsageTotals
+  days: number
+}) {
   // Total spend is the two sides added, but only where BOTH are known -
   // adding a measured number to an unmeasured one would silently present a
   // partial figure as a total.
@@ -211,16 +250,80 @@ function TotalsRow({ totals }: { totals: UsageTotals }) {
       ? null
       : (totals.cost_usd ?? 0) + (totals.embedding_cost_usd ?? 0)
 
+  const generationTokens = measuredSum([
+    totals.prompt_tokens,
+    totals.completion_tokens,
+  ])
+  const allTokens = measuredSum([
+    totals.prompt_tokens,
+    totals.completion_tokens,
+    totals.embedding_tokens,
+  ])
+  const promptShare = shareOf(totals.prompt_tokens, generationTokens)
+  const completionShare = shareOf(totals.completion_tokens, generationTokens)
+  const embeddingShare = shareOf(totals.embedding_tokens, allTokens)
+  const costPerRequest =
+    totalCost != null && totals.requests > 0
+      ? totalCost / totals.requests
+      : null
+
   return (
     <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
-      <StatTile label="Requests" value={totals.requests} />
-      <StatTile label="LLM tokens" value={totals.prompt_tokens} />
-      <StatTile label="Completion tokens" value={totals.completion_tokens} />
+      <MetricTile
+        label="Requests"
+        value={totals.requests}
+        detail={`${compactFmt.format(totals.requests / days)} average per day`}
+        icon={<Gauge className="size-4" weight="bold" />}
+        accent="var(--chart-1)"
+      />
+      <MetricTile
+        label="Prompt tokens"
+        value={totals.prompt_tokens}
+        detail={
+          promptShare == null
+            ? "Share not measured"
+            : `${formatPercent(promptShare)} of generation volume`
+        }
+        icon={<Stack className="size-4" weight="bold" />}
+        accent="var(--chart-2)"
+      />
+      <MetricTile
+        label="Completion tokens"
+        value={totals.completion_tokens}
+        detail={
+          completionShare == null
+            ? "Share not measured"
+            : `${formatPercent(completionShare)} of generation volume`
+        }
+        icon={<Lightning className="size-4" weight="bold" />}
+        accent="var(--chart-3)"
+      />
       {/* Shown beside the LLM tokens rather than folded into them: embedding
           is usually the larger VOLUME and the smaller COST, and one combined
           number would hide both facts. */}
-      <StatTile label="Embedding tokens" value={totals.embedding_tokens} />
-      <CostTile label="Total cost" value={totalCost} />
+      <MetricTile
+        label="Embedding tokens"
+        value={totals.embedding_tokens}
+        detail={
+          embeddingShare == null
+            ? "Share not measured"
+            : `${formatPercent(embeddingShare)} of measured tokens`
+        }
+        icon={<Database className="size-4" weight="bold" />}
+        accent="var(--chart-4)"
+      />
+      <MetricTile
+        label="Total cost"
+        value={totalCost}
+        detail={
+          costPerRequest == null
+            ? "Per-request cost not measured"
+            : `${formatCost(costPerRequest)} average per request`
+        }
+        icon={<Receipt className="size-4" weight="bold" />}
+        accent="var(--chart-5)"
+        format="cost"
+      />
     </div>
   )
 }
@@ -231,134 +334,313 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
   const total = llm + embedding
   if (total <= 0) return null
   const llmPct = (llm / total) * 100
+  const embeddingPct = 100 - llmPct
+  const measuredTokens = measuredSum([
+    totals.prompt_tokens,
+    totals.completion_tokens,
+    totals.embedding_tokens,
+  ])
+  const embeddingVolumePct = shareOf(totals.embedding_tokens, measuredTokens)
+  const costMultiple = embedding > 0 ? llm / embedding : null
 
   return (
-    <Card className="gap-4">
-      <CardHeader>
-        <CardTitle>Where the money goes</CardTitle>
-        <CardDescription>
-          Answering questions versus building and searching the index. On a
-          document-heavy account embedding is often the larger bill - it used
-          to be invisible here.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div
-          className="flex h-3 w-full overflow-hidden rounded-full bg-muted"
-          role="img"
-          aria-label={`Generation ${formatCost(llm)}, embedding ${formatCost(embedding)}`}
-        >
-          <div
-            className="bg-[var(--chart-1)]"
-            style={{ width: `${llmPct}%` }}
-          />
-          <div
-            className="bg-[var(--chart-2)]"
-            style={{ width: `${100 - llmPct}%` }}
-          />
+    <Card className="gap-5 overflow-hidden">
+      <CardHeader className="grid grid-cols-[1fr_auto] gap-3">
+        <div className="flex flex-col gap-2">
+          <CardTitle>Where the money goes</CardTitle>
+          <CardDescription>
+            Generation answers questions; embedding builds and searches the
+            index.
+          </CardDescription>
         </div>
-        <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="size-2.5 rounded-full bg-[var(--chart-1)]" />
-            <span className="text-muted-foreground">Generation</span>
-            <span className="font-medium tabular-nums">{formatCost(llm)}</span>
+        <span className="flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+          <ChartDonut className="size-5" weight="duotone" />
+        </span>
+      </CardHeader>
+      <CardContent className="grid items-center gap-6 sm:grid-cols-[11rem_1fr]">
+        <div className="flex justify-center">
+          <div
+            className="relative flex size-40 items-center justify-center rounded-full"
+            style={{
+              background: `conic-gradient(var(--chart-1) 0 ${llmPct}%, var(--chart-2) ${llmPct}% 100%)`,
+            }}
+            role="img"
+            aria-label={`Generation ${formatCost(llm)}, embedding ${formatCost(embedding)}`}
+          >
+            <div className="flex size-28 flex-col items-center justify-center rounded-full bg-card text-center shadow-[0_0_0_1px_var(--border)]">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Total spent
+              </span>
+              <span className="mt-1 text-2xl font-semibold tracking-tight">
+                {formatCost(total)}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="size-2.5 rounded-full bg-[var(--chart-2)]" />
-            <span className="text-muted-foreground">Embedding</span>
-            <span className="font-medium tabular-nums">
-              {formatCost(embedding)}
-            </span>
-          </div>
+        </div>
+        <div className="flex flex-col gap-4">
+          <SpendLegendRow
+            label="Generation"
+            description="Prompts and model responses"
+            cost={llm}
+            percent={llmPct}
+            color="var(--chart-1)"
+          />
+          <SpendLegendRow
+            label="Embedding"
+            description="Indexing and retrieval vectors"
+            cost={embedding}
+            percent={embeddingPct}
+            color="var(--chart-2)"
+          />
         </div>
       </CardContent>
+      <CardFooter className="border-t bg-muted/30 py-4 text-sm text-muted-foreground">
+        <ChartBar className="mr-2 size-4 shrink-0" />
+        {embeddingVolumePct != null ? (
+          <span>
+            Embedding produced {formatPercent(embeddingVolumePct)} of measured
+            tokens but only {formatPercent(embeddingPct)} of spend
+            {costMultiple != null
+              ? `; generation cost ${costMultiple.toFixed(1)}x more.`
+              : "."}
+          </span>
+        ) : (
+          <span>Token-volume comparison is not measured for this window.</span>
+        )}
+      </CardFooter>
     </Card>
   )
 }
 
-function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
+function SpendLegendRow({
+  label,
+  description,
+  cost,
+  percent,
+  color,
+}: {
+  label: string
+  description: string
+  cost: number
+  percent: number
+  color: string
+}) {
   return (
-    <Card className="gap-4">
-      <CardHeader>
-        <CardTitle>Saved by the cache</CardTitle>
-        <CardDescription>
-          Answers served from the L1 (exact) and L2 (semantic) caches skip the
-          provider entirely - these are the tokens and money that never got
-          spent.
-        </CardDescription>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="mt-1 size-2.5 shrink-0 rounded-full"
+            style={{ background: color }}
+          />
+          <div>
+            <div className="font-medium">{label}</div>
+            <div className="text-xs text-muted-foreground">{description}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="font-semibold tabular-nums">{formatCost(cost)}</div>
+          <div className="text-xs text-muted-foreground tabular-nums">
+            {formatPercent(percent)}
+          </div>
+        </div>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${percent}%`, background: color }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
+  const savedGenerationTokens = measuredSum([
+    totals.saved_prompt_tokens,
+    totals.saved_completion_tokens,
+  ])
+  const billedGenerationTokens = measuredSum([
+    totals.prompt_tokens,
+    totals.completion_tokens,
+  ])
+  const potentialGenerationTokens = measuredSum([
+    totals.prompt_tokens,
+    totals.completion_tokens,
+    totals.saved_prompt_tokens,
+    totals.saved_completion_tokens,
+  ])
+  const tokenSavingsPct = shareOf(
+    savedGenerationTokens,
+    potentialGenerationTokens
+  )
+  const potentialGenerationCost = measuredSum([
+    totals.cost_usd,
+    totals.saved_cost_usd,
+  ])
+  const costSavingsPct = shareOf(
+    totals.saved_cost_usd,
+    potentialGenerationCost
+  )
+
+  return (
+    <Card className="gap-5 overflow-hidden">
+      <CardHeader className="grid grid-cols-[1fr_auto] gap-3">
+        <div className="flex flex-col gap-2">
+          <CardTitle>Saved by the cache</CardTitle>
+          <CardDescription>
+            L1 and L2 cache hits skip provider generation, avoiding tokens and
+            cost.
+          </CardDescription>
+        </div>
+        <span
+          className="flex size-10 items-center justify-center rounded-xl"
+          style={{
+            background:
+              "color-mix(in oklab, var(--chart-3) 12%, transparent)",
+            color: "var(--chart-3)",
+          }}
+        >
+          <PiggyBank className="size-5" weight="duotone" />
+        </span>
       </CardHeader>
-      <CardContent className="flex flex-wrap items-end gap-x-12 gap-y-4">
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Cost saved
-          </div>
-          {totals.saved_cost_usd == null ? (
-            <div className="mt-1 text-lg font-medium italic text-muted-foreground">
-              Not measured
+      <CardContent className="flex flex-col gap-5">
+        <div
+          className="rounded-xl border p-4"
+          style={{
+            background:
+              "color-mix(in oklab, var(--chart-3) 6%, var(--card))",
+          }}
+        >
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Generation tokens avoided
+              </div>
+              {tokenSavingsPct == null ? (
+                <div className="mt-1 text-lg font-medium italic text-muted-foreground">
+                  Not measured
+                </div>
+              ) : (
+                <div
+                  className="mt-1 text-4xl font-semibold tracking-tight"
+                  style={{ color: "var(--chart-3)" }}
+                >
+                  {formatPercent(tokenSavingsPct)}
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="mt-1 text-4xl font-semibold text-[#006300] dark:text-[#0ca30c]">
-              {formatCost(totals.saved_cost_usd)}
+            <div className="text-right text-xs text-muted-foreground">
+              {savedGenerationTokens == null ? (
+                <NotMeasured />
+              ) : (
+                <>
+                  <span className="block text-base font-semibold text-foreground">
+                    {compactFmt.format(savedGenerationTokens)}
+                  </span>
+                  of potential generation volume
+                </>
+              )}
             </div>
-          )}
-        </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Prompt tokens saved
           </div>
-          <div className="mt-1 text-xl font-semibold">
-            {totals.saved_prompt_tokens == null ? (
-              <NotMeasured className="text-sm" />
-            ) : (
-              <span title={intFmt.format(totals.saved_prompt_tokens)}>
-                {compactFmt.format(totals.saved_prompt_tokens)}
-              </span>
-            )}
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${tokenSavingsPct ?? 0}%`,
+                background: "var(--chart-3)",
+              }}
+            />
           </div>
         </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Completion tokens saved
-          </div>
-          <div className="mt-1 text-xl font-semibold">
-            {totals.saved_completion_tokens == null ? (
-              <NotMeasured className="text-sm" />
-            ) : (
-              <span title={intFmt.format(totals.saved_completion_tokens)}>
-                {compactFmt.format(totals.saved_completion_tokens)}
-              </span>
-            )}
-          </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <SavingsMetric
+            label="Cost saved"
+            value={
+              totals.saved_cost_usd == null
+                ? null
+                : formatCost(totals.saved_cost_usd)
+            }
+            detail={
+              costSavingsPct == null
+                ? "Reduction not measured"
+                : `${formatPercent(costSavingsPct)} of potential generation cost`
+            }
+          />
+          <SavingsMetric
+            label="Prompt saved"
+            value={
+              totals.saved_prompt_tokens == null
+                ? null
+                : compactFmt.format(totals.saved_prompt_tokens)
+            }
+            detail="tokens avoided"
+          />
+          <SavingsMetric
+            label="Completion saved"
+            value={
+              totals.saved_completion_tokens == null
+                ? null
+                : compactFmt.format(totals.saved_completion_tokens)
+            }
+            detail="tokens avoided"
+          />
         </div>
       </CardContent>
-      <CardFooter className="flex-col items-start gap-1 border-t pt-4">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Embedding saved by the dimension archive
-        </div>
-        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-          <span className="text-xl font-semibold">
+      <CardFooter className="flex-col items-start gap-2 border-t bg-muted/30 py-4">
+        <div className="flex w-full flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 font-medium">
+            <Database className="size-4 text-muted-foreground" />
+            Dimension archive recovery
+          </div>
+          <div className="flex items-baseline gap-2">
             {totals.saved_embedding_tokens == null ? (
-              <NotMeasured className="text-sm" />
+              <NotMeasured />
             ) : (
-              <span title={intFmt.format(totals.saved_embedding_tokens)}>
+              <span className="font-semibold">
                 {compactFmt.format(totals.saved_embedding_tokens)} tokens
               </span>
             )}
-          </span>
-          {totals.saved_embedding_cost_usd != null && (
-            <span className="text-sm font-medium text-[#006300] dark:text-[#0ca30c]">
-              {formatCost(totals.saved_embedding_cost_usd)}
-            </span>
-          )}
+            {totals.saved_embedding_cost_usd != null && (
+              <Badge variant="secondary">
+                {formatCost(totals.saved_embedding_cost_usd)} avoided
+              </Badge>
+            )}
+          </div>
         </div>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Shrinking an embedding dimension keeps the full-width vector. Growing
-          back restores it exactly instead of re-embedding the corpus - this is
-          what that recovered, replayed from what those files originally cost.
-          Files indexed before this was recorded show as not measured.
-        </p>
+        <CardDescription>
+          Full-width vectors were restored from the archive instead of being
+          re-embedded.
+        </CardDescription>
       </CardFooter>
     </Card>
+  )
+}
+
+function SavingsMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string
+  value: string | null
+  detail: string
+}) {
+  return (
+    <div className="rounded-lg border bg-card p-3">
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      {value == null ? (
+        <NotMeasured className="mt-2 block" />
+      ) : (
+        <div className="mt-1 text-xl font-semibold tracking-tight">{value}</div>
+      )}
+      <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        {detail}
+      </div>
+    </div>
   )
 }
 
@@ -918,8 +1200,8 @@ export function UsageView({ data }: { data: AccountUsage }) {
     return <EmptyState days={data.window_days} />
   }
   return (
-    <>
-      <TotalsRow totals={data.totals} />
+    <div className="flex min-h-full flex-col gap-4 sm:gap-6">
+      <TotalsRow totals={data.totals} days={data.window_days} />
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <SpendSplit totals={data.totals} />
         <CacheSavingsCard totals={data.totals} />
@@ -932,7 +1214,7 @@ export function UsageView({ data }: { data: AccountUsage }) {
         unmeasuredModels={data.caveats.unmeasured_models}
       />
       <ProjectsTable rows={data.by_project} />
-    </>
+    </div>
   )
 }
 
@@ -985,7 +1267,7 @@ export function UsageDashboard() {
       )}
 
       {isLoading && !data && (
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pb-2 sm:space-y-6">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-2">
           <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             {[1, 2, 3, 4].map((i) => (
               <Skeleton key={i} className="h-24" />
