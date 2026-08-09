@@ -2,7 +2,18 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, BigInteger, Boolean, DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy import (
+    ARRAY,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    Text,
+    func,
+)
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, deferred, mapped_column
@@ -278,6 +289,12 @@ class QueryLog(Base):
     # Which cache served this query: "l1" (exact), "l2" (semantic), or NULL when
     # it was computed fresh. Powers the project-wide cache hit rate.
     cache_layer: Mapped[str | None] = mapped_column(Text)
+    # Mean similarity of the chunks actually used - the best single signal for
+    # "is retrieval working on this project", computed today and discarded.
+    retrieval_similarity: Mapped[float | None] = mapped_column(Float)
+    # How close the L2 match was. Without it nobody can tell whether
+    # semantic_cache_min_similarity (0.75) is too loose.
+    cache_similarity: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -306,4 +323,15 @@ class UsageEvent(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer)
     completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    # Which model produced them. Text rather than an FK: models are retired
+    # from the catalog, and a usage row must stay readable afterwards.
+    model: Mapped[str | None] = mapped_column(Text)
+    # Priced at WRITE time. Deriving cost at read time would let a price change
+    # silently rewrite every past invoice.
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    # Tokens NOT spent because the cache answered. Set only on a hit - NULL on a
+    # miss, which is a different fact from 0.
+    saved_prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    saved_completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    cache_layer: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

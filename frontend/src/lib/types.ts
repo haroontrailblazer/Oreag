@@ -189,3 +189,88 @@ export interface ModelsResponse {
   deprecated?: DeprecatedModels
   availability: Record<string, boolean>
 }
+
+/*
+ * GET /api/account/usage?days=N
+ *
+ * Everywhere `| null` appears below it means "the provider did not report
+ * this" - unmeasured, which is NOT the same as zero. The UI must render null
+ * as "not measured", never as 0: a provider that reports no token counts has
+ * to stay visible as such, or the totals silently understate real spend.
+ */
+
+export interface UsageTotals {
+  requests: number
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cost_usd: number | null
+  saved_prompt_tokens: number | null
+  saved_completion_tokens: number | null
+  saved_cost_usd: number | null
+}
+
+export interface UsageByModel {
+  model: string
+  requests: number
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cost_usd: number | null
+}
+
+export interface UsageByApiKey {
+  api_key_id: string
+  key_prefix: string
+  revoked: boolean
+  requests: number
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cost_usd: number | null
+}
+
+export interface UsageProjectCache {
+  l1: number
+  l2: number
+  miss: number
+  /** Fraction 0..1 of cacheable requests answered from L1 or L2. */
+  hit_rate: number
+}
+
+export interface UsageByProject {
+  project_id: string
+  name: string
+  requests: number
+  cost_usd: number | null
+  cache: UsageProjectCache
+  avg_retrieval_similarity: number | null
+  avg_cache_similarity: number | null
+  saved_prompt_tokens: number | null
+  saved_completion_tokens: number | null
+}
+
+export interface UsageDaily {
+  /** YYYY-MM-DD */
+  date: string
+  requests: number
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cost_usd: number | null
+  saved_prompt_tokens: number | null
+}
+
+export interface UsageCaveats {
+  /** Requests whose provider reported no token usage - excluded from token/cost sums. */
+  unmeasured_requests: number
+  unmeasured_models: string[]
+  /** Embedding during ingest, image captioning and audio transcription are not counted. */
+  ingestion_excluded: boolean
+}
+
+export interface AccountUsage {
+  window_days: number
+  totals: UsageTotals
+  by_model: UsageByModel[]
+  by_api_key: UsageByApiKey[]
+  by_project: UsageByProject[]
+  daily: UsageDaily[]
+  caveats: UsageCaveats
+}

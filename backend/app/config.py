@@ -49,6 +49,29 @@ class Settings(BaseSettings):
     # from day one; it only starts biting an account the moment that account
     # opts in. MFA_ENFORCE_AAL2=false disables it with a restart and no
     # redeploy, for the case where a bad enrolment locks people out.
+    # --- Langfuse (Phase 7) -------------------------------------------------
+    # Server-side ONLY. These never reach the browser - the frontend reads
+    # usage from our own /api endpoints, never from Langfuse directly, so there
+    # is deliberately no NEXT_PUBLIC_ equivalent of any of these.
+    #
+    # Default OFF and empty: with no keys the client is never constructed and
+    # every call site is a no-op, so a deploy without them behaves exactly as
+    # today rather than erroring on every request.
+    langfuse_enabled: bool = False
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    # EU: https://cloud.langfuse.com  |  US: https://us.cloud.langfuse.com
+    # A self-hosted instance is the same setting - that is the whole migration.
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+    # Fraction of traces that carry INPUT/OUTPUT content. Metadata (tokens,
+    # cost, latency, model, cache layer) is always sent for 100%; this governs
+    # only the expensive part. One query emits 6-8 observations, so the free
+    # tier is ~6-7k queries/month - sampling is what keeps that viable.
+    # Errors and low-scoring traces are always captured in full regardless.
+    langfuse_content_sample_rate: float = 0.1
+    # Blank means "detect": production on Render, development anywhere else.
+    langfuse_environment: str = ""
+
     mfa_enforce_aal2: bool = True
     # How long "does this user have a factor?" is memoised per process. Short,
     # because it bounds how long a freshly enrolled factor takes to start being

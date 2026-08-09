@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import Chunk, Memory, Project, QueryLog
 from ..providers import resolver
-from ..providers.base import ProviderUnavailableError, is_provider_rate_limit
+from ..providers.base import (
+    ProviderUnavailableError,
+    TokenUsage,
+    is_provider_rate_limit,
+)
 from ..providers.registry import get_embedder, get_llm
 from ..schemas import QueryResponse, SourceChunk
 from . import agentic
@@ -23,6 +27,7 @@ from . import memory as memory_service
 from . import query_cache
 from . import retrieval
 from . import semantic_cache
+from .tracing import observed_generate
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +126,121 @@ def _llm_step(db: Session, llm_fn, call):
     return call(llm)
 
 
+class _UsageAccumulator:
+    """Sums the TokenUsage of every LLM call made while serving one request.
+
+    Pure metering, so it must never be able to fail the request: add() eats its
+    own exceptions, and a broken accumulator just means a NULL token count. The
+    running total keeps TokenUsage.__add__ semantics - an unmeasured call never
+    erases a measured one, and nothing measured stays None, never 0.
+    """
+
+    __slots__ = ("total",)
+
+    def __init__(self) -> None:
+        self.total = TokenUsage()
+
+    def add(self, usage) -> None:
+        try:
+            if usage is not None:
+                self.total = self.total + usage
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Token usage accumulation failed", exc_info=True)
+
+
+class _FanoutUsage:
+    """One .add() fanned out to several accumulators.
+
+    The compute phase feeds two totals at once: the REQUEST total (what this
+    request spent, condense included) and the per-result subtotal (what a
+    future cache hit will have saved, which travels with the cached answer).
+    """
+
+    __slots__ = ("_accs",)
+
+    def __init__(self, *accs: _UsageAccumulator) -> None:
+        self._accs = accs
+
+    def add(self, usage) -> None:
+        for acc in self._accs:
+            acc.add(usage)
+
+
+class _TrackedLLM:
+    """Wraps a provider so plain ``.generate()`` calls report their tokens.
+
+    agentic.condense/plan/clarify call ``llm.generate(...)`` and expect a str -
+    that contract stays. The wrapper routes the call through observed_generate
+    (a Langfuse generation span + TokenUsage, both fail-open) and feeds the
+    usage to the request's accumulator, so all up-to-3 LLM calls of one query
+    sum into a single billing figure instead of only the final generation.
+    """
+
+    __slots__ = ("_inner", "_name", "_acc")
+
+    def __init__(self, inner, name: str, acc) -> None:
+        self._inner = inner
+        self._name = name
+        self._acc = acc
+
+    @property
+    def model(self) -> str:
+        return getattr(self._inner, "model", "") or ""
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
+        text, usage = observed_generate(
+            self._inner, system_prompt, user_prompt, name=self._name
+        )
+        self._acc.add(usage)
+        return text
+
+
+def _mean_similarity(sources) -> float | None:
+    """Mean similarity of the sources an answer actually used, or None.
+
+    None - not 0 - when there are no sources (e.g. a clarification): "nothing
+    was retrieved" is a different fact from "retrieval matched at 0.0".
+    """
+    values = [
+        s.get("similarity")
+        for s in (sources or [])
+        if isinstance(s.get("similarity"), (int, float))
+    ]
+    if not values:
+        return None
+    return round(sum(values) / len(values), 4)
+
+
+def _fill_usage_out(
+    usage_out: dict | None,
+    request_usage: _UsageAccumulator,
+    cache_layer: str | None,
+    result,
+    latency_ms: int | None,
+) -> None:
+    """Expose what this request spent (and what a cache hit saved) to the
+    caller, out of band of the public response shape - routers/rag_v1.py
+    threads it into record_usage().
+
+    "saved" is only ever the counts persisted WITH the cached answer when it
+    was first computed - never an estimate. When the original run was not
+    measured (a streamed generation reports nothing), the hit's saving stays
+    unreported rather than invented.
+    """
+    if usage_out is None:
+        return
+    usage_out["usage"] = request_usage.total
+    usage_out["cache_layer"] = cache_layer
+    usage_out["latency_ms"] = latency_ms
+    if cache_layer is not None and result is not None:
+        saved = TokenUsage(
+            prompt_tokens=result.gen_prompt_tokens,
+            completion_tokens=result.gen_completion_tokens,
+        )
+        if saved.known:
+            usage_out["saved"] = saved
+
+
 def run_query(
     db: Session,
     project: Project,
@@ -128,6 +248,7 @@ def run_query(
     top_k_override: int | None,
     api_key_id: uuid.UUID | None,
     conversation_id: str | None = None,
+    usage_out: dict | None = None,
 ) -> QueryResponse:
     """Shared by the dashboard playground and the public /v1 endpoint.
 
@@ -168,6 +289,8 @@ def run_query(
     model = f"{project.llm_provider}/{project.llm_model}"
 
     embed_memo, embed_query, _llm = _request_helpers(db, project)
+    # Everything this request spends on LLM calls, summed for metering.
+    request_usage = _UsageAccumulator()
 
     def retrieve_fn(query: str, k: int) -> list[dict]:
         """One retrieval pass over the brain: document chunks + relevant memories.
@@ -231,7 +354,10 @@ def run_query(
                 db,
                 _llm,
                 lambda llm: agentic.condense_question(
-                    llm, history, question, settings.conversation_history_turns
+                    _TrackedLLM(llm, "condense-question", request_usage),
+                    history,
+                    question,
+                    settings.conversation_history_turns,
                 ),
             )
             if history
@@ -239,30 +365,46 @@ def run_query(
         )
 
         def compute() -> agentic.AgenticResult:
-            return agentic.run_agentic_query(
+            # The compute phase gets its own subtotal alongside the request
+            # total: these are the tokens a future cache hit will have SAVED,
+            # so they travel with the result into both caches. Condense is
+            # deliberately outside - it runs before the caches and is spent
+            # again on every follow-up, hit or not.
+            fresh_usage = _UsageAccumulator()
+            compute_usage = _FanoutUsage(request_usage, fresh_usage)
+            result = agentic.run_agentic_query(
                 question=agentic_question,
                 retrieve_fn=retrieve_fn,
                 plan_fn=lambda q: _llm_step(
                     db,
                     _llm,
                     lambda llm: agentic.plan_subqueries(
-                        llm, q, settings.agentic_max_subqueries
+                        _TrackedLLM(llm, "plan-subqueries", compute_usage),
+                        q,
+                        settings.agentic_max_subqueries,
                     ),
                 ),
                 generate_fn=lambda q, srcs, depth: generation.generate_answer(
-                    db, project, q, srcs, depth, llm_fn=_llm
+                    db, project, q, srcs, depth, llm_fn=_llm, usage_acc=compute_usage
                 ),
                 clarify_fn=lambda q: _llm_step(
                     db,
                     _llm,
                     lambda llm: agentic.request_clarification(
-                        llm, q, settings.agentic_max_clarifying
+                        _TrackedLLM(llm, "request-clarification", compute_usage),
+                        q,
+                        settings.agentic_max_clarifying,
                     ),
                 ),
                 top_k=top_k,
                 min_similarity=settings.agentic_min_similarity,
                 min_strong=settings.agentic_min_strong,
                 max_rounds=settings.agentic_max_rounds,
+            )
+            return dataclasses.replace(
+                result,
+                gen_prompt_tokens=fresh_usage.total.prompt_tokens,
+                gen_completion_tokens=fresh_usage.total.completion_tokens,
             )
 
         # Two cache layers, cheapest first. L1 (Redis/in-memory) hits when the
@@ -328,6 +470,7 @@ def run_query(
             )
         raise
     latency_ms = int((time.perf_counter() - started) * 1000)
+    _fill_usage_out(usage_out, request_usage, cache_layer, result, latency_ms)
 
     # Guarded exactly like the streaming twin, and for the same reason: the
     # answer is generated and already paid for by here, and this commit is a
@@ -344,6 +487,8 @@ def run_query(
                 top_k=top_k,
                 latency_ms=latency_ms,
                 cache_layer=cache_layer,
+                retrieval_similarity=_mean_similarity(result.sources),
+                cache_similarity=cache_similarity,
             )
         )
         db.commit()
@@ -394,6 +539,7 @@ def run_query_stream(
     top_k_override: int | None,
     api_key_id: uuid.UUID | None = None,
     conversation_id: str | None = None,
+    usage_out: dict | None = None,
 ):
     """Streaming twin of ``run_query``: yields event dicts as the answer is
     produced. Same brain, caches and agentic loop - only the final generation
@@ -467,6 +613,8 @@ def run_query_stream(
         return
 
     embed_memo, embed_query, _llm = _request_helpers(db, project)
+    # Everything this request spends on LLM calls, summed for metering.
+    request_usage = _UsageAccumulator()
 
     def retrieve_fn(query: str, k: int) -> list[dict]:
         sources = (
@@ -514,6 +662,10 @@ def run_query_stream(
     cache_layer: str | None = None
     cache_similarity: float | None = None
     semantic_vector: list[float] | None = None
+    # Compute-phase subtotal (what a future cache hit will have saved) - see
+    # the non-streaming twin's compute() for why condense stays outside it.
+    fresh_usage = _UsageAccumulator()
+    compute_usage = _FanoutUsage(request_usage, fresh_usage)
 
     try:
         agentic_question = (
@@ -521,7 +673,10 @@ def run_query_stream(
                 db,
                 _llm,
                 lambda llm: agentic.condense_question(
-                    llm, history, question, settings.conversation_history_turns
+                    _TrackedLLM(llm, "condense-question", request_usage),
+                    history,
+                    question,
+                    settings.conversation_history_turns,
                 ),
             )
             if history
@@ -609,14 +764,20 @@ def run_query_stream(
                             db,
                             _llm,
                             lambda llm: agentic.plan_subqueries(
-                                llm, q, settings.agentic_max_subqueries
+                                _TrackedLLM(llm, "plan-subqueries", compute_usage),
+                                q,
+                                settings.agentic_max_subqueries,
                             ),
                         ),
                         clarify_fn=lambda q: _llm_step(
                             db,
                             _llm,
                             lambda llm: agentic.request_clarification(
-                                llm, q, settings.agentic_max_clarifying
+                                _TrackedLLM(
+                                    llm, "request-clarification", compute_usage
+                                ),
+                                q,
+                                settings.agentic_max_clarifying,
                             ),
                         ),
                         top_k=top_k,
@@ -644,11 +805,19 @@ def run_query_stream(
                         rounds=ctx.rounds,
                         needs_clarification=True,
                         clarification_questions=ctx.clarification_questions,
+                        gen_prompt_tokens=fresh_usage.total.prompt_tokens,
+                        gen_completion_tokens=fresh_usage.total.completion_tokens,
                     )
                 else:
                     acc: list[str] = []
                     for tok in generation.generate_answer_stream(
-                        db, project, agentic_question, ctx.sources, ctx.depth, llm_fn=_llm
+                        db,
+                        project,
+                        agentic_question,
+                        ctx.sources,
+                        ctx.depth,
+                        llm_fn=_llm,
+                        usage_acc=compute_usage,
                     ):
                         acc.append(tok)
                         yield {"type": "token", "text": tok}
@@ -659,6 +828,8 @@ def run_query_stream(
                         sub_queries=ctx.sub_queries,
                         rounds=ctx.rounds,
                         needs_clarification=False,
+                        gen_prompt_tokens=fresh_usage.total.prompt_tokens,
+                        gen_completion_tokens=fresh_usage.total.completion_tokens,
                     )
                     if key is not None:
                         _cache.set(key, final)
@@ -669,9 +840,11 @@ def run_query_stream(
             if lead_lock is not None:
                 lead_lock.release()
     except ProviderUnavailableError as exc:
+        _fill_usage_out(usage_out, request_usage, cache_layer, None, None)
         yield {"type": "error", "detail": str(exc)}
         return
     except Exception as exc:
+        _fill_usage_out(usage_out, request_usage, cache_layer, None, None)
         if is_provider_rate_limit(exc):
             yield {
                 "type": "error",
@@ -684,6 +857,7 @@ def run_query_stream(
         return
 
     latency_ms = int((time.perf_counter() - started) * 1000)
+    _fill_usage_out(usage_out, request_usage, cache_layer, final, latency_ms)
     try:
         db.add(
             QueryLog(
@@ -693,6 +867,8 @@ def run_query_stream(
                 top_k=top_k,
                 latency_ms=latency_ms,
                 cache_layer=cache_layer,
+                retrieval_similarity=_mean_similarity(final.sources),
+                cache_similarity=cache_similarity,
             )
         )
         db.commit()

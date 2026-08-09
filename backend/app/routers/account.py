@@ -1,7 +1,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from ..auth.jwt import get_current_user, get_user_pending_mfa
 from ..db import get_db
 from ..models import File, Project
-from ..services import admin, mfa, storage
+from ..schemas import UsageReport
+from ..services import admin, mfa, storage, usage_report
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,30 @@ def delete_account(
             storage.delete(paths)
         except Exception:
             logger.exception("Storage cleanup failed during account deletion")
+
+
+# ── Usage report ────────────────────────────────────────────────────────────
+
+
+@router.get("/usage", response_model=UsageReport)
+def account_usage(
+    days: int = Query(default=30, ge=1, le=365),
+    user_id: uuid.UUID = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Account-wide usage rollup for the dashboard Usage page.
+
+    Strictly scoped to the authenticated owner: usage_events filters on
+    owner_id directly, and query_logs (which has no owner column) is reached
+    only through a JOIN on projects.owner_id - see services/usage_report.py,
+    where that boundary is documented and tested.
+
+    Token and cost fields are null when nothing was measured (null is not 0),
+    and ``caveats`` names what the numbers cannot see: requests whose provider
+    reported no usage, and ingestion-time work (embedding, captioning,
+    transcription) that bypasses the LLM factory entirely.
+    """
+    return usage_report.build_report(db, user_id, days=days)
 
 
 # ── MFA recovery codes ──────────────────────────────────────────────────────

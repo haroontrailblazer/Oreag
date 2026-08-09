@@ -1,5 +1,6 @@
 """Anthropic Claude provider (chat only - Anthropic has no embedding models)."""
 from .base import ProviderUnavailableError
+from .base import TokenUsage, usage_from_anthropic
 
 # Big enough for the agentic loop's long exam-style answers; small enough to
 # stay well under non-streaming SDK timeouts.
@@ -37,6 +38,11 @@ class AnthropicLLM:
         self.client = _client(api_key)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        return self.generate_with_usage(system_prompt, user_prompt)[0]
+
+    def generate_with_usage(
+        self, system_prompt: str, user_prompt: str
+    ) -> tuple[str, TokenUsage]:
         # No `temperature`: it was removed on Claude Sonnet 5 / Opus 4.8 and
         # returns a 400 if sent; omitting it works on every model.
         resp = self.client.messages.create(
@@ -45,7 +51,10 @@ class AnthropicLLM:
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        return resp.content[0].text if resp.content else ""
+        return (
+            resp.content[0].text if resp.content else "",
+            usage_from_anthropic(resp, self.model),
+        )
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
         """Yield answer text deltas as Claude produces them."""

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from .config import settings
+from .services import tracing
 from .routers import (
     account,
     files,
@@ -60,6 +61,11 @@ async def lifespan(app: FastAPI):
         logger.warning("DATABASE_URL is not set - only /healthz will work")
     yield
     stop_workers.set()
+    # Push whatever the exporter still has buffered. The ingest workers above
+    # are daemon threads that are signalled and never joined, so this is the
+    # only point where a queued span can still be written - without it the last
+    # traces before every deploy are lost.
+    tracing.shutdown()
 
 
 app = FastAPI(title="Oreag API", version="0.1.0", lifespan=lifespan)

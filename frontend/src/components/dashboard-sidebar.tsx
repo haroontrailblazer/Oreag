@@ -2,6 +2,7 @@
 
 import {
   CaretRightIcon as ChevronRight,
+  ChartBarIcon as ChartBar,
   CircleIcon as Circle,
   FileTextIcon as FileText,
   KanbanIcon as FolderKanban,
@@ -43,6 +44,7 @@ const mainNav = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/projects/new", label: "New project", icon: Plus },
   { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
+  { href: "/settings/usage", label: "Usage", icon: ChartBar },
 ]
 
 const statusTone: Record<Project["status"], string> = {

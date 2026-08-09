@@ -454,6 +454,113 @@ def validate_llm(provider: str, model: str) -> None:
         raise ValueError(f"Unknown LLM: {provider}/{model}")
 
 
+
+# ---------------------------------------------------------------------------
+# Pricing: USD per 1M tokens, (input, output), at public list rates.
+#
+# Keyed by the model id exactly as CATALOG spells it, because that is the id
+# TokenUsage carries out of every provider. ONLY models with a verifiable
+# public price are listed; cost_for() returns None for everything else. An
+# unknown price must surface as NULL in usage_events.cost_usd - a guessed
+# price is a silently wrong invoice, which is strictly worse than an honest
+# gap. Several catalog models are therefore deliberately ABSENT:
+#
+#   * gemini-flash-latest / gemini-pro-latest and the mistral *-latest ids are
+#     rolling aliases - the model (and its price) behind them changes without
+#     the id changing, so any number pinned here would silently go stale.
+#   * xAI's grok-4-fast-* slugs are silently REDIRECTED to grok-4.3 and billed
+#     as that model (see DEPRECATED_LLMS) - pricing the slug would be wrong.
+#   * deepseek-chat / deepseek-reasoner and Together's Llama-3.1-8B-Turbo are
+#     discontinued upstream and no longer have a public price.
+#   * Perplexity charges a per-REQUEST search fee on top of tokens, so a
+#     token-only figure would systematically understate the bill.
+#   * openai/gpt-oss-20b is served by BOTH groq (paid) and lmstudio (local,
+#     free) under one id; with a model-keyed table any price would be wrong
+#     for one of them.
+#   * ollama / lmstudio / sentence_transformers run locally - there is no
+#     per-token price to record.
+#   * grok-3-mini, sarvam-*, and the remaining OpenRouter ids: no price we
+#     could verify at the dates below - unpriced rather than guessed.
+MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
+    # OpenAI (openai.com pricing, verified 2026-08). gpt-5.5 bills higher
+    # above 272K prompt tokens; a top_k<=20 RAG call never gets there.
+    "gpt-5.4-mini": (0.75, 4.50),
+    "gpt-5.4": (2.50, 15.00),
+    "gpt-5.5": (5.00, 30.00),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    # Azure OpenAI serves the same models at OpenAI's list prices; these two
+    # ids are Azure-only in the catalog (openai.com list prices).
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    # Google (ai.google.dev pricing, verified 2026-08). 2.5-pro is the
+    # <=200K-prompt tier - the only tier a top_k<=20 RAG call can reach.
+    "gemini-3.5-flash": (1.50, 9.00),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (1.25, 10.00),
+    # Anthropic (platform.claude.com pricing, verified 2026-08). sonnet-5 has
+    # an intro price ($2/$10) through 2026-08-31; the standard list price is
+    # recorded so rows written this month overstate rather than understate.
+    "claude-sonnet-5": (3.00, 15.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-haiku-4-5-20251001": (1.00, 5.00),
+    # xAI (x.ai pricing, verified 2026-08).
+    "grok-4": (3.00, 15.00),
+    # DeepSeek (deepseek.ai pricing, verified 2026-08; cache-MISS input rate -
+    # Oreag does not use their prefix-cache discount).
+    "deepseek-v4-flash": (0.14, 0.28),
+    "deepseek-v4-pro": (0.435, 0.87),
+    # Groq (groq.com pricing). Both llama ids retire 2026-08-16 but bill at
+    # these rates until then.
+    "llama-3.3-70b-versatile": (0.59, 0.79),
+    "llama-3.1-8b-instant": (0.05, 0.08),
+    "openai/gpt-oss-120b": (0.15, 0.75),
+    # Cohere (cohere.com pricing).
+    "command-a-03-2025": (2.50, 10.00),
+    "command-r-plus-08-2024": (2.50, 10.00),
+    # Together AI (together.ai serverless pricing).
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo": (0.88, 0.88),
+    "deepseek-ai/DeepSeek-V3": (1.25, 1.25),
+    # Fireworks AI (fireworks.ai serverless pricing).
+    "accounts/fireworks/models/llama-v3p3-70b-instruct": (0.90, 0.90),
+    "accounts/fireworks/models/deepseek-v3": (0.90, 0.90),
+    # OpenRouter passes upstream token prices through unchanged; only ids
+    # whose upstream price is pinned above (or equally stable) are listed.
+    "openai/gpt-4o-mini": (0.15, 0.60),
+    "anthropic/claude-sonnet-4.5": (3.00, 15.00),
+    "google/gemini-2.5-flash": (0.30, 2.50),
+}
+
+
+def cost_for(model: str, usage) -> float | None:
+    """USD cost of one measured call, or None when it cannot be known.
+
+    None - never 0 - when the model has no listed price OR either token count
+    is missing: pricing only the half that was measured would produce a number
+    that reads as a total while understating it. NULL keeps "we could not
+    price this" distinguishable from "this cost nothing" - a real $0 exists
+    (zero tokens both ways) and is returned as 0.0.
+
+    ``usage`` is duck-typed (providers.base.TokenUsage in practice) so this
+    stays importable without the providers' SDKs.
+    """
+    if not model:
+        return None
+    prices = MODEL_PRICES_USD_PER_MTOK.get(model)
+    if prices is None:
+        return None
+    prompt = getattr(usage, "prompt_tokens", None)
+    completion = getattr(usage, "completion_tokens", None)
+    if prompt is None or completion is None:
+        return None
+    input_per_mtok, output_per_mtok = prices
+    # 6dp matches usage_events.cost_usd NUMERIC(12,6).
+    return round(
+        (prompt * input_per_mtok + completion * output_per_mtok) / 1_000_000, 6
+    )
+
+
 # Providers are stateless wrappers around thread-safe SDK clients, so instances
 # are memoized per (provider, model, key, dims): the underlying httpx connection
 # pools get reused across requests instead of paying a fresh TLS handshake per

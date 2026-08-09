@@ -4,6 +4,7 @@ import httpx
 from openai import OpenAI
 
 from .base import ProviderUnavailableError
+from .base import TokenUsage, usage_from_openai
 
 SARVAM_BASE_URL = "https://api.sarvam.ai/v1"
 
@@ -29,6 +30,11 @@ class SarvamLLM:
         self.client = _client(api_key)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        return self.generate_with_usage(system_prompt, user_prompt)[0]
+
+    def generate_with_usage(
+        self, system_prompt: str, user_prompt: str
+    ) -> tuple[str, TokenUsage]:
         resp = self.client.chat.completions.create(
             model=self.model,
             temperature=0,
@@ -37,7 +43,10 @@ class SarvamLLM:
                 {"role": "user", "content": user_prompt},
             ],
         )
-        return resp.choices[0].message.content or ""
+        return (
+            resp.choices[0].message.content or "",
+            usage_from_openai(resp, self.model),
+        )
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
         """Yield answer text deltas as they arrive (Sarvam is OpenAI-compatible)."""

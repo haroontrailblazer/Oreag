@@ -2,6 +2,7 @@
 import math
 
 from .base import ProviderUnavailableError, ensure_width
+from .base import TokenUsage, usage_from_gemini
 
 
 def l2_normalize(values: list[float]) -> list[float]:
@@ -114,12 +115,17 @@ class GeminiLLM:
         )
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        return self.generate_with_usage(system_prompt, user_prompt)[0]
+
+    def generate_with_usage(
+        self, system_prompt: str, user_prompt: str
+    ) -> tuple[str, TokenUsage]:
         resp = self.client.models.generate_content(
             model=self.model,
             contents=user_prompt,
             config=self._config(system_prompt),
         )
-        return resp.text or ""
+        return resp.text or "", usage_from_gemini(resp, self.model)
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
         """Yield answer text deltas as Gemini produces them."""

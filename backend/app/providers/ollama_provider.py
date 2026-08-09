@@ -2,6 +2,7 @@ import httpx
 
 from ..config import settings
 from .base import ProviderUnavailableError, ensure_width
+from .base import TokenUsage, usage_from_ollama
 
 
 def _post(path: str, payload: dict, timeout: float) -> dict:
@@ -66,6 +67,11 @@ class OllamaLLM:
         self.model = model
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        return self.generate_with_usage(system_prompt, user_prompt)[0]
+
+    def generate_with_usage(
+        self, system_prompt: str, user_prompt: str
+    ) -> tuple[str, TokenUsage]:
         data = _post(
             "/api/chat",
             {
@@ -78,7 +84,7 @@ class OllamaLLM:
             },
             timeout=600,
         )
-        return data["message"]["content"]
+        return data["message"]["content"], usage_from_ollama(data, self.model)
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
         """Yield answer text deltas from Ollama's NDJSON chat stream."""

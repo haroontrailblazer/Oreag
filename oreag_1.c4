@@ -332,6 +332,26 @@ model {
         usage = component 'Usage Metering' 'One usage_events row per public request. Best-effort, never fails the request. The prerequisite for billing.' {
           #guard
         }
+        usageReport = component 'Usage Report' 'Account-scoped read side of metering, behind GET /api/account/usage: totals, per-model, per-key and per-project rollups with cache economics and a daily series.' {
+          technology 'services/usage_report.py · seven aggregate queries over usage_events + query_logs'
+          metadata {
+            tenancy 'every query filters on the authenticated owner. usage_events carries owner_id directly; query_logs has no owner column, so it is reached only through a JOIN on projects.owner_id - filtering it by project id alone would let a guessed UUID read a different account.'
+            null-honesty 'SUM over all-NULL stays null end to end. A token count of 0 is a measurement; never measured is a different fact, and COALESCE only ever touches request counts.'
+            caveats 'the response names what it cannot see: rows whose provider reported no token usage (and which models produced them), and that ingestion-time embedding, captioning and transcription bypass the LLM factory and are not counted at all.'
+          }
+        }
+        tracing = component 'Tracing' 'Optional Langfuse tracing of the RAG pipeline. Off unless keys are set, and never able to fail a request.' {
+          #guard
+          technology 'services/tracing.py · Langfuse SDK v4 · memoised client · mask callback'
+          metadata {
+            why 'nothing could answer "what did that query cost?" - usage_events.prompt_tokens has been NULL since migration 0016 because the provider contract returned a bare str and every implementation discarded the SDK usage object.'
+            off-by-default 'langfuse_enabled false, or empty keys, makes client() return None and every helper a no-op, so a deploy without credentials behaves exactly as it did before this module existed.'
+            fail-open 'every function swallows its own exceptions. A trace that fails to record is an inconvenience; a /query that 500s because the tracing backend had a bad minute is an outage caused by the thing meant to prevent them.'
+            content-sampling 'a mask callback rather than Langfuse sample_rate. sample_rate drops WHOLE traces, losing the tokens and cost that billing and the usage page need on 100% of traffic. The mask keeps every trace and redacts only the text on the unsampled majority - one query emits 6-8 observations, so the free tier is roughly 6-7k queries a month.'
+            environment 'detected from RENDER, not from database_url. The first attempt keyed on the DB host and was wrong here: dev and prod share one Supabase pooler, so a laptop reported production and would have polluted the dashboard the field exists to keep clean.'
+            authoritative 'Langfuse mirrors, it does not own. usage_events stays the billing record, so Langfuse being unreachable loses graphs, never invoices.'
+          }
+        }
         mfa = component 'Two-Factor Enforcement' 'Decides whether an access token that has not cleared a second factor may be used. The prompt in the browser is a courtesy; this is the control.' {
           #guard
           technology 'services/mfa.py · reads the aal claim · 60 s memoised probe · fails open'
@@ -544,6 +564,9 @@ model {
   conversations -[persist]-> cache 'conversation turns'
   rateLimit -[persist]-> cache 'fixed-window counters'
   usage -[persist]-> db 'usage_events'
+  dashboardApi -[internal]-> usageReport 'GET /api/account/usage'
+  usageReport -[persist]-> db 'aggregates usage_events, and query_logs joined through projects.owner_id'
+  generation -[internal]-> tracing 'records the model call, its tokens and its cost'
   contentVersion -[persist]-> db 'projects.content_version'
   maintenance -[persist]-> db 'prunes logs, usage and expired cache rows'
   publicApi -[persist]-> db 'query_logs with the cache layer that served it'

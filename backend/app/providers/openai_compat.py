@@ -11,6 +11,7 @@ from openai import OpenAI
 
 from ..config import settings
 from .base import ProviderUnavailableError, ensure_width
+from .base import TokenUsage, usage_from_openai
 
 
 # Bound the SDK defaults (600s, 2 retries) so a hung vendor can't pin a
@@ -81,6 +82,11 @@ class CompatLLM:
         self.client = _client(api_key, base_url, provider_label, GENERATE_TIMEOUT)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        return self.generate_with_usage(system_prompt, user_prompt)[0]
+
+    def generate_with_usage(
+        self, system_prompt: str, user_prompt: str
+    ) -> tuple[str, TokenUsage]:
         # No temperature: several of these vendors serve reasoning models that
         # reject sampling params, and each vendor's default is sane.
         resp = self.client.chat.completions.create(
@@ -90,7 +96,10 @@ class CompatLLM:
                 {"role": "user", "content": user_prompt},
             ],
         )
-        return resp.choices[0].message.content or ""
+        return (
+            resp.choices[0].message.content or "",
+            usage_from_openai(resp, self.model),
+        )
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
         """Yield answer text deltas as the model produces them."""

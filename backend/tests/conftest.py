@@ -10,6 +10,22 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _disable_langfuse(monkeypatch):
+    """Tracing must never leave the test process.
+
+    `.env` can carry real Langfuse keys, and the query path now routes its
+    condense/plan/clarify/generate calls through tracing.observed_generate -
+    without this, unit tests would construct a live exporter and push spans to
+    the real dashboard (plus a network flush at exit). The client is lru_cached,
+    so the cache is cleared too in case an earlier import already built one.
+    """
+    from app.services import tracing
+
+    monkeypatch.setattr(tracing.settings, "langfuse_enabled", False)
+    tracing.client.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_query_stores(monkeypatch):
     from app.services import query, query_cache
 

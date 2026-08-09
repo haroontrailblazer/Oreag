@@ -30,6 +30,7 @@ from ..services import explore, retrieval, storage
 from ..services.conversion import content_type_for, is_ingestable, source_extension
 from ..services.query import run_query, run_query_stream
 from ..services.rate_limit import enforce_rate_limit
+from ..services import tracing
 from ..services.usage import record_usage
 
 logger = logging.getLogger(__name__)
@@ -67,20 +68,42 @@ def public_query(
 ):
     project = _get_project(db, project_id)
     enforce_rate_limit(api_key.id, project.id)
-    response = run_query(
-        db,
-        project,
-        body.question,
-        body.top_k,
+    # Filled by the query service, out of band of the public response shape:
+    # summed TokenUsage of every LLM call, which cache layer answered, and -
+    # on a hit - the tokens the cached answer saved.
+    usage_out: dict = {}
+    # One trace per request. Opened HERE rather than inside run_query because
+    # the HTTP request is the real boundary - and every observation the service
+    # emits below nests under it automatically via OTEL context.
+    with tracing.query_trace(
+        project=project,
+        question=body.question,
         api_key_id=api_key.id,
         conversation_id=body.conversation_id,
-    )
+    ) as _root:
+        response = run_query(
+            db,
+            project,
+            body.question,
+            body.top_k,
+            api_key_id=api_key.id,
+            conversation_id=body.conversation_id,
+            usage_out=usage_out,
+        )
+        if _root is not None:
+            _root.update(
+                output={"answer": response.answer, "sources": len(response.sources)},
+                metadata={"cache_layer": usage_out.get("cache_layer")},
+            )
     record_usage(
         db,
         project=project,
         api_key_id=api_key.id,
         endpoint="query",
         latency_ms=response.latency_ms,
+        usage=usage_out.get("usage"),
+        saved=usage_out.get("saved"),
+        cache_layer=usage_out.get("cache_layer"),
     )
     return response
 
@@ -100,18 +123,51 @@ def public_query_stream(
     """
     project = _get_project(db, project_id)
     enforce_rate_limit(api_key.id, project.id)
-    # Recorded up-front (no latency): the stream body runs after this returns.
-    record_usage(db, project=project, api_key_id=api_key.id, endpoint="query_stream")
-    return sse_response(
-        run_query_stream(
-            db,
-            project,
-            body.question,
-            body.top_k,
+    # The usage event is written when the stream FINISHES (see the wrapper
+    # below), no longer up-front: token counts and the cache layer only exist
+    # once the body has run. run_query_stream fills usage_out as it goes and
+    # record_usage never raises, so the worst a broken tail can do is lose the
+    # row - the same best-effort contract as the QueryLog write inside the
+    # stream.
+    usage_out: dict = {}
+    events = run_query_stream(
+        db,
+        project,
+        body.question,
+        body.top_k,
+        api_key_id=api_key.id,
+        conversation_id=body.conversation_id,
+        usage_out=usage_out,
+    )
+
+    def stream_and_record():
+        # The trace has to live INSIDE the generator: the router returns before
+        # a single token is produced, so a span opened outside would close
+        # while the request was still running and record nothing.
+        with tracing.query_trace(
+            project=project,
+            question=body.question,
             api_key_id=api_key.id,
             conversation_id=body.conversation_id,
-        )
-    )
+        ):
+            try:
+                yield from events
+            finally:
+                # Runs on normal completion AND when the client disconnects
+                # (GeneratorExit) - the row then carries whatever was measured
+                # before the stream stopped.
+                record_usage(
+                    db,
+                    project=project,
+                    api_key_id=api_key.id,
+                    endpoint="query_stream",
+                    latency_ms=usage_out.get("latency_ms"),
+                    usage=usage_out.get("usage"),
+                    saved=usage_out.get("saved"),
+                    cache_layer=usage_out.get("cache_layer"),
+                )
+
+    return sse_response(stream_and_record())
 
 
 @router.post("/retrieve", response_model=list[SourceChunk])

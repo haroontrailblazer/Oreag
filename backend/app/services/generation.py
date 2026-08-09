@@ -7,6 +7,7 @@ from ..config import settings
 from ..models import Project
 from ..providers import resolver
 from ..providers.registry import get_llm
+from .tracing import observed_generate
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,11 @@ def generate_answer(
     sources: list[dict],
     depth: str = "short",
     llm_fn=None,
+    usage_acc=None,
 ) -> str:
+    # ``usage_acc`` (any object with .add(TokenUsage)) receives what this call
+    # consumed - query.py passes its per-request accumulator so the final
+    # generation counts toward the same billing figure as condense/plan.
     # query.py passes its per-request LLM getter (key resolved at most once)
     # as ``llm_fn``; standalone callers omit it and resolution happens here.
     if llm_fn is not None:
@@ -192,7 +197,21 @@ def generate_answer(
     # below this line touches the database, so the pool slot goes back before
     # the longest blocking wait in the whole request.
     release_connection(db)
-    return llm.generate(system_prompt, user_prompt)
+    text, usage = observed_generate(
+        llm,
+        system_prompt,
+        user_prompt,
+        name="generate-answer",
+        metadata={"depth": depth, "sources": len(sources)},
+    )
+    if usage_acc is not None:
+        # Metering must never break the answer; the accumulator's add() is
+        # already defensive, this guards against a caller passing junk.
+        try:
+            usage_acc.add(usage)
+        except Exception:
+            logger.debug("Usage accumulation failed", exc_info=True)
+    return text
 
 
 def generate_answer_stream(
@@ -202,11 +221,17 @@ def generate_answer_stream(
     sources: list[dict],
     depth: str = "short",
     llm_fn=None,
+    usage_acc=None,
 ):
     """Yield the answer as text deltas. Providers that implement ``generate_stream``
     (OpenAI and every OpenAI-compatible vendor) stream token by token; any other
     provider falls back to yielding the full answer once, so the same code path
-    works everywhere."""
+    works everywhere.
+
+    ``usage_acc`` only receives numbers on the fallback branch: streamed
+    deltas carry no usage from any provider here, so a streamed generation
+    stays UNMEASURED - its token columns end up NULL, never an estimate.
+    """
     if llm_fn is not None:
         llm = llm_fn()
     else:
@@ -221,4 +246,17 @@ def generate_answer_stream(
     if callable(streamer):
         yield from streamer(system_prompt, user_prompt)
     else:
-        yield llm.generate(system_prompt, user_prompt)
+        # One blocking call - trace and meter it exactly like generate_answer.
+        text, usage = observed_generate(
+            llm,
+            system_prompt,
+            user_prompt,
+            name="generate-answer",
+            metadata={"depth": depth, "sources": len(sources)},
+        )
+        if usage_acc is not None:
+            try:
+                usage_acc.add(usage)
+            except Exception:
+                logger.debug("Usage accumulation failed", exc_info=True)
+        yield text

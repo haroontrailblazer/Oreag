@@ -303,3 +303,88 @@ class BrainExploreResponse(BaseModel):
     seeds: list[str]  # node ids the walk started from (most relevant)
     nodes: list[MemoryGraphNode]
     edges: list[MemoryGraphEdge]
+
+
+# --- Account usage report -------------------------------------------------
+#
+# GET /api/account/usage. Contract note that applies to every model below:
+# a token/cost field is None when nothing was MEASURED, which is a different
+# fact from a measured 0. Only request counts are genuinely 0 when empty.
+
+
+class UsageTotals(BaseModel):
+    requests: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    cost_usd: float | None
+    saved_prompt_tokens: int | None
+    saved_completion_tokens: int | None
+    # Estimated from in-window measured rates; None when nothing priced.
+    saved_cost_usd: float | None
+
+
+class UsageByModel(BaseModel):
+    model: str
+    requests: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    cost_usd: float | None
+
+
+class UsageByApiKey(BaseModel):
+    api_key_id: str
+    key_prefix: str
+    revoked: bool
+    requests: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    cost_usd: float | None
+
+
+class UsageCacheSplit(BaseModel):
+    l1: int
+    l2: int
+    miss: int
+    hit_rate: float  # (l1 + l2) / (l1 + l2 + miss); 0.0 when no queries
+
+
+class UsageByProject(BaseModel):
+    project_id: str
+    name: str
+    requests: int
+    cost_usd: float | None
+    cache: UsageCacheSplit
+    avg_retrieval_similarity: float | None
+    avg_cache_similarity: float | None
+    saved_prompt_tokens: int | None
+    saved_completion_tokens: int | None
+
+
+class UsageDaily(BaseModel):
+    date: str  # YYYY-MM-DD (UTC)
+    requests: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    cost_usd: float | None
+    saved_prompt_tokens: int | None
+
+
+class UsageCaveats(BaseModel):
+    """What the report could NOT see - shown, not hidden, on purpose."""
+
+    unmeasured_requests: int  # rows whose provider reported no token usage
+    unmeasured_models: list[str]  # distinct models on those rows
+    # Embedding during ingest, image captioning and audio transcription bypass
+    # the LLM factory and are not metered. For a document-heavy project that is
+    # plausibly the largest real cost, so the UI must be able to say so.
+    ingestion_excluded: bool
+
+
+class UsageReport(BaseModel):
+    window_days: int
+    totals: UsageTotals
+    by_model: list[UsageByModel]
+    by_api_key: list[UsageByApiKey]
+    by_project: list[UsageByProject]
+    daily: list[UsageDaily]
+    caveats: UsageCaveats

@@ -210,6 +210,16 @@ class AgenticResult:
     rounds: int
     needs_clarification: bool
     clarification_questions: list[str] = field(default_factory=list)
+    # Token usage of the LLM calls that PRODUCED this result (plan + generate,
+    # or plan + clarify) - not the condense step, which runs before the caches
+    # and is spent again on every follow-up. Serialized into BOTH answer caches
+    # with the rest of the dataclass, so a later cache hit can report exactly
+    # how many tokens it saved instead of estimating. None means "was not
+    # measured" (e.g. a streamed generation, where providers report nothing) -
+    # never 0, which would claim a real measurement of zero. Defaults keep
+    # pre-existing cache payloads (which lack these keys) deserializable.
+    gen_prompt_tokens: int | None = None
+    gen_completion_tokens: int | None = None
 
 
 @dataclass

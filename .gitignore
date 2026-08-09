@@ -17,3 +17,14 @@ chroma/
 # Supabase auth config backup written by scripts/apply_auth_email_config.py
 # (contains SMTP credentials)
 scripts/.auth-config-backup.json
+
+.agents
+.claude
+skills-lock.json
+
+# Agent skills installed by `npx skills add` (e.g. langfuse/skills).
+# Third-party code that runs with full agent permissions - pulled per machine
+# rather than vendored, so a repo checkout never silently ships someone else's
+# skill. .claude/skills/ holds symlinks into it.
+.agents/
+.claude/skills/

@@ -32,6 +32,21 @@ export const TOTP_KEY = "auth:totp"
 export const RECOVERY_KEY = "auth:recovery"
 export const PROVIDER_KEYS_KEY = "/api/provider-keys"
 
+/** Range presets offered by the Usage page. */
+export const USAGE_WINDOWS = [7, 30, 90] as const
+export type UsageWindow = (typeof USAGE_WINDOWS)[number]
+export const DEFAULT_USAGE_WINDOW: UsageWindow = 30
+
+/**
+ * SWR key for the account usage rollup. Hoisted here (not inlined in the page)
+ * for the same reason as everything else in this file: the key doubles as the
+ * request path, so page and preload share one key + the same `fetcher`
+ * reference and the warm-up actually fills the cache the page reads.
+ */
+export function usageKey(days: UsageWindow): string {
+  return `/api/account/usage?days=${days}`
+}
+
 /**
  * Every one of these swallows its own failure and resolves to an empty value.
  *
@@ -74,7 +89,7 @@ export async function fetchRecoveryCount(): Promise<{ remaining: number }> {
  *
  * Settings pages are reached by a deliberate click from a sidebar that is
  * already on screen, so the fetch can happen long before the click - by which
- * point the page renders populated instead of spinning. Four requests, once
+ * point the page renders populated instead of spinning. Five requests, once
  * per session, none of them large.
  *
  * NOT Next.js route prefetching: prefetching a protected route makes the
@@ -86,4 +101,6 @@ export function warmSettingsData(): void {
   preload(PASSKEYS_KEY, fetchPasskeys)
   preload(TOTP_KEY, fetchTotpFactors)
   preload(RECOVERY_KEY, fetchRecoveryCount)
+  // Only the default window - the page fetches 7/90 on demand.
+  preload(usageKey(DEFAULT_USAGE_WINDOW), fetcher)
 }

@@ -2,6 +2,7 @@ import httpx
 from openai import OpenAI
 
 from .base import ProviderUnavailableError, ensure_width
+from .base import TokenUsage, usage_from_openai
 
 # SDK defaults are 600s + 2 retries: a hung upstream would pin a threadpool
 # thread (and the request's DB connection) for ~10 minutes and triple provider
@@ -71,12 +72,20 @@ class OpenAILLM:
         ]
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        return self.generate_with_usage(system_prompt, user_prompt)[0]
+
+    def generate_with_usage(
+        self, system_prompt: str, user_prompt: str
+    ) -> tuple[str, TokenUsage]:
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=self._messages(system_prompt, user_prompt),
             **self._params(),
         )
-        return resp.choices[0].message.content or ""
+        return (
+            resp.choices[0].message.content or "",
+            usage_from_openai(resp, self.model),
+        )
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
         """Yield answer text deltas as the model produces them."""

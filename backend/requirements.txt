@@ -18,3 +18,7 @@ python-multipart>=0.0.9
 # Optional: only imported when REDIS_URL is set (shared CAG cache + conversation
 # memory across workers). Without REDIS_URL the app uses an in-memory fallback.
 redis>=5.0
+# Optional: only imported when LANGFUSE_ENABLED is set with keys.
+# services/tracing.py returns None and every call site no-ops without it,
+# so the app runs unchanged if this import ever fails.
+langfuse>=4.14
