@@ -157,6 +157,7 @@ function MetricTile({
   icon,
   accent,
   format = "number",
+  className,
 }: {
   label: string
   value: number | null
@@ -164,9 +165,10 @@ function MetricTile({
   icon: ReactNode
   accent: string
   format?: "number" | "cost"
+  className?: string
 }) {
   return (
-    <Card className="relative gap-3 overflow-hidden py-4">
+    <Card className={cn("relative gap-3 overflow-hidden py-4", className)}>
       <span
         aria-hidden="true"
         className="absolute inset-x-0 top-0 h-0.5"
@@ -323,6 +325,7 @@ function TotalsRow({
         icon={<Receipt className="size-4" weight="bold" />}
         accent="var(--chart-5)"
         format="cost"
+        className="col-span-2 xl:col-span-1"
       />
     </div>
   )
@@ -333,6 +336,8 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
   const embedding = totals.embedding_cost_usd ?? 0
   const total = llm + embedding
   if (total <= 0) return null
+  const hasCompleteSpend =
+    totals.cost_usd != null && totals.embedding_cost_usd != null
   const llmPct = (llm / total) * 100
   const embeddingPct = 100 - llmPct
   const measuredTokens = measuredSum([
@@ -340,8 +345,25 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
     totals.completion_tokens,
     totals.embedding_tokens,
   ])
+  const generationTokens = measuredSum([
+    totals.prompt_tokens,
+    totals.completion_tokens,
+  ])
   const embeddingVolumePct = shareOf(totals.embedding_tokens, measuredTokens)
-  const costMultiple = embedding > 0 ? llm / embedding : null
+  const costMultiple =
+    hasCompleteSpend && embedding > 0 ? llm / embedding : null
+  const generationCostPerMillion =
+    totals.cost_usd != null &&
+    generationTokens != null &&
+    generationTokens > 0
+      ? (totals.cost_usd / generationTokens) * 1_000_000
+      : null
+  const embeddingCostPerMillion =
+    totals.embedding_cost_usd != null &&
+    totals.embedding_tokens != null &&
+    totals.embedding_tokens > 0
+      ? (totals.embedding_cost_usd / totals.embedding_tokens) * 1_000_000
+      : null
 
   return (
     <Card className="gap-5 overflow-hidden">
@@ -357,51 +379,65 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
           <ChartDonut className="size-5" weight="duotone" />
         </span>
       </CardHeader>
-      <CardContent className="grid items-center gap-6 sm:grid-cols-[11rem_1fr]">
-        <div className="flex justify-center">
-          <div
-            className="relative flex size-40 items-center justify-center rounded-full"
-            style={{
-              background: `conic-gradient(var(--chart-1) 0 ${llmPct}%, var(--chart-2) ${llmPct}% 100%)`,
-            }}
-            role="img"
-            aria-label={`Generation ${formatCost(llm)}, embedding ${formatCost(embedding)}`}
-          >
-            <div className="flex size-28 flex-col items-center justify-center rounded-full bg-card text-center shadow-[0_0_0_1px_var(--border)]">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                Total spent
-              </span>
-              <span className="mt-1 text-2xl font-semibold tracking-tight">
-                {formatCost(total)}
-              </span>
+      <CardContent className="flex flex-col gap-5">
+        <div className="grid items-center gap-6 sm:grid-cols-[11rem_1fr]">
+          <div className="flex justify-center">
+            <div
+              className="relative flex size-40 items-center justify-center rounded-full"
+              style={{
+                background: `conic-gradient(var(--chart-1) 0 ${llmPct}%, var(--chart-2) ${llmPct}% 100%)`,
+              }}
+              role="img"
+              aria-label={`Generation ${formatCost(llm)}, embedding ${formatCost(embedding)}`}
+            >
+              <div className="flex size-28 flex-col items-center justify-center rounded-full bg-card text-center shadow-[0_0_0_1px_var(--border)]">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Total spent
+                </span>
+                <span className="mt-1 text-2xl font-semibold tracking-tight">
+                  {formatCost(total)}
+                </span>
+              </div>
             </div>
           </div>
+          <div className="flex flex-col gap-4">
+            <SpendLegendRow
+              label="Generation"
+              description="Prompts and model responses"
+              cost={llm}
+              percent={llmPct}
+              color="var(--chart-1)"
+            />
+            <SpendLegendRow
+              label="Embedding"
+              description="Indexing and retrieval vectors"
+              cost={embedding}
+              percent={embeddingPct}
+              color="var(--chart-2)"
+            />
+          </div>
         </div>
-        <div className="flex flex-col gap-4">
-          <SpendLegendRow
-            label="Generation"
-            description="Prompts and model responses"
-            cost={llm}
-            percent={llmPct}
+        <div className="grid grid-cols-2 gap-3">
+          <EfficiencyMetric
+            label="Generation cost density"
+            value={generationCostPerMillion}
             color="var(--chart-1)"
           />
-          <SpendLegendRow
-            label="Embedding"
-            description="Indexing and retrieval vectors"
-            cost={embedding}
-            percent={embeddingPct}
+          <EfficiencyMetric
+            label="Embedding cost density"
+            value={embeddingCostPerMillion}
             color="var(--chart-2)"
           />
         </div>
       </CardContent>
       <CardFooter className="border-t bg-muted/30 py-4 text-sm text-muted-foreground">
         <ChartBar className="mr-2 size-4 shrink-0" />
-        {embeddingVolumePct != null ? (
+        {embeddingVolumePct != null && hasCompleteSpend ? (
           <span>
             Embedding produced {formatPercent(embeddingVolumePct)} of measured
             tokens but only {formatPercent(embeddingPct)} of spend
             {costMultiple != null
-              ? `; generation cost ${costMultiple.toFixed(1)}x more.`
+              ? `; generation cost ${costMultiple.toFixed(1)} times as much.`
               : "."}
           </span>
         ) : (
@@ -409,6 +445,31 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
         )}
       </CardFooter>
     </Card>
+  )
+}
+
+function EfficiencyMetric({
+  label,
+  value,
+  color,
+}: {
+  label: string
+  value: number | null
+  color: string
+}) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      {value == null ? (
+        <NotMeasured className="mt-2 block" />
+      ) : (
+        <div className="mt-1 font-semibold tabular-nums" style={{ color }}>
+          {formatCost(value)} / 1M tokens
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -460,10 +521,6 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
   const savedGenerationTokens = measuredSum([
     totals.saved_prompt_tokens,
     totals.saved_completion_tokens,
-  ])
-  const billedGenerationTokens = measuredSum([
-    totals.prompt_tokens,
-    totals.completion_tokens,
   ])
   const potentialGenerationTokens = measuredSum([
     totals.prompt_tokens,
@@ -585,6 +642,7 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
                 : compactFmt.format(totals.saved_completion_tokens)
             }
             detail="tokens avoided"
+            className="col-span-2 sm:col-span-1"
           />
         </div>
       </CardContent>
@@ -622,13 +680,15 @@ function SavingsMetric({
   label,
   value,
   detail,
+  className,
 }: {
   label: string
   value: string | null
   detail: string
+  className?: string
 }) {
   return (
-    <div className="rounded-lg border bg-card p-3">
+    <div className={cn("rounded-lg border bg-card p-3", className)}>
       <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
@@ -725,9 +785,12 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
   return (
     <div className="space-y-2">
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-        <Card className="gap-4">
-          <CardHeader>
-            <CardTitle className="text-base">Requests per day</CardTitle>
+        <Card className="gap-4 overflow-hidden">
+          <CardHeader className="border-b bg-muted/20 pb-5">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ChartBar className="size-4 text-muted-foreground" />
+              Requests per day
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <ChartContainer
@@ -774,9 +837,12 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
           </CardContent>
         </Card>
 
-        <Card className="gap-4">
-          <CardHeader>
-            <CardTitle className="text-base">Tokens per day</CardTitle>
+        <Card className="gap-4 overflow-hidden">
+          <CardHeader className="border-b bg-muted/20 pb-5">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Stack className="size-4 text-muted-foreground" />
+              Tokens per day
+            </CardTitle>
             <CardDescription>
               Gaps are days the provider reported nothing - unmeasured, not
               zero.
@@ -925,9 +991,12 @@ function DailyTable({ series }: { series: UsageDaily[] }) {
 
 function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
   return (
-    <Card className="gap-3">
-      <CardHeader>
-        <CardTitle className="text-base">By API key</CardTitle>
+    <Card className="gap-3 overflow-hidden">
+      <CardHeader className="border-b bg-muted/20 pb-5">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Receipt className="size-4 text-muted-foreground" />
+          By API key
+        </CardTitle>
         <CardDescription>
           Every key you have created, by what it spent. Only the prefix is
           shown - never the secret.
@@ -990,9 +1059,12 @@ function ModelsTable({
   unmeasuredModels: string[]
 }) {
   return (
-    <Card className="gap-3">
-      <CardHeader>
-        <CardTitle className="text-base">By model</CardTitle>
+    <Card className="gap-3 overflow-hidden">
+      <CardHeader className="border-b bg-muted/20 pb-5">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Stack className="size-4 text-muted-foreground" />
+          By model
+        </CardTitle>
         <CardDescription>
           Token spend per model, across every key on this account. Embedders
           are tagged - their tokens are far cheaper than an LLM&apos;s, so the two
@@ -1072,9 +1144,12 @@ function SavedTokensCell({
 
 function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
   return (
-    <Card className="gap-3">
-      <CardHeader>
-        <CardTitle className="text-base">By project</CardTitle>
+    <Card className="gap-3 overflow-hidden">
+      <CardHeader className="border-b bg-muted/20 pb-5">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Database className="size-4 text-muted-foreground" />
+          By project
+        </CardTitle>
         <CardDescription>
           Cache performance and retrieval quality per project. Hit rate is the
           share of requests answered from the L1 or L2 cache.
@@ -1267,7 +1342,7 @@ export function UsageDashboard() {
       )}
 
       {isLoading && !data && (
-        <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 sm:gap-6">
           <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             {[1, 2, 3, 4].map((i) => (
               <Skeleton key={i} className="h-24" />
@@ -1285,7 +1360,7 @@ export function UsageDashboard() {
       {data && (
         <div
           className={cn(
-            "min-h-0 flex-1 space-y-4 overflow-y-auto pb-2 sm:space-y-6",
+            "min-h-0 flex-1 overflow-y-auto pb-2",
             isLoading && "opacity-60 transition-opacity"
           )}
         >
