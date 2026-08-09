@@ -10,10 +10,31 @@ import { DocsOnThisPage } from "./docs-on-this-page"
 import { DocsSidebar } from "./docs-sidebar"
 import { Markdown } from "./markdown"
 
+const DOCS_TITLE = "Documentation - Oreag"
+const DOCS_DESCRIPTION =
+  "Everything in Oreag: projects, uploading documents, the RAG query API, " +
+  "agentic retrieval, agent memory, the memory graph, the MCP server, and API keys."
+
 export const metadata: Metadata = {
-  title: "Documentation - Oreag",
-  description:
-    "Everything in Oreag: projects, uploading documents, the RAG query API, agentic retrieval, agent memory, the memory graph, the MCP server, and API keys.",
+  title: DOCS_TITLE,
+  description: DOCS_DESCRIPTION,
+  // openGraph has to be restated, not just `title`/`description`.
+  //
+  // Next.js merges metadata from the root layout, but a page's own title and
+  // description do NOT flow into the inherited openGraph block - so this page
+  // rendered <title>Documentation - Oreag</title> while sharing to LinkedIn and
+  // WhatsApp as "Oreag - RAG & Memory as a Service". The image and siteName
+  // still come from the root, which is the intent: one brand card, per-page
+  // words.
+  openGraph: {
+    title: DOCS_TITLE,
+    description: DOCS_DESCRIPTION,
+    url: "/docs",
+  },
+  twitter: {
+    title: DOCS_TITLE,
+    description: DOCS_DESCRIPTION,
+  },
 }
 
 export default function DocsPage() {

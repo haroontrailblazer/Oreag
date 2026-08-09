@@ -14,32 +14,47 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+import {
+  OG_IMAGE_ALT,
+  OG_IMAGE_HEIGHT,
+  OG_IMAGE_TYPE,
+  OG_IMAGE_WIDTH,
+  ogImagePath,
+} from "@/lib/og-image";
+
+const ogImage = ogImagePath();
+
 export const metadata: Metadata = {
   metadataBase: new URL("https://oreag.vercel.app"),
   title: "Oreag - RAG & Memory as a Service",
   description:
     "Turn your documents into a queryable RAG API with a built-in memory graph: upload, tune chunking and embeddings, and get a per-project endpoint.",
-  // Favicons are picked up from the app/ file conventions: icon.png + favicon.ico
-  // (both are the Oreag 3D app-icon badge, matching the landing brand mark).
-  // The OG/Twitter image is public/oreag-og-whatsapp-v3.jpg (regenerate with
-  // `node scripts/generate-og.mjs`). A static asset resolves via metadataBase to
-  // an absolute URL and its path is exempt from the auth middleware. The v3
-  // filename and social URL deliberately invalidate stale WhatsApp previews.
+  // Favicons come from the app/ file conventions: icon.png + favicon.ico (both
+  // the Oreag 3D app-icon badge, matching the landing brand mark). The
+  // OG/Twitter image is public/oreag-og-whatsapp-v3.jpg (regenerate with
+  // `node scripts/generate-og.mjs`); its ?v= is a hash of the file's own bytes,
+  // so replacing the artwork changes the URL and social platforms re-fetch it.
+  // See lib/og-image.
+  //
+  // NO `url:` here on purpose. It sets og:url, which crawlers read as the
+  // page's CANONICAL address - and because this is the root layout, every page
+  // inherits it. A hardcoded value made /docs announce the homepage as its own
+  // canonical URL. It also does nothing for WhatsApp's cache, which is keyed on
+  // the link the user actually pasted, not on og:url.
   openGraph: {
     title: "Oreag - RAG & Memory as a Service",
     description:
       "Turn your documents into a queryable RAG API with a built-in memory graph.",
-    url: "/?share=og-v3",
     siteName: "Oreag",
     type: "website",
     images: [
       {
-        url: "/oreag-og-whatsapp-v3.jpg",
-        secureUrl: "https://oreag.vercel.app/oreag-og-whatsapp-v3.jpg",
-        width: 1200,
-        height: 630,
-        type: "image/jpeg",
-        alt: "Oreag above a painterly night scene of a person working through documents",
+        url: ogImage,
+        secureUrl: `https://oreag.vercel.app${ogImage}`,
+        width: OG_IMAGE_WIDTH,
+        height: OG_IMAGE_HEIGHT,
+        type: OG_IMAGE_TYPE,
+        alt: OG_IMAGE_ALT,
       },
     ],
   },
@@ -48,7 +63,7 @@ export const metadata: Metadata = {
     title: "Oreag - RAG & Memory as a Service",
     description:
       "Turn your documents into a queryable RAG API with a built-in memory graph.",
-    images: ["/oreag-og-whatsapp-v3.jpg"],
+    images: [ogImage],
   },
 };
 
