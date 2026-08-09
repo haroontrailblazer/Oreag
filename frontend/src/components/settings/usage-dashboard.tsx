@@ -178,14 +178,7 @@ function MetricTile({
         <CardDescription className="font-medium text-foreground/70">
           {label}
         </CardDescription>
-        <span
-          aria-hidden="true"
-          className="flex size-8 items-center justify-center rounded-lg"
-          style={{
-            background: `color-mix(in oklab, ${accent} 12%, transparent)`,
-            color: accent,
-          }}
-        >
+        <span aria-hidden="true" style={{ color: accent }}>
           {icon}
         </span>
       </CardHeader>
@@ -212,10 +205,16 @@ function MetricTile({
 
 /** Tiny meter: fill and track are the same hue (chart slot 1) so the state
  *  reads across the whole bar, per the meter rule. */
-function HitRateMeter({ rate }: { rate: number }) {
+function HitRateMeter({
+  rate,
+  className,
+}: {
+  rate: number
+  className?: string
+}) {
   const pct = Math.min(100, Math.max(0, rate * 100))
   return (
-    <span className="flex items-center justify-end gap-2">
+    <span className={cn("flex items-center justify-end gap-2", className)}>
       <span
         aria-hidden="true"
         className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full"
@@ -375,8 +374,8 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
             index.
           </CardDescription>
         </div>
-        <span className="flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-          <ChartDonut className="size-5" weight="duotone" />
+        <span className="text-muted-foreground">
+          <ChartDonut className="size-5" weight="regular" />
         </span>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
@@ -458,14 +457,14 @@ function EfficiencyMetric({
   color: string
 }) {
   return (
-    <div className="rounded-lg border bg-muted/20 p-3">
+    <div className="flex flex-col gap-1 py-1">
       <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
       {value == null ? (
-        <NotMeasured className="mt-2 block" />
+        <NotMeasured />
       ) : (
-        <div className="mt-1 font-semibold tabular-nums" style={{ color }}>
+        <div className="font-semibold tabular-nums" style={{ color }}>
           {formatCost(value)} / 1M tokens
         </div>
       )}
@@ -551,25 +550,12 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
             cost.
           </CardDescription>
         </div>
-        <span
-          className="flex size-10 items-center justify-center rounded-xl"
-          style={{
-            background:
-              "color-mix(in oklab, var(--chart-3) 12%, transparent)",
-            color: "var(--chart-3)",
-          }}
-        >
-          <PiggyBank className="size-5" weight="duotone" />
+        <span className="text-muted-foreground">
+          <PiggyBank className="size-5" weight="regular" />
         </span>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
-        <div
-          className="rounded-xl border p-4"
-          style={{
-            background:
-              "color-mix(in oklab, var(--chart-3) 6%, var(--card))",
-          }}
-        >
+        <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -601,7 +587,7 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
               )}
             </div>
           </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full"
               style={{
@@ -688,16 +674,16 @@ function SavingsMetric({
   className?: string
 }) {
   return (
-    <div className={cn("rounded-lg border bg-card p-3", className)}>
+    <div className={cn("flex flex-col gap-1 py-1", className)}>
       <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
       {value == null ? (
-        <NotMeasured className="mt-2 block" />
+        <NotMeasured />
       ) : (
-        <div className="mt-1 text-xl font-semibold tracking-tight">{value}</div>
+        <div className="text-xl font-semibold tracking-tight">{value}</div>
       )}
-      <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+      <div className="text-xs leading-relaxed text-muted-foreground">
         {detail}
       </div>
     </div>
@@ -950,40 +936,73 @@ function DailyTable({ series }: { series: UsageDaily[] }) {
   return (
     <Card className="gap-3 py-4">
       <CardContent className="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="pl-6">Date</TableHead>
-              <TableHead className="text-right">Requests</TableHead>
-              <TableHead className="text-right">Prompt tokens</TableHead>
-              <TableHead className="text-right">Completion tokens</TableHead>
-              <TableHead className="text-right">Saved prompt tokens</TableHead>
-              <TableHead className="pr-6 text-right">Cost</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((day) => (
-              <TableRow key={day.date}>
-                <TableCell className="pl-6">{dayLabel(day.date)}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {intFmt.format(day.requests)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <IntCell value={day.prompt_tokens} />
-                </TableCell>
-                <TableCell className="text-right">
-                  <IntCell value={day.completion_tokens} />
-                </TableCell>
-                <TableCell className="text-right">
-                  <IntCell value={day.saved_prompt_tokens} />
-                </TableCell>
-                <TableCell className="pr-6 text-right">
+        <div className="divide-y md:hidden">
+          {rows.map((day) => (
+            <div
+              key={`${day.date}:mobile`}
+              className="flex flex-col gap-4 px-4 py-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="font-medium">{dayLabel(day.date)}</div>
+                <MobileDatum label="Cost" className="shrink-0 text-right">
                   <CostCell value={day.cost_usd} />
-                </TableCell>
+                </MobileDatum>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                <MobileDatum label="Requests">
+                  <span className="tabular-nums">
+                    {intFmt.format(day.requests)}
+                  </span>
+                </MobileDatum>
+                <MobileDatum label="Prompt tokens">
+                  <IntCell value={day.prompt_tokens} />
+                </MobileDatum>
+                <MobileDatum label="Completion tokens">
+                  <IntCell value={day.completion_tokens} />
+                </MobileDatum>
+                <MobileDatum label="Saved prompt tokens">
+                  <IntCell value={day.saved_prompt_tokens} />
+                </MobileDatum>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="pl-6">Date</TableHead>
+                <TableHead className="text-right">Requests</TableHead>
+                <TableHead className="text-right">Prompt tokens</TableHead>
+                <TableHead className="text-right">Completion tokens</TableHead>
+                <TableHead className="text-right">Saved prompt tokens</TableHead>
+                <TableHead className="pr-6 text-right">Cost</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {rows.map((day) => (
+                <TableRow key={day.date}>
+                  <TableCell className="pl-6">{dayLabel(day.date)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {intFmt.format(day.requests)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <IntCell value={day.prompt_tokens} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <IntCell value={day.completion_tokens} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <IntCell value={day.saved_prompt_tokens} />
+                  </TableCell>
+                  <TableCell className="pr-6 text-right">
+                    <CostCell value={day.cost_usd} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   )
@@ -1008,7 +1027,46 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
             No API key activity in this window.
           </p>
         ) : (
-          <Table>
+          <>
+            <div className="divide-y md:hidden">
+              {rows.map((row) => (
+                <div
+                  key={`${row.api_key_id}:mobile`}
+                  className="flex flex-col gap-4 px-4 py-5"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="break-all font-mono text-sm font-medium">
+                        {row.key_prefix}&hellip;
+                      </div>
+                      {row.revoked && (
+                        <Badge variant="secondary" className="mt-2">
+                          revoked
+                        </Badge>
+                      )}
+                    </div>
+                    <MobileDatum label="Cost" className="shrink-0 text-right">
+                      <CostCell value={row.cost_usd} />
+                    </MobileDatum>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <MobileDatum label="Requests">
+                      <span className="tabular-nums">
+                        {intFmt.format(row.requests)}
+                      </span>
+                    </MobileDatum>
+                    <MobileDatum label="Prompt">
+                      <IntCell value={row.prompt_tokens} />
+                    </MobileDatum>
+                    <MobileDatum label="Completion">
+                      <IntCell value={row.completion_tokens} />
+                    </MobileDatum>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden md:block">
+              <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="pl-6">Key</TableHead>
@@ -1044,7 +1102,9 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -1077,48 +1137,92 @@ function ModelsTable({
             No model activity in this window.
           </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-6">Model</TableHead>
-                <TableHead className="text-right">Requests</TableHead>
-                <TableHead className="text-right">Prompt tokens</TableHead>
-                <TableHead className="text-right">Completion tokens</TableHead>
-                <TableHead className="pr-6 text-right">Cost</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className="divide-y md:hidden">
               {rows.map((row) => (
-                <TableRow key={`${row.kind}:${row.model}`}>
-                  <TableCell className="pl-6">
-                    <span className="font-mono text-xs">{row.model}</span>
-                    {row.kind === "embedding" && (
-                      <Badge variant="secondary" className="ml-2">
-                        embedding
-                      </Badge>
-                    )}
-                    {unmeasuredModels.includes(row.model) && (
-                      <Badge variant="outline" className="ml-2">
-                        no usage reported
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {intFmt.format(row.requests)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <IntCell value={row.prompt_tokens} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <IntCell value={row.completion_tokens} />
-                  </TableCell>
-                  <TableCell className="pr-6 text-right">
-                    <CostCell value={row.cost_usd} />
-                  </TableCell>
-                </TableRow>
+                <div
+                  key={`${row.kind}:${row.model}:mobile`}
+                  className="flex flex-col gap-4 px-4 py-5"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="break-all font-mono text-sm font-medium">
+                        {row.model}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {row.kind === "embedding" && (
+                          <Badge variant="secondary">embedding</Badge>
+                        )}
+                        {unmeasuredModels.includes(row.model) && (
+                          <Badge variant="outline">no usage reported</Badge>
+                        )}
+                      </div>
+                    </div>
+                    <MobileDatum label="Cost" className="shrink-0 text-right">
+                      <CostCell value={row.cost_usd} />
+                    </MobileDatum>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <MobileDatum label="Requests">
+                      <span className="tabular-nums">
+                        {intFmt.format(row.requests)}
+                      </span>
+                    </MobileDatum>
+                    <MobileDatum label="Prompt">
+                      <IntCell value={row.prompt_tokens} />
+                    </MobileDatum>
+                    <MobileDatum label="Completion">
+                      <IntCell value={row.completion_tokens} />
+                    </MobileDatum>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-6">Model</TableHead>
+                    <TableHead className="text-right">Requests</TableHead>
+                    <TableHead className="text-right">Prompt tokens</TableHead>
+                    <TableHead className="text-right">Completion tokens</TableHead>
+                    <TableHead className="pr-6 text-right">Cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={`${row.kind}:${row.model}`}>
+                      <TableCell className="pl-6">
+                        <span className="font-mono text-xs">{row.model}</span>
+                        {row.kind === "embedding" && (
+                          <Badge variant="secondary" className="ml-2">
+                            embedding
+                          </Badge>
+                        )}
+                        {unmeasuredModels.includes(row.model) && (
+                          <Badge variant="outline" className="ml-2">
+                            no usage reported
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {intFmt.format(row.requests)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <IntCell value={row.prompt_tokens} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <IntCell value={row.completion_tokens} />
+                      </TableCell>
+                      <TableCell className="pr-6 text-right">
+                        <CostCell value={row.cost_usd} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -1142,6 +1246,25 @@ function SavedTokensCell({
   )
 }
 
+function MobileDatum({
+  label,
+  children,
+  className,
+}: {
+  label: string
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-medium">{children}</div>
+    </div>
+  )
+}
+
 function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
   return (
     <Card className="gap-3 overflow-hidden">
@@ -1161,83 +1284,153 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
             No project activity in this window.
           </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-6">Project</TableHead>
-                <TableHead className="text-right">Requests</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-                <TableHead className="text-right">L1 hits</TableHead>
-                <TableHead className="text-right">L2 hits</TableHead>
-                <TableHead className="text-right">Misses</TableHead>
-                <TableHead className="text-right">Hit rate</TableHead>
-                <TableHead
-                  className="text-right"
-                  title="Average similarity of the chunks retrieved to answer queries"
-                >
-                  Avg similarity
-                </TableHead>
-                <TableHead
-                  className="text-right"
-                  title="Average similarity of questions answered from the L2 cache"
-                >
-                  Cache similarity
-                </TableHead>
-                <TableHead
-                  className="pr-6 text-right"
-                  title="Tokens the cache saved: prompt / completion"
-                >
-                  Saved (prompt / completion)
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className="divide-y md:hidden">
               {rows.map((row) => (
-                <TableRow key={row.project_id}>
-                  <TableCell className="max-w-48 truncate pl-6 font-medium">
-                    {row.name}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {intFmt.format(row.requests)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <CostCell value={row.cost_usd} />
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {intFmt.format(row.cache.l1)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {intFmt.format(row.cache.l2)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {intFmt.format(row.cache.miss)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <HitRateMeter rate={row.cache.hit_rate} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <SimilarityCell value={row.avg_retrieval_similarity} />
-                  </TableCell>
-                  <TableCell
-                    className="text-right"
-                    title={
-                      row.avg_cache_similarity == null && row.cache.l2 > 0
-                        ? "This project's L2 hits predate similarity recording - newer hits will show a score."
-                        : undefined
-                    }
-                  >
-                    <SimilarityCell value={row.avg_cache_similarity} />
-                  </TableCell>
-                  <TableCell className="pr-6 text-right">
-                    <SavedTokensCell
-                      prompt={row.saved_prompt_tokens}
-                      completion={row.saved_completion_tokens}
-                    />
-                  </TableCell>
-                </TableRow>
+                <div
+                  key={`${row.project_id}:mobile`}
+                  className="flex flex-col gap-4 px-4 py-5"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="break-words font-medium">{row.name}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {intFmt.format(row.requests)} requests
+                      </div>
+                    </div>
+                    <MobileDatum label="Cost" className="shrink-0 text-right">
+                      <CostCell value={row.cost_usd} />
+                    </MobileDatum>
+                  </div>
+                  <div className="grid grid-cols-3 gap-x-3 gap-y-4">
+                    <MobileDatum label="L1 hits">
+                      <span className="tabular-nums">
+                        {intFmt.format(row.cache.l1)}
+                      </span>
+                    </MobileDatum>
+                    <MobileDatum label="L2 hits">
+                      <span className="tabular-nums">
+                        {intFmt.format(row.cache.l2)}
+                      </span>
+                    </MobileDatum>
+                    <MobileDatum label="Misses">
+                      <span className="tabular-nums">
+                        {intFmt.format(row.cache.miss)}
+                      </span>
+                    </MobileDatum>
+                    <MobileDatum label="Retrieval similarity">
+                      <SimilarityCell value={row.avg_retrieval_similarity} />
+                    </MobileDatum>
+                    <MobileDatum label="Cache similarity">
+                      <span
+                        title={
+                          row.avg_cache_similarity == null && row.cache.l2 > 0
+                            ? "This project's L2 hits predate similarity recording - newer hits will show a score."
+                            : undefined
+                        }
+                      >
+                        <SimilarityCell value={row.avg_cache_similarity} />
+                      </span>
+                    </MobileDatum>
+                    <MobileDatum label="Hit rate">
+                      <HitRateMeter
+                        rate={row.cache.hit_rate}
+                        className="justify-start"
+                      />
+                    </MobileDatum>
+                    <MobileDatum
+                      label="Saved tokens (prompt / completion)"
+                      className="col-span-3"
+                    >
+                      <SavedTokensCell
+                        prompt={row.saved_prompt_tokens}
+                        completion={row.saved_completion_tokens}
+                      />
+                    </MobileDatum>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-6">Project</TableHead>
+                    <TableHead className="text-right">Requests</TableHead>
+                    <TableHead className="text-right">Cost</TableHead>
+                    <TableHead className="text-right">L1 hits</TableHead>
+                    <TableHead className="text-right">L2 hits</TableHead>
+                    <TableHead className="text-right">Misses</TableHead>
+                    <TableHead className="text-right">Hit rate</TableHead>
+                    <TableHead
+                      className="text-right"
+                      title="Average similarity of the chunks retrieved to answer queries"
+                    >
+                      Avg similarity
+                    </TableHead>
+                    <TableHead
+                      className="text-right"
+                      title="Average similarity of questions answered from the L2 cache"
+                    >
+                      Cache similarity
+                    </TableHead>
+                    <TableHead
+                      className="pr-6 text-right"
+                      title="Tokens the cache saved: prompt / completion"
+                    >
+                      Saved (prompt / completion)
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={row.project_id}>
+                      <TableCell className="max-w-48 truncate pl-6 font-medium">
+                        {row.name}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {intFmt.format(row.requests)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <CostCell value={row.cost_usd} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {intFmt.format(row.cache.l1)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {intFmt.format(row.cache.l2)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {intFmt.format(row.cache.miss)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <HitRateMeter rate={row.cache.hit_rate} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <SimilarityCell value={row.avg_retrieval_similarity} />
+                      </TableCell>
+                      <TableCell
+                        className="text-right"
+                        title={
+                          row.avg_cache_similarity == null && row.cache.l2 > 0
+                            ? "This project's L2 hits predate similarity recording - newer hits will show a score."
+                            : undefined
+                        }
+                      >
+                        <SimilarityCell value={row.avg_cache_similarity} />
+                      </TableCell>
+                      <TableCell className="pr-6 text-right">
+                        <SavedTokensCell
+                          prompt={row.saved_prompt_tokens}
+                          completion={row.saved_completion_tokens}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

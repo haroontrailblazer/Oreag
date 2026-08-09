@@ -37,7 +37,7 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "Oreag - RAG & Memory as a Service",
+        alt: "Oreag above a painterly night scene of a person working through documents",
       },
     ],
   },

@@ -1,10 +1,9 @@
-// One-off: render the brand OG card to a static PNG at public/og.png using the
-// same engine (next/og) as the route version. Run: `node scripts/generate-og.mjs`
+// Render the brand OG card to public/og.png. Run:
+// `node scripts/generate-og.mjs`
 //
-// Design: the real Oreag logo inside the 3D "app-icon" badge (matching the
-// .brand-mark treatment in globals.css), an Oreag wordmark, the amber/sky accent
-// tagline from the landing hero, and feature pills - on a dark canvas with a soft
-// brand-coloured glow.
+// The composition mirrors the landing page: its painterly document-work scene
+// stays full bleed, while the real app icon and exact product copy remain crisp
+// code-native layers for reliable social-preview rendering.
 import { readFileSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
@@ -13,127 +12,113 @@ import { fileURLToPath } from "node:url"
 import React from "react"
 
 const here = dirname(fileURLToPath(import.meta.url))
-// next/og's "./og" subpath isn't in the package exports map, so import the
-// compiled ImageResponse by absolute path (bypasses the exports restriction).
+const publicDir = join(here, "..", "public")
 const require = createRequire(import.meta.url)
 const { ImageResponse } = require(
-  join(here, "..", "node_modules", "next", "dist", "server", "og", "image-response.js")
+  join(
+    here,
+    "..",
+    "node_modules",
+    "next",
+    "dist",
+    "server",
+    "og",
+    "image-response.js"
+  )
 )
 
 const h = React.createElement
 
-// The dark badge needs a light mark (same as the dashboard's dark-mode
-// `dark:invert`). satori can't apply CSS filters, so recolour the vector logo's
-// fills to white directly and embed the SVG.
-let logoSvg = readFileSync(join(here, "..", "public", "logo.svg"), "utf8")
-logoSvg = logoSvg.replace(/fill="#[0-9a-fA-F]+"/g, 'fill="#ffffff"')
-const logoSrc = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString("base64")}`
+function imageDataUrl(filename, mimeType) {
+  const bytes = readFileSync(join(publicDir, filename))
+  return `data:${mimeType};base64,${bytes.toString("base64")}`
+}
 
-// The 3D badge - same gradient + layered shadows as `.brand-mark` (light), with a
-// child gloss overlay standing in for the CSS ::after (satori has no pseudos).
-const badge = h(
+const paintingSrc = imageDataUrl("og-painting.png", "image/png")
+const iconSrc = imageDataUrl("../src/app/icon.png", "image/png")
+
+const brand = h(
   "div",
   {
     style: {
-      position: "relative",
-      width: "300px",
-      height: "300px",
-      borderRadius: "64px",
       display: "flex",
       alignItems: "center",
-      justifyContent: "center",
-      overflow: "hidden",
-      border: "1px solid rgba(255,255,255,0.06)",
-      background: "linear-gradient(160deg, #2b2e32 0%, #161719 55%, #0a0b0c 100%)",
-      boxShadow:
-        "inset 0 2px 0 0 rgba(255,255,255,0.16), inset 0 -6px 14px -4px rgba(0,0,0,0.55), 0 2px 4px 0 rgba(0,0,0,0.5), 0 36px 70px -20px rgba(0,0,0,0.8)",
+      gap: "20px",
     },
   },
   h("img", {
-    src: logoSrc,
-    width: 232,
-    height: 232,
-    style: { objectFit: "contain" },
+    src: iconSrc,
+    width: 88,
+    height: 88,
+    style: {
+      borderRadius: "22px",
+      boxShadow: "0 18px 40px rgba(0,0,0,0.42)",
+    },
   }),
-  h("div", {
-    style: {
-      position: "absolute",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background:
-        "linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 45%)",
-    },
-  })
-)
-
-// Accent tagline (amber "documents", sky "RAG API") - built as coloured word
-// chips so satori lays them out inline without inline-text quirks.
-const phrase = [
-  ["Turn your", "#a1a1aa"],
-  ["documents", "#f59e0b"],
-  ["into a queryable", "#a1a1aa"],
-  ["RAG API", "#38bdf8"],
-]
-const tagline = h(
-  "div",
-  {
-    style: {
-      display: "flex",
-      flexWrap: "wrap",
-      maxWidth: "600px",
-      fontSize: "34px",
-      fontWeight: 600,
-      lineHeight: 1.25,
-    },
-  },
-  phrase.map(([word, color], i) =>
-    h("div", { key: i, style: { display: "flex", color, marginRight: "11px" } }, word)
-  )
-)
-
-const pills = h(
-  "div",
-  { style: { display: "flex", gap: "14px", marginTop: "8px" } },
-  ["BYOK", "pgvector", "Memory Graph"].map((t, i) =>
+  h(
+    "div",
+    { style: { display: "flex", flexDirection: "column", gap: "5px" } },
     h(
       "div",
       {
-        key: i,
         style: {
           display: "flex",
-          padding: "11px 24px",
-          borderRadius: "9999px",
-          border: "1px solid #3f3f46",
-          color: "#e4e4e7",
-          fontSize: "26px",
+          color: "#ffffff",
+          fontSize: "58px",
+          fontWeight: 760,
+          letterSpacing: "-2.5px",
+          lineHeight: 1,
         },
       },
-      t
+      "Oreag"
+    ),
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          color: "rgba(255,255,255,0.74)",
+          fontSize: "22px",
+          fontWeight: 500,
+          letterSpacing: "0.2px",
+        },
+      },
+      "RAG & Memory as a Service"
     )
   )
 )
 
-const rightColumn = h(
+const headline = h(
   "div",
-  { style: { display: "flex", flexDirection: "column", gap: "22px" } },
+  {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      width: "650px",
+      color: "#ffffff",
+      fontSize: "50px",
+      fontWeight: 680,
+      lineHeight: 1.08,
+      letterSpacing: "-1.8px",
+    },
+  },
+  h("div", { style: { display: "flex" } }, "Turn your documents into"),
   h(
     "div",
-    {
-      style: {
-        display: "flex",
-        fontSize: "94px",
-        fontWeight: 800,
-        color: "#ffffff",
-        letterSpacing: "-4px",
-        lineHeight: 1,
+    { style: { display: "flex", alignItems: "baseline", gap: "14px" } },
+    h("div", { style: { display: "flex" } }, "a queryable"),
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          color: "#7dd3fc",
+          textShadow: "0 3px 18px rgba(14,165,233,0.28)",
+        },
       },
-    },
-    "Oreag"
-  ),
-  tagline,
-  pills
+      "RAG API"
+    )
+  )
 )
 
 const element = h(
@@ -144,30 +129,38 @@ const element = h(
       height: "100%",
       display: "flex",
       position: "relative",
+      overflow: "hidden",
       fontFamily: "sans-serif",
-      background: "linear-gradient(135deg, #1c1c21 0%, #0a0a0a 100%)",
+      background: "#06142f",
     },
   },
-  h("div", {
+  h("img", {
+    src: paintingSrc,
+    width: 1200,
+    height: 630,
     style: {
       position: "absolute",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background:
-        "radial-gradient(circle at 84% 16%, rgba(56,189,248,0.18) 0%, rgba(0,0,0,0) 42%)",
+      inset: 0,
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+      objectPosition: "center",
     },
   }),
   h("div", {
     style: {
       position: "absolute",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
+      inset: 0,
       background:
-        "radial-gradient(circle at 12% 92%, rgba(245,158,11,0.12) 0%, rgba(0,0,0,0) 40%)",
+        "linear-gradient(90deg, rgba(2,8,23,0.88) 0%, rgba(2,8,23,0.66) 42%, rgba(2,8,23,0.08) 72%, rgba(2,8,23,0) 100%)",
+    },
+  }),
+  h("div", {
+    style: {
+      position: "absolute",
+      inset: 0,
+      background:
+        "linear-gradient(180deg, rgba(2,8,23,0.30) 0%, rgba(2,8,23,0) 48%, rgba(2,8,23,0.36) 100%)",
     },
   }),
   h(
@@ -176,21 +169,20 @@ const element = h(
       style: {
         position: "relative",
         display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
         width: "100%",
         height: "100%",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "68px",
-        padding: "72px",
+        padding: "64px 68px 62px",
       },
     },
-    badge,
-    rightColumn
+    brand,
+    headline
   )
 )
 
-const res = new ImageResponse(element, { width: 1200, height: 630 })
-const buf = Buffer.from(await res.arrayBuffer())
-const out = join(here, "..", "public", "og.png")
-writeFileSync(out, buf)
-console.log("WROTE", out, buf.length, "bytes")
+const response = new ImageResponse(element, { width: 1200, height: 630 })
+const output = Buffer.from(await response.arrayBuffer())
+const outputPath = join(publicDir, "og.png")
+writeFileSync(outputPath, output)
+console.log("WROTE", outputPath, output.length, "bytes")
