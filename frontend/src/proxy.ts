@@ -130,6 +130,10 @@ export const config = {
     // manifest). Those render with NO file extension, so without listing them
     // here the auth check below redirects unauthenticated social crawlers to
     // /login - which is why the OG preview image never loaded.
-    "/((?!_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|icon|apple-icon|sitemap\\.xml|robots\\.txt|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // `c4` is in the extension list for the same reason the image types are:
+    // public/architecture.c4 is a static asset, and without it here an
+    // unauthenticated request for the architecture model is answered with a
+    // redirect to /login instead of the file.
+    "/((?!_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|icon|apple-icon|sitemap\\.xml|robots\\.txt|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|c4)$).*)",
   ],
 }

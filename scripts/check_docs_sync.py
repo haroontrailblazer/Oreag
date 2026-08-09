@@ -468,6 +468,40 @@ def check_api_tab(rep: Report, cfg: dict) -> None:
 # ── entry point ─────────────────────────────────────────────────────────────
 
 
+
+def check_published_architecture_matches(rep: Report) -> None:
+    """The architecture model served to users must be the one in the repo.
+
+    oreag_1.c4 is the source of truth and lives at the root, because it
+    describes the backend as much as the frontend. It is ALSO published as a
+    static asset at frontend/public/architecture.c4, linked from the docs page,
+    because Vercel builds with the frontend as its root directory and files
+    above that root are not guaranteed to be present at build time.
+
+    A committed copy is what makes that reliable, and a committed copy is
+    exactly the kind of thing that silently goes stale - the docs would then
+    serve an architecture that has not been true for months. `npm run build`
+    refreshes it (see frontend/scripts/sync-architecture.mjs); this is what
+    fails the build when someone edits the model and does not.
+    """
+    published = ROOT / "frontend/public/architecture.c4"
+    if not C4.exists():
+        return
+    if not published.exists():
+        rep.fail(
+            "architecture-published",
+            "frontend/public/architecture.c4 is missing - the docs link 404s",
+            "run `npm run build` in frontend/ (or node scripts/sync-architecture.mjs)",
+        )
+        return
+    if read(published) != read(C4):
+        rep.fail(
+            "architecture-published",
+            "frontend/public/architecture.c4 is stale - it differs from oreag_1.c4",
+            "run `npm run build` in frontend/ (or node scripts/sync-architecture.mjs)",
+        )
+
+
 def check_auth_redirects_are_public(rep: Report) -> None:
     """Every email-link landing page must be reachable without a session.
 
@@ -532,6 +566,7 @@ def run() -> Report:
     check_feature_surfaces(rep)
     check_api_tab(rep, cfg)
     check_auth_redirects_are_public(rep)
+    check_published_architecture_matches(rep)
     return rep
 
 

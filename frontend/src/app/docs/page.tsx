@@ -62,13 +62,26 @@ export default function DocsPage() {
               </span>
             </Link>
           </div>
-          <Link
-            href="/dashboard"
-            className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Dashboard
-            <ArrowSquareOut className="size-4" />
-          </Link>
+          <div className="flex shrink-0 items-center gap-4 sm:gap-5">
+            {/* The LikeC4 model behind the system, served as plain text so it
+                opens in the browser rather than downloading (see vercel.json).
+                A plain <a>, not next/link: this is a static asset outside the
+                router, and prefetching it would pull 70KB nobody asked for. */}
+            <a
+              href="/architecture.c4"
+              className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Architecture
+              <ArrowSquareOut className="size-4" />
+            </a>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Dashboard
+              <ArrowSquareOut className="size-4" />
+            </Link>
+          </div>
         </div>
       </header>
 
