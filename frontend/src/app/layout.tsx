@@ -21,20 +21,21 @@ export const metadata: Metadata = {
     "Turn your documents into a queryable RAG API with a built-in memory graph: upload, tune chunking and embeddings, and get a per-project endpoint.",
   // Favicons are picked up from the app/ file conventions: icon.png + favicon.ico
   // (both are the Oreag 3D app-icon badge, matching the landing brand mark).
-  // The OG/Twitter image is the static public/oreag-og-v2.jpg (regenerate with
+  // The OG/Twitter image is public/oreag-og-whatsapp-v3.jpg (regenerate with
   // `node scripts/generate-og.mjs`). A static asset resolves via metadataBase to
-  // an absolute URL, is CDN-cached, and its image path is exempt from the auth
-  // middleware - so crawlers always get it.
+  // an absolute URL and its path is exempt from the auth middleware. The v3
+  // filename and social URL deliberately invalidate stale WhatsApp previews.
   openGraph: {
     title: "Oreag - RAG & Memory as a Service",
     description:
       "Turn your documents into a queryable RAG API with a built-in memory graph.",
-    url: "/",
+    url: "/?share=og-v3",
     siteName: "Oreag",
     type: "website",
     images: [
       {
-        url: "/oreag-og-v2.jpg",
+        url: "/oreag-og-whatsapp-v3.jpg",
+        secureUrl: "https://oreag.vercel.app/oreag-og-whatsapp-v3.jpg",
         width: 1200,
         height: 630,
         type: "image/jpeg",
@@ -47,7 +48,7 @@ export const metadata: Metadata = {
     title: "Oreag - RAG & Memory as a Service",
     description:
       "Turn your documents into a queryable RAG API with a built-in memory graph.",
-    images: ["/oreag-og-v2.jpg"],
+    images: ["/oreag-og-whatsapp-v3.jpg"],
   },
 };
 

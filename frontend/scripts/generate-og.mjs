@@ -1,4 +1,4 @@
-// Render the brand OG card to public/oreag-og-v2.jpg. Run:
+// Render the brand OG card to public/oreag-og-whatsapp-v3.jpg. Run:
 // `node scripts/generate-og.mjs`
 //
 // The composition mirrors the landing page: its painterly document-work scene
@@ -185,8 +185,11 @@ const element = h(
 const response = new ImageResponse(element, { width: 1200, height: 630 })
 const renderedPng = Buffer.from(await response.arrayBuffer())
 const output = await sharp(renderedPng)
-  .jpeg({ quality: 82, progressive: true, chromaSubsampling: "4:2:0" })
+  // Baseline JPEG keeps the social image compatible with conservative link
+  // preview decoders while remaining comfortably below WhatsApp's practical
+  // download limits.
+  .jpeg({ quality: 82, progressive: false, chromaSubsampling: "4:2:0" })
   .toBuffer()
-const outputPath = join(publicDir, "oreag-og-v2.jpg")
+const outputPath = join(publicDir, "oreag-og-whatsapp-v3.jpg")
 writeFileSync(outputPath, output)
 console.log("WROTE", outputPath, output.length, "bytes")
