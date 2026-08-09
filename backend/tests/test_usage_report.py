@@ -469,6 +469,8 @@ class TestEndpoint:
                 "saved_cost_usd": None,
                 "embedding_tokens": None,
                 "embedding_cost_usd": None,
+                "saved_embedding_tokens": None,
+                "saved_embedding_cost_usd": None,
             },
             "by_model": [],
             "by_api_key": [],

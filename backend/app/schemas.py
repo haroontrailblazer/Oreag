@@ -327,6 +327,12 @@ class UsageTotals(BaseModel):
     # cheaper, so one combined number would be wrong for both.
     embedding_tokens: int | None
     embedding_cost_usd: float | None
+    # Embedding avoided by a Matryoshka grow-back: restoring vectors from the
+    # archive instead of re-embedding. Replayed from what the files originally
+    # cost, so it is a measurement - NULL for files ingested before that was
+    # recorded, never a fabricated figure.
+    saved_embedding_tokens: int | None
+    saved_embedding_cost_usd: float | None
 
 
 class UsageByModel(BaseModel):

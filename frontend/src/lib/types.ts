@@ -214,6 +214,11 @@ export interface UsageTotals {
    *  cheaper, so one combined number would be wrong for both. */
   embedding_tokens: number | null
   embedding_cost_usd: number | null
+  /** Embedding avoided by a Matryoshka grow-back - vectors restored from the
+   *  archive instead of re-embedded. Replayed from what the files originally
+   *  cost, so null means "not measured", never zero. */
+  saved_embedding_tokens: number | null
+  saved_embedding_cost_usd: number | null
 }
 
 export interface UsageByModel {

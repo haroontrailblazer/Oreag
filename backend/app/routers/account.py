@@ -1,7 +1,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,7 +10,7 @@ from ..auth.jwt import get_current_user, get_user_pending_mfa
 from ..db import get_db
 from ..models import File, Project
 from ..schemas import UsageReport
-from ..services import admin, mfa, storage, usage_report
+from ..services import admin, mfa, storage, tracing, usage_report
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,16 @@ def delete_account(
             if f.markdown_storage_path:
                 paths.append(f.markdown_storage_path)
 
+    # Remove the account's observability data BEFORE the auth user goes, so a
+    # failure here is still attributable to a user that exists. Deleting an
+    # account must not leave its questions and answers sitting in Langfuse.
+    try:
+        removed = tracing.forget_user(user_id)
+        if removed:
+            logger.info("Removed %d Langfuse traces for %s", removed, user_id)
+    except Exception:
+        logger.exception("Langfuse cleanup failed during account deletion")
+
     # Cascades all of the user's DB rows.
     admin.delete_auth_user(str(user_id))
 
@@ -49,6 +59,28 @@ def delete_account(
             storage.delete(paths)
         except Exception:
             logger.exception("Storage cleanup failed during account deletion")
+
+
+@router.post("/observability", status_code=204)
+def register_observability(
+    background: BackgroundTasks,
+    user_id: uuid.UUID = Depends(get_current_user),
+):
+    """Make this account visible in Langfuse's Users view.
+
+    Called once by the frontend right after a successful signup. It exists as
+    an explicit endpoint rather than a hook inside get_current_user because
+    registering means emitting an observation over the network, and
+    get_current_user runs on EVERY authenticated request - paying that there,
+    even memoised, puts a third-party call on the auth hot path.
+
+    Idempotent: Langfuse derives a user from the observations that carry its
+    id, so registering twice just adds a second tiny event rather than
+    conflicting. Runs in the background and returns 204 regardless, because
+    whether an observability backend acknowledged a signup is not something a
+    user signing up should ever wait for - or fail on.
+    """
+    background.add_task(tracing.register_user, user_id)
 
 
 # ── Usage report ────────────────────────────────────────────────────────────

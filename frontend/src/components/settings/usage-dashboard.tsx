@@ -23,6 +23,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -329,6 +330,33 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
           </div>
         </div>
       </CardContent>
+      <CardFooter className="flex-col items-start gap-1 border-t pt-4">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          Embedding saved by the dimension archive
+        </div>
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+          <span className="text-xl font-semibold">
+            {totals.saved_embedding_tokens == null ? (
+              <NotMeasured className="text-sm" />
+            ) : (
+              <span title={intFmt.format(totals.saved_embedding_tokens)}>
+                {compactFmt.format(totals.saved_embedding_tokens)} tokens
+              </span>
+            )}
+          </span>
+          {totals.saved_embedding_cost_usd != null && (
+            <span className="text-sm font-medium text-[#006300] dark:text-[#0ca30c]">
+              {formatCost(totals.saved_embedding_cost_usd)}
+            </span>
+          )}
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Shrinking an embedding dimension keeps the full-width vector. Growing
+          back restores it exactly instead of re-embedding the corpus - this is
+          what that recovered, replayed from what those files originally cost.
+          Files indexed before this was recorded show as not measured.
+        </p>
+      </CardFooter>
     </Card>
   )
 }
@@ -832,7 +860,14 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
                   <TableCell className="text-right">
                     <SimilarityCell value={row.avg_retrieval_similarity} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell
+                    className="text-right"
+                    title={
+                      row.avg_cache_similarity == null && row.cache.l2 > 0
+                        ? "This project's L2 hits predate similarity recording - newer hits will show a score."
+                        : undefined
+                    }
+                  >
                     <SimilarityCell value={row.avg_cache_similarity} />
                   </TableCell>
                   <TableCell className="pr-6 text-right">

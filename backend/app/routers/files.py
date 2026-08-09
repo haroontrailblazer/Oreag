@@ -17,6 +17,8 @@ from ..providers import registry
 from ..schemas import FileOut, ReindexRequest
 from ..services import storage
 from ..services.content_version import bump_content_version
+from ..services.usage import record_usage
+from ..providers.base import TokenUsage
 from ..services.conversion import content_type_for, is_ingestable, source_extension
 from ..services.ingestion import recompute_project_status
 from ..services.memory import reembed_project_memories
@@ -348,6 +350,42 @@ def _shrink_vectors_in_place(db: Session, project: Project, dims: int) -> bool:
         )
         db.rollback()
         return False
+
+
+
+def _record_restore_savings(
+    db: Session, project: Project, files: list[File], restore_gap: list[uuid.UUID]
+) -> None:
+    """Report the embedding a Matryoshka grow-back did NOT have to buy.
+
+    Restoring from `embedding_full` is the single largest avoided cost in the
+    product on a big corpus, and it used to leave no trace whatsoever - a
+    grow-back that rescued ten thousand chunks looked identical to one that did
+    nothing.
+
+    The figure is REPLAYED, never estimated: each restored file reports what it
+    actually cost to embed at ingest (`files.embedding_tokens`). Files ingested
+    before that column existed contribute nothing and their saving stays
+    unmeasured, which is the honest answer - the same rule the answer cache
+    follows. Files in the gap are excluded because they are about to be
+    re-embedded and paid for.
+    """
+    gap = set(restore_gap)
+    restored = [f for f in files if f.id not in gap]
+    tokens = [f.embedding_tokens for f in restored if f.embedding_tokens is not None]
+    if not tokens:
+        return
+    record_usage(
+        db,
+        project=project,
+        api_key_id=None,
+        endpoint="matryoshka_restore",
+        saved_embedding=TokenUsage(
+            prompt_tokens=sum(tokens),
+            completion_tokens=0,
+            model=project.embedding_model or "",
+        ),
+    )
 
 
 def _files_to_requeue(files: list[File], restore_gap: list[uuid.UUID]) -> list[File]:
@@ -800,6 +838,8 @@ def reindex_project(
         # Growing back from the archive lands here too: every vector is already
         # at the new width, so there is nothing to re-ingest and nothing to pay
         # for. This is the whole point of the archive.
+        if plan == "restore":
+            _record_restore_savings(db, project, files, restore_gap)
         if plan == "restore" and dims >= (
             project.embedding_native_dimensions or dims
         ):

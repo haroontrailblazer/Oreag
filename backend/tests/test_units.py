@@ -36,6 +36,26 @@ from app.services.ingestion import parse_pdf
 from app.services.memory_graph import _sections
 
 
+
+def ingest_source() -> str:
+    """The full source of the ingest entry point.
+
+    `ingest_file` is now a thin wrapper that opens the embedding-usage scope
+    and delegates to `_ingest_file_inner`, so inspecting only the wrapper
+    silently stops checking any of the invariants below - the assertions would
+    pass on an empty function. Both halves together are what "the ingest path"
+    means.
+    """
+    import inspect
+
+    from app.services import ingestion
+
+    return (
+        inspect.getsource(ingestion.ingest_file)
+        + inspect.getsource(ingestion._ingest_file_inner)
+    )
+
+
 class TestMemoryModel:
     def test_table_and_columns(self):
         assert Memory.__tablename__ == "memories"
@@ -2027,7 +2047,7 @@ class TestConvertedMarkdownReuse:
 
         from app.services import ingestion
 
-        src = inspect.getsource(ingestion.ingest_file)
+        src = ingest_source()
         assert src.index("storage.upload_file") < src.index(
             "file.conversion_version = CONVERSION_VERSION"
         )
@@ -2348,7 +2368,7 @@ class TestConversionNoteSurvivesReindex:
 
         from app.services import ingestion
 
-        src = inspect.getsource(ingestion.ingest_file)
+        src = ingest_source()
         assert "file.conversion_note = converted.note" in src
         assert "note=file.conversion_note" in src
 
@@ -2384,7 +2404,7 @@ class TestArchiveColumnIsOmittedNotNulled:
         # fails on correct code - a test that cannot tell code from prose.
         code = "\n".join(
             line
-            for line in inspect.getsource(ingestion.ingest_file).splitlines()
+            for line in ingest_source().splitlines()
             if not line.strip().startswith("#")
         )
         assert '"embedding_full": None' not in code
@@ -2961,7 +2981,7 @@ class TestUsableNativeDimensions:
         from app.services import ingestion, memory
 
         assert "usable_native_dimensions" in inspect.getsource(memory._embed_many)
-        assert "usable_native_dimensions" in inspect.getsource(ingestion.ingest_file)
+        assert "usable_native_dimensions" in ingest_source()
 
 
 class TestMemoryEmbeddingIsBatched:

@@ -346,3 +346,132 @@ def observed_stream(llm, streamer, system_prompt: str, user_prompt: str, *,
             except Exception:
                 logger.debug("Could not annotate a streamed span", exc_info=True)
     return usage
+
+
+def register_user(user_id, *, email: str | None = None) -> None:
+    """Make an Oreag account visible in Langfuse's Users view immediately.
+
+    Langfuse has NO user-creation API - probed and confirmed, POST
+    /api/public/users is a 404. A "user" there is derived: it exists because
+    some observation carried that `userId`. So the only way to make an account
+    appear at signup, rather than on its first query, is to emit one
+    observation for it.
+
+    That is what this does - a single tiny event, not a fabricated query. It
+    carries no question and no answer, so it cannot be mistaken for real
+    traffic in any of the RAG dashboards.
+
+    Never raises: a failure here must not be able to break a signup.
+    """
+    lf = client()
+    if lf is None:
+        return
+    try:
+        from langfuse import propagate_attributes
+    except Exception:  # pragma: no cover - defensive
+        return
+    try:
+        # propagate_attributes, exactly as query_trace does - NOT
+        # update_current_trace. The latter did not attach user_id here and the
+        # account never appeared, which is the whole point of the call.
+        with propagate_attributes(
+            user_id=str(user_id),
+            tags=["lifecycle"],
+            metadata={"lifecycle": "signup", "email": email},
+        ):
+            with lf.start_as_current_observation(
+                as_type="span",
+                name="account-created",
+                input={"event": "signup"},
+            ):
+                pass
+        lf.flush()
+    except Exception:
+        logger.debug("Could not register the user in Langfuse", exc_info=True)
+
+
+# A hard stop, so a paging bug can never become an unbounded loop against a
+# third-party API. 100 pages x 100 traces is far beyond any real account.
+_MAX_TRACE_PAGES = 100
+
+
+def forget_user(user_id) -> int:
+    """Delete everything Langfuse holds for one account. Returns traces removed.
+
+    The counterpart to `register_user`: deleting an Oreag account must not
+    leave its questions and answers sitting in an observability backend. There
+    is no "delete user" endpoint either, for the same reason there is no create
+    one - a user IS its traces, so removing them removes the user.
+
+    Paged deliberately: an active account can have far more traces than one
+    response returns, and stopping at the first page would silently leave data
+    behind while reporting success.
+
+    Best-effort, like everything else in this module - but the caller logs the
+    count, because "we deleted your data" is a claim that should be checkable.
+    """
+    lf = client()
+    if lf is None:
+        return 0
+    import httpx
+
+    from ..config import settings
+
+    base = (settings.langfuse_base_url or "").rstrip("/")
+    auth = (settings.langfuse_public_key or "", settings.langfuse_secret_key or "")
+    if not base or not all(auth):
+        return 0
+
+    # COLLECT every id first, then delete - never delete-then-requery.
+    #
+    # Deletion in Langfuse is asynchronous: a trace stays readable for a while
+    # after a successful DELETE. A loop that re-queries page 1 after each
+    # delete therefore sees the same ids again, "deletes" them again, and
+    # counts them again - the first version of this reported 7 removals for a
+    # single trace and rate-limited itself into a 429 doing it.
+    ids: list[str] = []
+    seen: set[str] = set()
+    try:
+        with httpx.Client(base_url=base, auth=auth, timeout=30) as http:
+            page = 1
+            while page <= _MAX_TRACE_PAGES:
+                resp = http.get(
+                    "/api/public/traces",
+                    params={"userId": str(user_id), "page": page, "limit": 100},
+                )
+                if resp.status_code == 429:
+                    logger.warning(
+                        "Langfuse rate limited the cleanup for %s; "
+                        "%d traces collected so far", user_id, len(ids)
+                    )
+                    break
+                resp.raise_for_status()
+                batch = resp.json().get("data", [])
+                if not batch:
+                    break
+                # Dedup across pages: paging a list that is being written to
+                # can repeat an entry, and a repeat must not become a second
+                # delete request.
+                fresh = [t["id"] for t in batch if t["id"] not in seen]
+                seen.update(fresh)
+                ids.extend(fresh)
+                if len(batch) < 100:
+                    break
+                page += 1
+
+            for i in range(0, len(ids), 100):
+                chunk = ids[i : i + 100]
+                deleted = http.request(
+                    "DELETE", "/api/public/traces", json={"traceIds": chunk}
+                )
+                if deleted.status_code == 429:
+                    logger.warning(
+                        "Langfuse rate limited the delete for %s after %d",
+                        user_id, i
+                    )
+                    return i
+                deleted.raise_for_status()
+    except Exception:
+        logger.warning("Langfuse cleanup failed for user %s", user_id, exc_info=True)
+        return 0
+    return len(ids)

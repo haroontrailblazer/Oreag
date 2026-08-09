@@ -91,7 +91,7 @@ class _Bucket:
 
     __slots__ = ("requests", "prompt", "completion", "cost", "saved_prompt",
                  "saved_completion", "saved_cost", "embedding_tokens",
-                 "embedding_cost")
+                 "embedding_cost", "saved_embedding", "saved_embedding_cost")
 
     def __init__(self) -> None:
         self.requests = 0
@@ -108,6 +108,8 @@ class _Bucket:
         self.saved_cost.append(row.saved_cost)
         self.embedding_tokens.append(row.embedding_tokens)
         self.embedding_cost.append(row.embedding_cost)
+        self.saved_embedding.append(row.saved_embedding)
+        self.saved_embedding_cost.append(row.saved_embedding_cost)
 
     def __getattr__(self, name):  # pragma: no cover - defensive
         raise AttributeError(name)
@@ -158,6 +160,8 @@ def cube_query(in_window, day):
             func.sum(UsageEvent.saved_cost_usd).label("saved_cost"),
             func.sum(UsageEvent.embedding_tokens).label("embedding_tokens"),
             func.sum(UsageEvent.embedding_cost_usd).label("embedding_cost"),
+            func.sum(UsageEvent.saved_embedding_tokens).label("saved_embedding"),
+            func.sum(UsageEvent.saved_embedding_cost_usd).label("saved_embedding_cost"),
         )
         .where(*in_window)
         .group_by(
@@ -318,6 +322,8 @@ def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
             saved_cost_usd=_f(_nsum(totals_bucket.saved_cost)),
             embedding_tokens=_i(_nsum(totals_bucket.embedding_tokens)),
             embedding_cost_usd=_f(_nsum(totals_bucket.embedding_cost)),
+            saved_embedding_tokens=_i(_nsum(totals_bucket.saved_embedding)),
+            saved_embedding_cost_usd=_f(_nsum(totals_bucket.saved_embedding_cost)),
         ),
         # Chat and embedding models in ONE list, tagged by kind: "what did this
         # account spend, by model" is a single question, and splitting it into

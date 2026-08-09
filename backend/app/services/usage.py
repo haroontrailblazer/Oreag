@@ -34,6 +34,7 @@ def record_usage(
     saved: TokenUsage | None = None,
     cache_layer: str | None = None,
     embedding: TokenUsage | None = None,
+    saved_embedding: TokenUsage | None = None,
 ) -> None:
     """Write one UsageEvent. Never raises - metering must not fail a request.
 
@@ -102,6 +103,16 @@ def record_usage(
                 embedding_tokens=embedding_tokens,
                 embedding_model=embedding_model,
                 embedding_cost_usd=embedding_cost,
+                saved_embedding_tokens=(
+                    saved_embedding.prompt_tokens
+                    if saved_embedding is not None else None
+                ),
+                saved_embedding_cost_usd=(
+                    embedding_cost_for(
+                        saved_embedding.model, saved_embedding.prompt_tokens
+                    )
+                    if saved_embedding is not None else None
+                ),
             )
         )
         db.commit()

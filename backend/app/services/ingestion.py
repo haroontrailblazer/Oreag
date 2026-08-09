@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..models import Chunk, File, Project
+from . import embedding_usage
+from .usage import record_usage
 from ..providers import registry, resolver
 from ..providers.registry import (
     embed_batch_size,
@@ -216,7 +218,60 @@ def ingest_file(file_id: uuid.UUID) -> None:
     """Background task: parse -> chunk -> embed -> store, with status updates.
 
     Runs in Starlette's threadpool (sync def), so it owns its DB session.
+
+    Metered here rather than at the upload route. The route returns as soon as
+    the file is queued; the embedding happens later on an ingest WORKER thread,
+    which is outside the HTTP request the usage middleware wraps - so a UI
+    upload was writing its vectors and recording no tokens at all. Ingesting
+    one document embeds every chunk of it and is routinely the largest single
+    cost in the product, so it is exactly the spend that must not be invisible.
     """
+    with embedding_usage.scope() as _embedding:
+        try:
+            _ingest_file_inner(file_id)
+        finally:
+            # In a finally: a file that fails PART way through has still paid
+            # for whatever it embedded before failing, and that spend is just
+            # as real as a successful one.
+            _record_ingest_usage(file_id, _embedding)
+
+
+def _record_ingest_usage(file_id: uuid.UUID, embedding) -> None:
+    """Write the usage row for one ingest. Never raises - see services/usage."""
+    if embedding is None or not embedding.total.known:
+        return
+    db = SessionLocal()
+    try:
+        file = db.get(File, file_id)
+        if file is None:
+            return
+        project = db.get(Project, file.project_id)
+        if project is None:
+            return
+        record_usage(
+            db,
+            project=project,
+            # No API key: ingestion is triggered by an owner through the
+            # dashboard or the upload endpoint, and attributing it to a key
+            # would misreport which key spent the money.
+            api_key_id=None,
+            endpoint="file_ingest",
+            embedding=embedding.total,
+        )
+        # Stamped on the file too, not only on the usage row: a Matryoshka
+        # grow-back restores THIS file's vectors from the archive and needs to
+        # know what re-embedding it would have cost. That figure cannot be
+        # computed at restore time without doing the very work being avoided,
+        # so it has to be remembered here.
+        file.embedding_tokens = embedding.total.prompt_tokens
+        db.commit()
+    except Exception:
+        logger.warning("Could not record ingest usage for %s", file_id, exc_info=True)
+    finally:
+        db.close()
+
+
+def _ingest_file_inner(file_id: uuid.UUID) -> None:
     db = SessionLocal()
     try:
         file = db.get(File, file_id)

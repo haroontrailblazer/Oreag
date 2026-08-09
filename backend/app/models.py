@@ -97,6 +97,11 @@ class File(Base):
     # file is re-queued (up to the retry cap) instead of bulk-failed.
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # What this file cost to embed at ingest. Replayed as the saving when a
+    # Matryoshka grow-back restores its vectors instead of re-embedding -
+    # there is no way to know that cost at restore time without doing the
+    # very work being avoided, so it has to come from the past.
+    embedding_tokens: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -343,5 +348,10 @@ class UsageEvent(Base):
     embedding_tokens: Mapped[int | None] = mapped_column(Integer)
     embedding_model: Mapped[str | None] = mapped_column(Text)
     embedding_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    # Embedding NOT spent because a Matryoshka grow-back restored the vectors
+    # from the archive instead of calling the provider. Replayed from what the
+    # files originally cost, so it is a measurement like every other saving.
+    saved_embedding_tokens: Mapped[int | None] = mapped_column(Integer)
+    saved_embedding_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
     cache_layer: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

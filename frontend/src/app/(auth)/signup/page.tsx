@@ -4,6 +4,7 @@ import { ArrowRightIcon as ArrowRight} from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useCallback, useState } from "react"
+import { api } from "@/lib/api"
 import { toast } from "@/lib/toast"
 
 import { AuthShell } from "@/components/auth-shell"
@@ -20,6 +21,26 @@ import { passwordFailures } from "@/lib/password"
 import { createClient } from "@/lib/supabase/client"
 
 const FIELD = "h-11 sm:h-12 rounded-xl bg-muted/50"
+
+/**
+ * Tell the backend to register this account with Langfuse.
+ *
+ * Fired from BOTH signup success paths - the immediate-session one and the
+ * email-confirmation one - because those are the two moments a new account
+ * first holds a session, and the endpoint needs one to know who it is.
+ *
+ * Swallows its own failure on purpose. Observability is bookkeeping; a signup
+ * that worked must never look like it failed because a tracing backend was
+ * unreachable. The endpoint is idempotent, and any query the account makes
+ * later would register it anyway - this only makes it appear immediately.
+ */
+async function registerObservability(): Promise<void> {
+  try {
+    await api("/api/account/observability", { method: "POST" })
+  } catch {
+    // deliberately ignored - see above
+  }
+}
 
 export default function SignupPage() {
   const router = useRouter()
@@ -62,6 +83,7 @@ export default function SignupPage() {
         return
       }
       toast.success("Email confirmed - welcome to Oreag")
+      void registerObservability()
       router.replace("/dashboard")  // see login/page.tsx: never leave signup in history
       router.refresh()
     },
@@ -113,6 +135,7 @@ export default function SignupPage() {
     }
     if (data.session) {
       // email confirmation disabled - signed in immediately
+      void registerObservability()
       router.replace("/dashboard")  // see login/page.tsx: never leave signup in history
       router.refresh()
     } else {
