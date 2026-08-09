@@ -13,6 +13,24 @@ const nextConfig: NextConfig = {
       "@phosphor-icons/react/dist/ssr",
     ],
   },
+  async rewrites() {
+    return [
+      // Serve the LikeC4 viewer's entry point at a clean /architecture.
+      //
+      // Next does NOT map a directory in public/ to its index.html: the built
+      // viewer answers /architecture/index.html but /architecture is a plain
+      // 404, and Next's trailing-slash normalisation redirects /architecture/
+      // straight into that 404. One rewrite, scoped to this exact path.
+      //
+      // Declared here rather than in vercel.json so it also applies to
+      // `next dev` and `next start` - a rewrite that only exists on the
+      // platform cannot be tested before it is live.
+      {
+        source: "/architecture",
+        destination: "/architecture/index.html",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

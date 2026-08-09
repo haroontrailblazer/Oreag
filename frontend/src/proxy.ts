@@ -130,10 +130,15 @@ export const config = {
     // manifest). Those render with NO file extension, so without listing them
     // here the auth check below redirects unauthenticated social crawlers to
     // /login - which is why the OG preview image never loaded.
-    // `c4` is in the extension list for the same reason the image types are:
-    // public/architecture.c4 is a static asset, and without it here an
-    // unauthenticated request for the architecture model is answered with a
-    // redirect to /login instead of the file.
-    "/((?!_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|icon|apple-icon|sitemap\\.xml|robots\\.txt|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|c4)$).*)",
+    // `architecture` is the LikeC4 viewer: a static SPA under public/, so it
+    // never touches Next's router and has no session to check. Matched as a
+    // PREFIX because its index.html has no extension - the extension list
+    // below would never exempt it, and an unauthenticated visitor to the
+    // architecture diagram would be answered with the sign-in page.
+    //
+    // `c4`, `js` and `css` join the extension list for the same reason the
+    // image types are there: the viewer loads its own bundles from
+    // /architecture/assets, and the raw model is served at /architecture.c4.
+    "/((?!architecture|_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|icon|apple-icon|sitemap\\.xml|robots\\.txt|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|c4|js|css)$).*)",
   ],
 }

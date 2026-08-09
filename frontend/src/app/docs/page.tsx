@@ -63,12 +63,13 @@ export default function DocsPage() {
             </Link>
           </div>
           <div className="flex shrink-0 items-center gap-4 sm:gap-5">
-            {/* The LikeC4 model behind the system, served as plain text so it
-                opens in the browser rather than downloading (see vercel.json).
-                A plain <a>, not next/link: this is a static asset outside the
-                router, and prefetching it would pull 70KB nobody asked for. */}
+            {/* The interactive LikeC4 viewer, built from the model at deploy
+                time (frontend/scripts/sync-architecture.mjs). A plain <a>, not
+                next/link: it is a static SPA outside Next's router, so
+                prefetching it would pull a multi-megabyte bundle nobody asked
+                for. The raw model stays available at /architecture.c4. */}
             <a
-              href="/architecture.c4"
+              href="/architecture/"
               className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               Architecture
