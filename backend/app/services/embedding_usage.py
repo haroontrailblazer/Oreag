@@ -53,6 +53,13 @@ class EmbeddingUsage:
         self._by_model: dict[str, int] = {}
         self._calls = 0
         self._unmeasured_calls = 0
+        # Auxiliary LLM usage collected in the same scope: image captioning and
+        # audio transcription during ingest. They belong here for exactly the
+        # reason embeddings do - the call happens deep inside a pipeline whose
+        # return value is markdown, not usage, so there is no way to thread the
+        # numbers back up. Kept in a SEPARATE field because they are chat
+        # tokens, priced by the chat table, not embedding tokens.
+        self._llm = TokenUsage()
 
     def record(self, model: str, tokens: int | None) -> None:
         with self._lock:
@@ -64,6 +71,16 @@ class EmbeddingUsage:
                 self._unmeasured_calls += 1
                 return
             self._by_model[model] = self._by_model.get(model, 0) + tokens
+
+    def record_llm(self, usage: TokenUsage) -> None:
+        with self._lock:
+            self._llm = self._llm + usage
+
+    @property
+    def llm_total(self) -> TokenUsage:
+        """Chat tokens spent inside this scope (captioning, transcription)."""
+        with self._lock:
+            return self._llm
 
     @property
     def by_model(self) -> dict[str, int]:
@@ -154,3 +171,20 @@ def record(model: str, tokens: int | None) -> None:
         acc.record(model, tokens)
     except Exception:
         logger.debug("Embedding usage record failed", exc_info=True)
+
+
+def record_llm(usage: TokenUsage) -> None:
+    """Called by image captioning and audio transcription during ingest.
+
+    Same contract as `record`: a no-op outside a scope, never raises. These
+    were the last unmetered spend in the product - a scanned PDF captions every
+    page through a vision model, which for an image-heavy document costs more
+    than embedding it.
+    """
+    acc = _current.get()
+    if acc is None or usage is None or not usage.known:
+        return
+    try:
+        acc.record_llm(usage)
+    except Exception:
+        logger.debug("LLM usage record failed", exc_info=True)

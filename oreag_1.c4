@@ -374,7 +374,8 @@ model {
             two-criteria 'groundedness judges the ANSWER, relevance judges the SOURCES. Keeping them apart is what separates a retrieval problem from a generation problem. A judge with ten criteria returns ten mediocre numbers.'
             cache-hits-skipped 'a cached answer came from a run that was already eligible for judging, so scoring it again spends real money re-evaluating text nothing has changed about.'
             scores-not-local 'scores attach to the trace, so a bad score is one click from the question, the chunks and the answer. Stored in our own table they would be numbers with nothing to look at.'
-            after-the-answer 'runs as a background task once the response has been sent. A judge that fails, times out or returns nonsense must never affect an answer the user already has.'
+            after-the-answer 'runs on its own daemon thread with its own session once the response is sent - the same mechanism from both query routes, so the streaming one (whose SSE connection is still open) behaves like the buffered one. A judge that fails, times out or returns nonsense must never affect an answer the user already has.'
+            both-routes 'streamed answers went unjudged at first: the trace id has to be read INSIDE the trace context, and the answer and sources only exist assembled in the terminal done frame, since the tokens went out one at a time.'
           }
         }
         mfa = component 'Two-Factor Enforcement' 'Decides whether an access token that has not cleared a second factor may be used. The prompt in the browser is a courtesy; this is the control.' {

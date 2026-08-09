@@ -393,10 +393,10 @@ class UsageCaveats(BaseModel):
 
     unmeasured_requests: int  # rows whose provider reported no token usage
     unmeasured_models: list[str]  # distinct models on those rows
-    # Embedding IS now metered end to end - ingest included. What remains
-    # outside the numbers is image captioning and audio transcription, which
-    # build their SDK clients directly instead of going through the provider
-    # factory, so no wrapper sees them.
+    # Kept in the contract, now normally False: embedding, image captioning and
+    # audio transcription are all metered. It stays True only where a vendor
+    # reports no usage for those calls (Whisper and Sarvam STT return none), so
+    # the page can still say what it could not see rather than implying free.
     vision_and_audio_excluded: bool
 
 

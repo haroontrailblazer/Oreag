@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..models import Chunk, File, Project
+from ..providers.base import usage_from_openai
 from . import embedding_usage
 from .usage import record_usage
 from ..providers import registry, resolver
@@ -38,6 +39,59 @@ logger = logging.getLogger(__name__)
 GEMINI_OPENAI_COMPAT_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 
+
+class _MeteredVisionClient:
+    """Wraps the OpenAI client handed to MarkItDown so captioning is metered.
+
+    MarkItDown makes the captioning call ITSELF - we only supply the client -
+    so there is no return value to read `usage` from. Intercepting
+    `chat.completions.create` is the only place the response is visible.
+
+    Delegates everything else untouched via __getattr__, so this stays correct
+    if MarkItDown starts using another part of the client.
+
+    Image captioning was the last unmetered spend in the product, and it is not
+    small: a scanned PDF captions EVERY page through a vision model, which for
+    an image-heavy document costs more than embedding it.
+    """
+
+    def __init__(self, client, model: str):
+        self._client = client
+        self._model = model
+        self.chat = _MeteredChat(client.chat, model)
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
+class _MeteredChat:
+    def __init__(self, chat, model: str):
+        self._chat = chat
+        self.completions = _MeteredCompletions(chat.completions, model)
+
+    def __getattr__(self, name):
+        return getattr(self._chat, name)
+
+
+class _MeteredCompletions:
+    def __init__(self, completions, model: str):
+        self._completions = completions
+        self._model = model
+
+    def create(self, *args, **kwargs):
+        resp = self._completions.create(*args, **kwargs)
+        try:
+            embedding_usage.record_llm(
+                usage_from_openai(resp, kwargs.get("model") or self._model)
+            )
+        except Exception:
+            logger.debug("Could not meter a captioning call", exc_info=True)
+        return resp
+
+    def __getattr__(self, name):
+        return getattr(self._completions, name)
+
+
 def vision_llm_for(project: Project, api_key: str | None):
     """(client, model) for MarkItDown image captioning, or (None, None).
 
@@ -55,7 +109,7 @@ def vision_llm_for(project: Project, api_key: str | None):
         from openai import OpenAI
 
         client = OpenAI(api_key=api_key, timeout=GENERATE_TIMEOUT, max_retries=MAX_RETRIES)
-        return client, project.llm_model
+        return _MeteredVisionClient(client, project.llm_model), project.llm_model
     if project.llm_provider == "gemini":
         # No key-prefix skip here. "AQ." keys used to be refused captioning
         # outright on the belief they were Vertex-only; they are ordinary AI
@@ -73,7 +127,7 @@ def vision_llm_for(project: Project, api_key: str | None):
             timeout=GENERATE_TIMEOUT,
             max_retries=MAX_RETRIES,
         )
-        return client, project.llm_model
+        return _MeteredVisionClient(client, project.llm_model), project.llm_model
     return None, None
 
 
@@ -238,7 +292,12 @@ def ingest_file(file_id: uuid.UUID) -> None:
 
 def _record_ingest_usage(file_id: uuid.UUID, embedding) -> None:
     """Write the usage row for one ingest. Never raises - see services/usage."""
-    if embedding is None or not embedding.total.known:
+    # EITHER side is enough to be worth a row: an audio file spends only on
+    # transcription and embeds a short transcript; an image-heavy PDF spends
+    # most of its money on captioning.
+    if embedding is None or not (
+        embedding.total.known or embedding.llm_total.known
+    ):
         return
     db = SessionLocal()
     try:
@@ -257,6 +316,10 @@ def _record_ingest_usage(file_id: uuid.UUID, embedding) -> None:
             api_key_id=None,
             endpoint="file_ingest",
             embedding=embedding.total,
+            # Image captioning and audio transcription: real chat calls on the
+            # user's own key, priced by the chat table. They were the last
+            # unmetered spend in the product.
+            usage=embedding.llm_total if embedding.llm_total.known else None,
         )
         # Stamped on the file too, not only on the usage row: a Matryoshka
         # grow-back restores THIS file's vectors from the archive and needs to

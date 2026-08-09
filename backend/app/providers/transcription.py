@@ -17,6 +17,7 @@ Anthropic, xAI, DeepSeek, Cohere and Azure* have no usable STT surface here.
 """
 import io
 import logging
+import logging
 from pathlib import Path
 
 import httpx
@@ -46,9 +47,33 @@ _MIME = {
     ".m4a": "audio/aac",  # AAC-in-MP4; closest type Gemini accepts inline
 }
 
+from .base import usage_from_gemini, usage_from_openai
+
+logger = logging.getLogger(__name__)
 
 def _audio_mime(filename: str) -> str:
     return _MIME.get(Path(filename).suffix.lower(), "audio/mp3")
+
+
+
+def _record(resp, model: str) -> None:
+    """Meter one transcription call. Never raises - metering must not be able
+    to break an ingest that is otherwise succeeding."""
+    try:
+        from ..services import embedding_usage
+
+        embedding_usage.record_llm(usage_from_openai(resp, model))
+    except Exception:
+        logger.debug("Could not meter a transcription", exc_info=True)
+
+
+def _record_gemini(resp, model: str) -> None:
+    try:
+        from ..services import embedding_usage
+
+        embedding_usage.record_llm(usage_from_gemini(resp, model))
+    except Exception:
+        logger.debug("Could not meter a transcription", exc_info=True)
 
 
 def _openai_style_transcriber(api_key: str, base_url: str | None, model: str):
@@ -67,6 +92,10 @@ def _openai_style_transcriber(api_key: str, base_url: str | None, model: str):
         resp = client.audio.transcriptions.create(
             model=model, file=(filename, io.BytesIO(data))
         )
+        # whisper-1 reports no usage at all; the gpt-4o-transcribe family does.
+        # Recording whatever arrives keeps the honest split: measured where the
+        # vendor says so, NULL where it does not - never a fabricated zero.
+        _record(resp, model)
         return (getattr(resp, "text", None) or "").strip() or None
 
     return transcribe
@@ -87,6 +116,7 @@ def _gemini_transcriber(api_key: str, model: str):
                 "nothing else.",
             ],
         )
+        _record_gemini(resp, model)
         return (resp.text or "").strip() or None
 
     return transcribe

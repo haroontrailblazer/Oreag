@@ -13,6 +13,23 @@ import inspect
 from app.services import ingestion
 
 
+class _FakeSession:
+    """Just enough session for _record_ingest_usage's lookups."""
+
+    def get(self, model, ident):
+        import types
+
+        return types.SimpleNamespace(
+            id=ident, project_id="p", embedding_tokens=None, owner_id="o"
+        )
+
+    def commit(self):
+        pass
+
+    def close(self):
+        pass
+
+
 class TestIngestOpensItsOwnScope:
     def test_ingest_file_wraps_the_work_in_an_embedding_scope(self):
         """The middleware cannot reach a worker thread; ingest must scope
@@ -36,7 +53,35 @@ class TestIngestOpensItsOwnScope:
     def test_unmeasured_ingest_writes_nothing(self):
         """A local embedder reports no tokens; that must stay NULL, not 0."""
         src = inspect.getsource(ingestion._record_ingest_usage)
-        assert "not embedding.total.known" in src
+        assert "embedding.total.known" in src
+        assert "embedding.llm_total.known" in src
+
+    def test_captioning_alone_is_enough_to_write_a_row(self, monkeypatch):
+        """An audio file spends on transcription and embeds a short transcript;
+        an image-heavy PDF spends most of its money on captioning. Requiring
+        BOTH sides would drop whichever one actually carried the cost."""
+        from app.providers.base import TokenUsage
+        from app.services import embedding_usage
+
+        written = []
+        monkeypatch.setattr(ingestion, "record_usage",
+                            lambda db, **kw: written.append(kw))
+        monkeypatch.setattr(ingestion, "SessionLocal", lambda: _FakeSession())
+
+        with embedding_usage.scope() as acc:
+            embedding_usage.record_llm(TokenUsage(900, 40, "gpt-4o-mini"))
+            ingestion._record_ingest_usage("fid", acc)
+
+        assert written, "captioning-only ingest wrote no usage row"
+        assert written[0]["usage"] == TokenUsage(900, 40, "gpt-4o-mini")
+        # No embedding happened, so that side stays unmeasured rather than 0.
+        assert not written[0]["embedding"].known
+
+    def test_nothing_measured_writes_nothing(self):
+        from app.services import embedding_usage
+
+        with embedding_usage.scope() as acc:
+            assert acc.total.known is False and acc.llm_total.known is False
 
 
 class TestMatryoshkaRestoreSaving:

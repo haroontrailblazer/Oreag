@@ -185,7 +185,38 @@ class TestWiring:
     def test_the_judge_is_metered_under_its_own_endpoint(self):
         """Folded into "query" it would be an invisible cost the user cannot
         decide to stop paying."""
-        assert 'endpoint="judge"' in self._src()
+        assert 'endpoint="judge"' in inspect.getsource(judges.schedule)
 
-    def test_it_runs_in_the_background(self):
-        assert "background.add_task" in self._src()
+    def test_it_never_blocks_the_caller(self):
+        """`/query/stream` calls this while its SSE connection is still open;
+        blocking would hold that connection for an evaluation the client is
+        not waiting for."""
+        src = inspect.getsource(judges.schedule)
+        assert "daemon=True" in src
+        assert "threading.Thread" in src
+
+    def test_it_owns_its_session(self):
+        """One mechanism for both routes means one lifetime to reason about,
+        instead of depending on when each route's request session closes."""
+        src = inspect.getsource(judges.schedule)
+        assert "SessionLocal()" in src
+        assert "db.close()" in src
+
+    def test_both_query_routes_schedule_a_judge(self):
+        from app.routers import rag_v1
+
+        buffered = inspect.getsource(rag_v1.public_query)
+        streamed = inspect.getsource(rag_v1.public_query_stream)
+        assert "_maybe_judge" in buffered
+        assert "_maybe_judge" in streamed, "streamed answers went unjudged"
+
+    def test_the_stream_reads_its_trace_id_inside_the_trace(self):
+        """Outside the context there is no current trace, so a judge scheduled
+        afterwards has nowhere to attach - the original defect."""
+        from app.routers import rag_v1
+
+        src = inspect.getsource(rag_v1.public_query_stream)
+        trace_at = src.index("tracing.query_trace(")
+        id_at = src.index('usage_out["trace_id"]')
+        finally_at = src.index("finally:")
+        assert trace_at < id_at < finally_at

@@ -3,7 +3,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi import File as FastAPIFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
@@ -63,7 +63,6 @@ def _get_project(db: Session, project_id: uuid.UUID) -> Project:
 def public_query(
     project_id: uuid.UUID,
     body: QueryRequest,
-    background: BackgroundTasks,
     api_key: ApiKey = Depends(require_api_key),
     db: Session = Depends(get_db),
 ):
@@ -110,47 +109,46 @@ def public_query(
         cache_layer=usage_out.get("cache_layer"),
     )
     # Judged AFTER the row is written and only on a sampled slice - see
-    # services/judges. A background task so the caller never waits for an
-    # evaluation of an answer they already have.
-    _maybe_judge(background, db, project, body.question, response, usage_out)
+    # services/judges. Scheduled onto its own thread so the caller never waits
+    # for an evaluation of an answer they already have.
+    usage_out["project_id"] = project.id
+    _maybe_judge(
+        project,
+        body.question,
+        response.answer,
+        [s.model_dump() if hasattr(s, "model_dump") else dict(s)
+         for s in response.sources],
+        usage_out,
+    )
     return response
 
 
-def _maybe_judge(background, db, project, question, response, usage_out) -> None:
+def _maybe_judge(project, question, answer, sources, usage_out) -> None:
     """Queue an LLM-as-judge pass for this answer, if it was sampled.
 
     A cache hit is skipped deliberately: the answer came from a previous run
     that was already eligible for judging, so scoring it again would spend real
     money re-evaluating text nothing has changed about.
+
+    Both query routes funnel through here, and `judges.schedule` owns the
+    thread and the session - so the streaming route, whose response is still
+    open when this is called, behaves identically to the buffered one.
     """
     if usage_out.get("cache_layer") is not None:
         return
     if not judges.should_judge():
         return
     trace_id = usage_out.get("trace_id")
-    if not trace_id:
+    project_id = usage_out.get("project_id")
+    if not trace_id or not project_id:
         return
-
-    def run() -> None:
-        judge_usage = judges.judge_answer(
-            db,
-            project,
-            question=question,
-            answer=response.answer or "",
-            sources=[s.model_dump() if hasattr(s, "model_dump") else dict(s)
-                     for s in response.sources],
-            trace_id=trace_id,
-        )
-        if judge_usage is not None:
-            # Its own endpoint, never folded into "query": the judge is a cost
-            # the user can choose to stop paying, and that decision needs the
-            # number to be visible on its own.
-            record_usage(
-                db, project=project, api_key_id=None,
-                endpoint="judge", usage=judge_usage,
-            )
-
-    background.add_task(run)
+    judges.schedule(
+        project_id,
+        question=question,
+        answer=answer or "",
+        sources=sources,
+        trace_id=trace_id,
+    )
 
 
 @router.post("/query/stream")
@@ -195,8 +193,20 @@ def public_query_stream(
             api_key_id=api_key.id,
             conversation_id=body.conversation_id,
         ):
+            # Read INSIDE the trace context: once it exits there is no current
+            # trace, and a judge scheduled afterwards would have nothing to
+            # attach its scores to. This is why streamed answers went unjudged.
+            usage_out["trace_id"] = tracing.current_trace_id()
+            usage_out["project_id"] = project.id
+            final: dict = {}
             try:
-                yield from events
+                for event in events:
+                    # The terminal frame carries the whole answer and its
+                    # sources - the only place the streaming path has them
+                    # assembled, since the tokens went out one at a time.
+                    if event.get("type") == "done":
+                        final = event.get("response") or {}
+                    yield event
             finally:
                 # Runs on normal completion AND when the client disconnects
                 # (GeneratorExit) - the row then carries whatever was measured
@@ -210,6 +220,13 @@ def public_query_stream(
                     usage=usage_out.get("usage"),
                     saved=usage_out.get("saved"),
                     cache_layer=usage_out.get("cache_layer"),
+                )
+                _maybe_judge(
+                    project,
+                    body.question,
+                    final.get("answer") or "",
+                    final.get("sources") or [],
+                    usage_out,
                 )
 
     return sse_response(stream_and_record())

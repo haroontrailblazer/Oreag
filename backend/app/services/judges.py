@@ -227,3 +227,47 @@ def ensure_score_configs() -> None:
         except Exception:
             # A duplicate is a 409 and is exactly as fine as a 200.
             logger.debug("Score config %s not created", name, exc_info=True)
+
+
+def schedule(project_id, *, question: str, answer: str, sources: list[dict],
+             trace_id: str) -> None:
+    """Run a judge pass on a daemon thread, with its OWN database session.
+
+    A thread rather than the caller's context, and a fresh session rather than
+    the request's, because this has to work identically from BOTH query routes:
+
+      * `/query` returns and its response is done;
+      * `/query/stream` is still holding an open SSE connection, and blocking
+        in the generator's `finally` would keep that connection open while an
+        evaluation the client is not waiting for runs.
+
+    Sharing one mechanism means there is one lifetime to reason about instead
+    of two. Fire-and-forget: nothing observes the result except Langfuse.
+    """
+    import threading
+
+    def run() -> None:
+        from ..db import SessionLocal
+        from ..models import Project
+        from .usage import record_usage
+
+        db = SessionLocal()
+        try:
+            project = db.get(Project, project_id)
+            if project is None:
+                return
+            usage = judge_answer(
+                db, project, question=question, answer=answer,
+                sources=sources, trace_id=trace_id,
+            )
+            if usage is not None:
+                record_usage(
+                    db, project=project, api_key_id=None,
+                    endpoint="judge", usage=usage,
+                )
+        except Exception:
+            logger.debug("Judge task failed", exc_info=True)
+        finally:
+            db.close()
+
+    threading.Thread(target=run, name="oreag-judge", daemon=True).start()
