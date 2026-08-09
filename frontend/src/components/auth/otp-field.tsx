@@ -80,6 +80,7 @@ export function OtpField({
   length?: number
 }) {
   const LENGTH = length
+  const complete = value.length === LENGTH && DIGITS.test(value)
   const inputs = useRef<Array<HTMLInputElement | null>>([])
   // Guards against firing onComplete twice for the same code - React can
   // re-render between the state update and the effect on a fast paste.
@@ -164,46 +165,64 @@ export function OtpField({
     <div
       role="group"
       aria-label={label}
+      data-invalid={invalid || undefined}
       className={cn(
-        "flex items-center justify-center",
+        "otp-field flex items-center justify-center",
         LENGTH > 6 ? "gap-1 sm:gap-1.5" : "gap-2 sm:gap-2.5"
       )}
     >
-      {Array.from({ length: LENGTH }, (_, i) => (
-        <input
-          key={i}
-          ref={(el) => {
-            inputs.current[i] = el
-          }}
-          // type=text + inputMode=numeric, never type=number: number inputs
-          // add spinners, accept "e"/"+"/"-", and silently reject leading zeros
-          // in some browsers.
-          type="text"
-          inputMode="numeric"
-          pattern="\d*"
-          maxLength={LENGTH}
-          // Only the first box advertises one-time-code; repeating it makes
-          // iOS offer the same autofill once per box.
-          autoComplete={i === 0 ? "one-time-code" : "off"}
-          aria-label={`${label}, digit ${i + 1} of ${LENGTH}`}
-          aria-invalid={invalid || undefined}
-          disabled={disabled}
-          value={value[i] ?? ""}
-          onChange={(e) => handleChange(i, e.target.value)}
-          onKeyDown={(e) => handleKeyDown(i, e)}
-          onPaste={handlePaste}
-          onFocus={(e) => e.currentTarget.select()}
-          className={cn(
-            "rounded-xl border bg-muted/50 text-center font-mono tabular-nums transition-colors",
-            LENGTH > 6
-              ? "size-9 text-base sm:size-11 sm:text-lg"
-              : "size-11 text-lg sm:size-12 sm:text-xl",
-            "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
-            "disabled:cursor-not-allowed disabled:opacity-60",
-            invalid && "border-destructive text-destructive focus-visible:ring-destructive/40"
-          )}
-        />
-      ))}
+      {Array.from({ length: LENGTH }, (_, i) => {
+        const digit = value[i] ?? ""
+
+        return (
+          <span key={i} className="relative isolate">
+            <input
+              ref={(el) => {
+                inputs.current[i] = el
+              }}
+              // type=text + inputMode=numeric, never type=number: number inputs
+              // add spinners, accept "e"/"+"/"-", and silently reject leading zeros
+              // in some browsers.
+              type="text"
+              inputMode="numeric"
+              pattern="\d*"
+              maxLength={LENGTH}
+              // Only the first box advertises one-time-code; repeating it makes
+              // iOS offer the same autofill once per box.
+              autoComplete={i === 0 ? "one-time-code" : "off"}
+              aria-label={`${label}, digit ${i + 1} of ${LENGTH}`}
+              aria-invalid={invalid || undefined}
+              data-filled={digit ? "true" : undefined}
+              disabled={disabled}
+              value={digit}
+              onChange={(e) => handleChange(i, e.target.value)}
+              onKeyDown={(e) => handleKeyDown(i, e)}
+              onPaste={handlePaste}
+              onFocus={(e) => e.currentTarget.select()}
+              className={cn(
+                "otp-slot-input relative z-10 rounded-xl border bg-muted/50 text-center font-mono tabular-nums",
+                "transition-[transform,box-shadow,border-color,background-color,color] duration-200 ease-out",
+                LENGTH > 6
+                  ? "size-9 text-base sm:size-11 sm:text-lg"
+                  : "size-11 text-lg sm:size-12 sm:text-xl",
+                "focus-visible:-translate-y-0.5 focus-visible:scale-[1.035] focus-visible:border-ring focus-visible:bg-background focus-visible:ring-[3px] focus-visible:ring-ring/45 focus-visible:shadow-lg focus-visible:outline-none",
+                "disabled:cursor-not-allowed disabled:opacity-60",
+                digit && !invalid && "border-foreground/20 bg-background shadow-sm",
+                invalid &&
+                  "border-destructive text-destructive focus-visible:ring-destructive/40"
+              )}
+            />
+            {complete ? (
+              <span
+                key={`${value}-${i}`}
+                aria-hidden="true"
+                className="otp-complete-sweep pointer-events-none absolute inset-0 z-20 rounded-xl"
+                style={{ animationDelay: `${i * 45}ms` }}
+              />
+            ) : null}
+          </span>
+        )
+      })}
     </div>
   )
 }

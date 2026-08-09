@@ -43,6 +43,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TextScrambleEffect } from "@/components/ui/text-scramble-effect"
 import {
   Table,
   TableBody,
@@ -167,6 +168,13 @@ function MetricTile({
   format?: "number" | "cost"
   className?: string
 }) {
+  const formattedValue =
+    value == null
+      ? null
+      : format === "cost"
+        ? formatCost(value)
+        : compactFmt.format(value)
+
   return (
     <Card className={cn("relative gap-3 overflow-hidden py-4", className)}>
       <span
@@ -188,11 +196,12 @@ function MetricTile({
             Not measured
           </div>
         ) : (
-          <div
-            className="text-2xl font-semibold tracking-tight"
-            title={format === "cost" ? formatCost(value) : intFmt.format(value)}
-          >
-            {format === "cost" ? formatCost(value) : compactFmt.format(value)}
+          <div className="text-2xl font-semibold tracking-tight">
+            <TextScrambleEffect
+              key={formattedValue}
+              text={formattedValue ?? ""}
+              className="font-mono tabular-nums"
+            />
           </div>
         )}
       </CardContent>
