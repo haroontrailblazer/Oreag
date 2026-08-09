@@ -9,6 +9,7 @@ import { DocsMobileNav } from "./docs-mobile-nav"
 import { DocsOnThisPage } from "./docs-on-this-page"
 import { DocsSidebar } from "./docs-sidebar"
 import { Markdown } from "./markdown"
+import { ogImages } from "@/lib/og-image"
 
 const DOCS_TITLE = "Documentation - Oreag"
 const DOCS_DESCRIPTION =
@@ -23,13 +24,19 @@ export const metadata: Metadata = {
   // Next.js merges metadata from the root layout, but a page's own title and
   // description do NOT flow into the inherited openGraph block - so this page
   // rendered <title>Documentation - Oreag</title> while sharing to LinkedIn and
-  // WhatsApp as "Oreag - RAG & Memory as a Service". The image and siteName
-  // still come from the root, which is the intent: one brand card, per-page
-  // words.
+  // WhatsApp as "Oreag - RAG & Memory as a Service".
+  //
+  // And `images` MUST be restated too: declaring openGraph here REPLACES the
+  // root's block outright rather than merging into it, so omitting them left
+  // this page with no preview image at all - silently, since the title looked
+  // right. Hence ogImages(), the single definition every page shares.
   openGraph: {
     title: DOCS_TITLE,
     description: DOCS_DESCRIPTION,
     url: "/docs",
+    siteName: "Oreag",
+    type: "website",
+    images: ogImages(),
   },
   twitter: {
     title: DOCS_TITLE,

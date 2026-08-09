@@ -45,3 +45,28 @@ export function ogImagePath(): string {
   const version = contentVersion()
   return version ? `/${OG_IMAGE_FILE}?v=${version}` : `/${OG_IMAGE_FILE}`
 }
+
+
+/**
+ * The `openGraph.images` array, ready to spread into any page's metadata.
+ *
+ * Next.js REPLACES an inherited `openGraph` block rather than deep-merging it:
+ * the moment a page declares its own `openGraph` (say, to fix its title), the
+ * root layout's `images` vanish and that page shares with no picture at all.
+ * That is not obvious, and it is silent - the page still renders a correct
+ * <title>. Every page that sets openGraph must therefore restate the images,
+ * and this is the one definition they all restate from.
+ */
+export function ogImages() {
+  const path = ogImagePath()
+  return [
+    {
+      url: path,
+      secureUrl: `https://oreag.vercel.app${path}`,
+      width: OG_IMAGE_WIDTH,
+      height: OG_IMAGE_HEIGHT,
+      type: OG_IMAGE_TYPE,
+      alt: OG_IMAGE_ALT,
+    },
+  ]
+}

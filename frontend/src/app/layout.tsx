@@ -14,13 +14,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-import {
-  OG_IMAGE_ALT,
-  OG_IMAGE_HEIGHT,
-  OG_IMAGE_TYPE,
-  OG_IMAGE_WIDTH,
-  ogImagePath,
-} from "@/lib/og-image";
+import { ogImagePath, ogImages } from "@/lib/og-image";
 
 const ogImage = ogImagePath();
 
@@ -47,16 +41,7 @@ export const metadata: Metadata = {
       "Turn your documents into a queryable RAG API with a built-in memory graph.",
     siteName: "Oreag",
     type: "website",
-    images: [
-      {
-        url: ogImage,
-        secureUrl: `https://oreag.vercel.app${ogImage}`,
-        width: OG_IMAGE_WIDTH,
-        height: OG_IMAGE_HEIGHT,
-        type: OG_IMAGE_TYPE,
-        alt: OG_IMAGE_ALT,
-      },
-    ],
+    images: ogImages(),
   },
   twitter: {
     card: "summary_large_image",
