@@ -48,6 +48,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import {
   DEFAULT_USAGE_WINDOW,
+  USAGE_REFRESH_MS,
   USAGE_WINDOWS,
   usageKey,
   type UsageWindow,
@@ -712,7 +713,7 @@ function ModelsTable({
         <CardTitle className="text-base">By model</CardTitle>
         <CardDescription>
           Token spend per model, across every key on this account. Embedders
-          are tagged - their tokens are far cheaper than an LLM's, so the two
+          are tagged - their tokens are far cheaper than an LLM&apos;s, so the two
           are never summed into one figure.
         </CardDescription>
       </CardHeader>
@@ -940,9 +941,14 @@ export function UsageDashboard() {
   const { data, error, isLoading } = useSWR<AccountUsage>(
     usageKey(days),
     fetcher,
-    // Hold the previous window's render while the new one loads - no skeleton
-    // flash, no layout jump; the content just dims briefly (below).
-    { keepPreviousData: true }
+    {
+      // Hold the previous window's render while the new one loads - no skeleton
+      // flash, no layout jump; the content just dims briefly (below).
+      keepPreviousData: true,
+      // Poll the window actually on screen. The sidebar polls the default one
+      // wherever the user is; this covers 7 and 90 while they are selected.
+      refreshInterval: USAGE_REFRESH_MS,
+    }
   )
 
   return (

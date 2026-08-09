@@ -35,7 +35,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { fetcher } from "@/lib/api"
-import { warmSettingsData } from "@/lib/settings-data"
+import {
+  DEFAULT_USAGE_WINDOW,
+  USAGE_REFRESH_MS,
+  usageKey,
+  warmSettingsData,
+} from "@/lib/settings-data"
 import { useProjectNavPending } from "@/lib/nav-pending"
 import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -280,6 +285,21 @@ function SidebarBody() {
     const timer = setTimeout(() => setLoadingFileId(null), 1100)
     return () => clearTimeout(timer)
   }, [loadingFileId])
+
+  // Keep the account usage rollup advancing wherever the user is.
+  //
+  // SWR only polls for MOUNTED subscribers, so a refreshInterval on the Usage
+  // page alone stops the moment that page unmounts - the numbers would then be
+  // as old as the last visit. Declared here for the same reason the project
+  // list is: the sidebar is on every signed-in page, and it shares this SWR key
+  // with the page, so one poll serves both.
+  //
+  // Only the default window. The page fetches 7/90 on demand and polls
+  // whichever one is on screen; polling all three here would triple the cost
+  // of a rollup nobody is looking at.
+  useSWR(usageKey(DEFAULT_USAGE_WINDOW), fetcher, {
+    refreshInterval: USAGE_REFRESH_MS,
+  })
 
   // Fill the Settings caches while the user is still looking at the dashboard.
   //

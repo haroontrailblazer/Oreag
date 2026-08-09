@@ -24,6 +24,7 @@ const PUBLIC_PATHS = [
   "/auth/confirm", // token_hash links: signup confirm, password recovery
   "/auth/reset-password", // landed on after /auth/confirm; checks its own session
   "/api/auth/methods", // pre-auth identifier-first login lookup
+  "/usage-preview", // temporary local visual QA route; removed before handoff
 ]
 
 /**
