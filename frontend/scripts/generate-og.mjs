@@ -1,4 +1,4 @@
-// Render the brand OG card to public/og.png. Run:
+// Render the brand OG card to public/oreag-og-v2.jpg. Run:
 // `node scripts/generate-og.mjs`
 //
 // The composition mirrors the landing page: its painterly document-work scene
@@ -26,6 +26,7 @@ const { ImageResponse } = require(
     "image-response.js"
   )
 )
+const sharp = require("sharp")
 
 const h = React.createElement
 
@@ -182,7 +183,10 @@ const element = h(
 )
 
 const response = new ImageResponse(element, { width: 1200, height: 630 })
-const output = Buffer.from(await response.arrayBuffer())
-const outputPath = join(publicDir, "og.png")
+const renderedPng = Buffer.from(await response.arrayBuffer())
+const output = await sharp(renderedPng)
+  .jpeg({ quality: 82, progressive: true, chromaSubsampling: "4:2:0" })
+  .toBuffer()
+const outputPath = join(publicDir, "oreag-og-v2.jpg")
 writeFileSync(outputPath, output)
 console.log("WROTE", outputPath, output.length, "bytes")
