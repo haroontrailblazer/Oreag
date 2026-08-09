@@ -1,6 +1,9 @@
 """Anthropic Claude provider (chat only - Anthropic has no embedding models)."""
-from .base import ProviderUnavailableError
-from .base import TokenUsage, usage_from_anthropic
+import logging
+
+from .base import ProviderUnavailableError, TokenUsage, usage_from_anthropic
+
+logger = logging.getLogger(__name__)
 
 # Big enough for the agentic loop's long exam-style answers; small enough to
 # stay well under non-streaming SDK timeouts.
@@ -57,7 +60,15 @@ class AnthropicLLM:
         )
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
-        """Yield answer text deltas as Claude produces them."""
+        """Yield answer text deltas as Claude produces them, returning usage.
+
+        Anthropic accumulates usage across the stream's events and exposes the
+        total on `get_final_message()`. It is only complete once the text
+        stream is exhausted, so the call has to come AFTER the loop and still
+        inside the context manager - the previous code exited without ever
+        asking, which is why a streamed Claude answer reported no tokens.
+        """
+        usage = TokenUsage(model=self.model)
         with self.client.messages.stream(
             model=self.model,
             max_tokens=MAX_TOKENS,
@@ -65,3 +76,8 @@ class AnthropicLLM:
             messages=[{"role": "user", "content": user_prompt}],
         ) as stream:
             yield from stream.text_stream
+            try:
+                usage = usage_from_anthropic(stream.get_final_message(), self.model)
+            except Exception:
+                logger.debug("Anthropic stream reported no usage", exc_info=True)
+        return usage

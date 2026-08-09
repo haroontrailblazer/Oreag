@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import Chunk, Memory, Project, QueryLog
 from ..providers import resolver
+from . import embedding_usage
 from ..providers.base import (
     ProviderUnavailableError,
     TokenUsage,
@@ -236,9 +237,28 @@ def _fill_usage_out(
         saved = TokenUsage(
             prompt_tokens=result.gen_prompt_tokens,
             completion_tokens=result.gen_completion_tokens,
+            # Carries the model so record_usage can price the saving exactly.
+            # getattr, not attribute access: entries cached before this field
+            # existed deserialize without it.
+            model=getattr(result, "gen_model", None) or "",
         )
         if saved.known:
             usage_out["saved"] = saved
+
+
+
+def _in_embedding_scope(acc, fn):
+    """Run `fn` on another thread inside the caller's embedding accumulator.
+
+    See services/embedding_usage.adopt - the accumulator has to be re-entered
+    explicitly, because a copied context would tally into a copy the request
+    thread never reads.
+    """
+    def wrapper(*args, **kwargs):
+        with embedding_usage.adopt(acc):
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def run_query(
@@ -405,6 +425,7 @@ def run_query(
                 result,
                 gen_prompt_tokens=fresh_usage.total.prompt_tokens,
                 gen_completion_tokens=fresh_usage.total.completion_tokens,
+                gen_model=fresh_usage.total.model or None,
             )
 
         # Two cache layers, cheapest first. L1 (Redis/in-memory) hits when the
@@ -755,9 +776,17 @@ def run_query_stream(
                 # while the helper uses the db session, so access stays
                 # sequential.
                 executor = ThreadPoolExecutor(max_workers=1)
+                # Retrieval embeds the question on the HELPER thread, and
+                # ContextVars do not cross a ThreadPoolExecutor. Without
+                # re-entering the request's accumulator there, every embedding
+                # token a STREAMED query spends would go unrecorded - the
+                # non-streaming path would meter and this one silently would
+                # not, which is the worst kind of gap because it looks like a
+                # real difference in cost between the two.
+                _emb = embedding_usage.current()
                 try:
                     future = executor.submit(
-                        agentic.gather_context,
+                        _in_embedding_scope(_emb, agentic.gather_context),
                         question=agentic_question,
                         retrieve_fn=retrieve_fn,
                         plan_fn=lambda q: _llm_step(
@@ -807,6 +836,7 @@ def run_query_stream(
                         clarification_questions=ctx.clarification_questions,
                         gen_prompt_tokens=fresh_usage.total.prompt_tokens,
                         gen_completion_tokens=fresh_usage.total.completion_tokens,
+                        gen_model=fresh_usage.total.model or None,
                     )
                 else:
                     acc: list[str] = []
@@ -830,6 +860,7 @@ def run_query_stream(
                         needs_clarification=False,
                         gen_prompt_tokens=fresh_usage.total.prompt_tokens,
                         gen_completion_tokens=fresh_usage.total.completion_tokens,
+                        gen_model=fresh_usage.total.model or None,
                     )
                     if key is not None:
                         _cache.set(key, final)

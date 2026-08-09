@@ -220,6 +220,13 @@ class AgenticResult:
     # pre-existing cache payloads (which lack these keys) deserializable.
     gen_prompt_tokens: int | None = None
     gen_completion_tokens: int | None = None
+    # WHICH model produced the counts above. Without it a cache hit knows how
+    # many tokens it saved but not what they were worth, and the saving could
+    # only be estimated from a blended account-wide rate. With it the hit
+    # prices its own saving exactly, through the same table as a live call.
+    # Deliberately the model of the ORIGINAL run: if the project later switches
+    # models, what was avoided is still what was once actually spent.
+    gen_model: str | None = None
 
 
 @dataclass

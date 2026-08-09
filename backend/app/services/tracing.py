@@ -278,3 +278,71 @@ def query_trace(*, project, question: str, api_key_id=None, conversation_id=None
     except Exception:
         logger.debug("Could not open the query trace", exc_info=True)
         yield None
+
+
+def observed_stream(llm, streamer, system_prompt: str, user_prompt: str, *,
+                    name: str, metadata: dict | None = None):
+    """Record a STREAMED generation, yielding deltas and returning `TokenUsage`.
+
+    A streamed call cannot use `observed_generate`: there is no single moment
+    that produces the whole answer. The span has to stay open for as long as
+    the client keeps reading, and it must be closed even when the client
+    disconnects mid-answer - hence the `finally`, which runs on `GeneratorExit`
+    too. Without it an abandoned stream would leak an unfinished span and its
+    tokens would never be recorded.
+
+    Usage arrives via the streamer's return value, so this is a `yield from`
+    delegate rather than a wrapper: text flows straight through to the caller.
+    """
+    lf = client()
+    model = getattr(llm, "model", "") or ""
+    if lf is None:
+        return (yield from streamer(system_prompt, user_prompt))
+    try:
+        observation = lf.start_as_current_observation(
+            as_type="generation",
+            name=name,
+            model=model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            metadata=metadata or {},
+        )
+    except Exception:
+        logger.debug("Could not open a streamed generation span", exc_info=True)
+        return (yield from streamer(system_prompt, user_prompt))
+
+    from ..providers.base import TokenUsage
+
+    usage = TokenUsage(model=model)
+    chunks: list[str] = []
+    with observation as span:
+        try:
+            gen = streamer(system_prompt, user_prompt)
+            while True:
+                try:
+                    delta = next(gen)
+                except StopIteration as stop:
+                    if isinstance(stop.value, TokenUsage):
+                        usage = stop.value
+                    break
+                chunks.append(delta)
+                yield delta
+        finally:
+            try:
+                update: dict = {"output": "".join(chunks)}
+                if usage.known:
+                    update["usage_details"] = {
+                        "input": usage.prompt_tokens or 0,
+                        "output": usage.completion_tokens or 0,
+                    }
+                else:
+                    update["metadata"] = {
+                        **(metadata or {}),
+                        "token_usage": "not reported for this streamed call",
+                    }
+                span.update(**update)
+            except Exception:
+                logger.debug("Could not annotate a streamed span", exc_info=True)
+    return usage

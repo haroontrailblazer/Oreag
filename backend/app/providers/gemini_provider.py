@@ -2,7 +2,8 @@
 import math
 
 from .base import ProviderUnavailableError, ensure_width
-from .base import TokenUsage, usage_from_gemini
+from ..services import embedding_usage
+from .base import TokenUsage, embedding_tokens_from_gemini, usage_from_gemini
 
 
 def l2_normalize(values: list[float]) -> list[float]:
@@ -94,6 +95,7 @@ class GeminiEmbedder:
                 contents=texts[i : i + self.batch_size],
                 config=config,
             )
+            embedding_usage.record(self.model, embedding_tokens_from_gemini(resp))
             out.extend(l2_normalize(e.values) for e in resp.embeddings)
         return ensure_width(out, self.dimensions, "Gemini", self.model)
 
@@ -128,11 +130,21 @@ class GeminiLLM:
         return resp.text or "", usage_from_gemini(resp, self.model)
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
-        """Yield answer text deltas as Gemini produces them."""
+        """Yield answer text deltas as Gemini produces them, returning usage.
+
+        Gemini repeats `usage_metadata` on chunks with running totals rather
+        than sending one final tally, so the newest reported value wins and the
+        last one seen is the total for the call.
+        """
+        usage = TokenUsage(model=self.model)
         for chunk in self.client.models.generate_content_stream(
             model=self.model,
             contents=user_prompt,
             config=self._config(system_prompt),
         ):
+            found = usage_from_gemini(chunk, self.model)
+            if found.known:
+                usage = found
             if chunk.text:
                 yield chunk.text
+        return usage

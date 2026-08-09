@@ -11,7 +11,13 @@ from openai import OpenAI
 
 from ..config import settings
 from .base import ProviderUnavailableError, ensure_width
-from .base import TokenUsage, usage_from_openai
+from ..services import embedding_usage
+from .base import (
+    TokenUsage,
+    embedding_tokens_from_openai,
+    stream_openai_chat,
+    usage_from_openai,
+)
 
 
 # Bound the SDK defaults (600s, 2 retries) so a hung vendor can't pin a
@@ -102,21 +108,24 @@ class CompatLLM:
         )
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
-        """Yield answer text deltas as the model produces them."""
-        stream = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            stream=True,
-        )
-        for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        """Yield answer text deltas as the model produces them, returning usage.
+
+        This class fronts Azure, Groq, Together, OpenRouter and friends, so the
+        `stream_options` fallback in `stream_openai_chat` matters most here -
+        support for it is uneven across compatible vendors.
+        """
+        def create(**extra):
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                stream=True,
+                **extra,
+            )
+
+        return (yield from stream_openai_chat(create, self.model))
 
 
 class CompatEmbedder:
@@ -146,6 +155,7 @@ class CompatEmbedder:
             resp = self.client.embeddings.create(
                 model=self.model, input=texts[i : i + self.batch_size], **params
             )
+            embedding_usage.record(self.model, embedding_tokens_from_openai(resp))
             out.extend(item.embedding for item in resp.data)
         # Sending `dimensions` is a REQUEST, not a guarantee - some vendors
         # accept the parameter and ignore it. Verify before the vectors reach an

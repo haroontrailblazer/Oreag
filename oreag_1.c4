@@ -333,11 +333,24 @@ model {
           #guard
         }
         usageReport = component 'Usage Report' 'Account-scoped read side of metering, behind GET /api/account/usage: totals, per-model, per-key and per-project rollups with cache economics and a daily series.' {
-          technology 'services/usage_report.py · seven aggregate queries over usage_events + query_logs'
+          technology 'services/usage_report.py · one grouped cube pass over usage_events + 3 support queries'
           metadata {
             tenancy 'every query filters on the authenticated owner. usage_events carries owner_id directly; query_logs has no owner column, so it is reached only through a JOIN on projects.owner_id - filtering it by project id alone would let a guessed UUID read a different account.'
             null-honesty 'SUM over all-NULL stays null end to end. A token count of 0 is a measurement; never measured is a different fact, and COALESCE only ever touches request counts.'
-            caveats 'the response names what it cannot see: rows whose provider reported no token usage (and which models produced them), and that ingestion-time embedding, captioning and transcription bypass the LLM factory and are not counted at all.'
+            caveats 'the response names what it cannot see: rows whose provider reported no token usage (and which models produced them), and that image captioning and audio transcription build their SDK clients directly instead of going through the provider factory, so no wrapper sees them. Ingestion embedding IS now counted.'
+            round-trips 'nine aggregate queries became four. Each was fast and each cost a network round trip, and against a pooled Postgres the round trip is the entire cost - five seconds of report for milliseconds of query. One GROUP BY on the full key tuple yields a cube every rollup derives from.'
+            dialect-trap 'the grouping keys are bare IS NULL predicates, not CASE. A CASE renders its 1/0 as bind parameters which SQLAlchemy numbers independently in SELECT and GROUP BY, so Postgres rejects the query - while SQLite, which the suite runs on, accepts it. Tests passed and production would have 500d; a compile-against-postgresql test now guards it.'
+          }
+        }
+        embeddingUsage = component 'Embedding Metering' 'Request-scoped tally of embedding tokens, collected without changing the embedder contract.' {
+          #guard
+          technology 'services/embedding_usage.py · ContextVar accumulator · pure-ASGI middleware opens one scope per request'
+          metadata {
+            why 'embedding is plausibly the largest token consumer in the product - every chunk of every file, every memory, every query, every cache probe - and it reported nothing, so files_upload and memory_create rows carried NULL tokens and a document-heavy account appeared to spend zero.'
+            not-a-return-value 'embed_texts returns list[list[float]] and is called from dozens of places; widening it would make every caller thread numbers back by hand.'
+            not-an-attribute 'get_embedder is lru_cached, so instances are SHARED across requests and projects. Per-request state on the instance would leak one projects token counts into anothers bill - the most damaging bug this could have.'
+            thread-boundary 'ContextVars do not cross ThreadPoolExecutor, which retrieval fans out into. scope() hands back the accumulator and adopt() lets a worker thread re-enter it, because copying the context would accumulate into a copy the parent never reads.'
+            priced-apart 'embedding tokens are 10-100x cheaper than chat tokens, so they get their own columns and their own price table. Summed into prompt_tokens they would price correctly for neither, and tokens-by-model would credit an embedders volume to whichever LLM shared the row.'
           }
         }
         tracing = component 'Tracing' 'Optional Langfuse tracing of the RAG pipeline. Off unless keys are set, and never able to fail a request.' {
@@ -567,6 +580,7 @@ model {
   dashboardApi -[internal]-> usageReport 'GET /api/account/usage'
   usageReport -[persist]-> db 'aggregates usage_events, and query_logs joined through projects.owner_id'
   generation -[internal]-> tracing 'records the model call, its tokens and its cost'
+  usage -[internal]-> embeddingUsage 'reads the request embedding tally when writing the row'
   contentVersion -[persist]-> db 'projects.content_version'
   maintenance -[persist]-> db 'prunes logs, usage and expired cache rows'
   publicApi -[persist]-> db 'query_logs with the cache layer that served it'

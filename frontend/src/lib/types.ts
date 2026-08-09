@@ -206,7 +206,14 @@ export interface UsageTotals {
   cost_usd: number | null
   saved_prompt_tokens: number | null
   saved_completion_tokens: number | null
+  /** Priced per row at write time from the model that produced the cached
+   *  answer - a measurement, not a rate blended across the window. */
   saved_cost_usd: number | null
+  /** The EMBEDDER's side: retrieval, ingestion, memory writes, cache probes.
+   *  Kept apart from prompt_tokens because embedding tokens are 10-100x
+   *  cheaper, so one combined number would be wrong for both. */
+  embedding_tokens: number | null
+  embedding_cost_usd: number | null
 }
 
 export interface UsageByModel {
@@ -215,6 +222,10 @@ export interface UsageByModel {
   prompt_tokens: number | null
   completion_tokens: number | null
   cost_usd: number | null
+  /** "llm" answered questions; "embedding" produced vectors. Both appear in
+   *  one list because "what did this account spend, by model" is one
+   *  question - but they must be labelled, not silently mixed. */
+  kind: "llm" | "embedding"
 }
 
 export interface UsageByApiKey {
@@ -255,14 +266,18 @@ export interface UsageDaily {
   completion_tokens: number | null
   cost_usd: number | null
   saved_prompt_tokens: number | null
+  embedding_tokens: number | null
+  embedding_cost_usd: number | null
 }
 
 export interface UsageCaveats {
   /** Requests whose provider reported no token usage - excluded from token/cost sums. */
   unmeasured_requests: number
   unmeasured_models: string[]
-  /** Embedding during ingest, image captioning and audio transcription are not counted. */
-  ingestion_excluded: boolean
+  /** Image captioning and audio transcription build their SDK clients directly
+   *  rather than going through the provider factory, so no wrapper sees them.
+   *  Ingestion-time embedding IS now counted. */
+  vision_and_audio_excluded: boolean
 }
 
 export interface AccountUsage {

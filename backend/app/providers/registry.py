@@ -533,6 +533,44 @@ MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {
 }
 
 
+# Embedding prices, kept apart from the chat table because an embedding has
+# only an INPUT side - there is no completion to charge for. A single
+# $/1M-tokens figure per model.
+#
+# Only OpenAI's are listed. Their embedding list prices have been stable for
+# years and are unambiguous. Every other embedder in the catalog is left
+# unpriced ON PURPOSE, following the same rule as the chat table above: a
+# guessed price is a silently wrong invoice, and NULL is an honest one. Google,
+# Cohere and the OpenRouter-fronted embedders publish prices that vary by tier
+# or region in ways this single-number shape cannot express faithfully.
+#
+# Local embedders (Ollama, sentence-transformers) are correctly absent: they
+# consume tokens but cost no dollars, so their volume is reported and their
+# cost stays NULL rather than a misleading 0.00.
+EMBEDDING_PRICES_USD_PER_MTOK: dict[str, float] = {
+    "text-embedding-3-small": 0.02,
+    "text-embedding-3-large": 0.13,
+    "text-embedding-ada-002": 0.10,
+}
+
+
+def embedding_cost_for(model: str, tokens: int | None) -> float | None:
+    """USD for `tokens` embedded by `model`, or None when it cannot be known.
+
+    None - never 0 - for an unpriced model or an unmeasured call, so the Usage
+    page can distinguish "we did not measure this" from "this was free". A
+    genuinely free local embedder still returns None here: its dollar cost is
+    zero, but claiming a measured $0.00 for a model with no price entry would
+    make the two indistinguishable.
+    """
+    if not model or tokens is None:
+        return None
+    price = EMBEDDING_PRICES_USD_PER_MTOK.get(model)
+    if price is None:
+        return None
+    return round(tokens * price / 1_000_000, 6)
+
+
 def cost_for(model: str, usage) -> float | None:
     """USD cost of one measured call, or None when it cannot be known.
 

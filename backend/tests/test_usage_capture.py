@@ -262,7 +262,9 @@ class TestCacheHitRecordsSavings:
         # numbers are exactly what the original computation was measured at.
         assert second["cache_layer"] == "l1"
         assert second["usage"].known is False
-        assert second["saved"] == TokenUsage(200, 20)
+        # The model travels with the saving so the hit can be PRICED exactly,
+        # rather than valued at a blended account-wide rate.
+        assert second["saved"] == TokenUsage(200, 20, "gpt-4o-mini")
 
         db = FakeDB()
         record_usage(
@@ -420,4 +422,6 @@ class TestStreamUsage:
             FakeDB([10, 0]), project, "explain   x", None, None, usage_out=second
         )
         assert second["cache_layer"] == "l1"
-        assert second["saved"] == TokenUsage(200, 20)
+        # The model travels with the saving so the hit can be PRICED exactly,
+        # rather than valued at a blended account-wide rate.
+        assert second["saved"] == TokenUsage(200, 20, "gpt-4o-mini")

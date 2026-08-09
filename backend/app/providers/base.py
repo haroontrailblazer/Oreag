@@ -1,5 +1,8 @@
+import logging
 from dataclasses import dataclass
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderUnavailableError(Exception):
@@ -205,3 +208,69 @@ def call_llm(llm, system_prompt: str, user_prompt: str) -> tuple[str, TokenUsage
             model=getattr(llm, "model", "")
         )
     return with_usage(system_prompt, user_prompt)
+
+
+def stream_openai_chat(create, model: str):
+    """Yield text deltas from an OpenAI-style chat stream, returning `TokenUsage`.
+
+    Shared by OpenAI, Sarvam and every OpenAI-compatible vendor. A streamed
+    response carries NO usage unless `stream_options.include_usage` is asked
+    for, and when it is granted the counts arrive in a FINAL chunk that has
+    usage and an EMPTY `choices` list - precisely the chunk a delta loop skips.
+    Missing that detail is why a streamed answer reported nothing at all.
+
+    `create` is a callable taking the extra kwargs so the option can be
+    retried away: several OpenAI-compatible vendors reject `stream_options`
+    outright with a 400. The answer matters more than the bookkeeping, so a
+    rejection falls back to a plain stream and reports usage as unknown. If the
+    plain call fails too the failure is real and propagates.
+
+    The return value is delivered through `yield from`, so a caller that simply
+    iterates for text is unaffected.
+    """
+    try:
+        stream = create(stream_options={"include_usage": True})
+    except Exception:
+        logger.debug("Vendor rejected stream_options; streaming unmetered",
+                     exc_info=True)
+        stream = create()
+    usage = TokenUsage(model=model)
+    for chunk in stream:
+        # Checked on every chunk, not just the last: vendors disagree about
+        # where usage lands, and taking the newest known value is right for
+        # both the final-chunk and the cumulative-per-chunk conventions.
+        found = usage_from_openai(chunk, model)
+        if found.known:
+            usage = found
+        if not getattr(chunk, "choices", None):
+            continue
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+    return usage
+
+
+def embedding_tokens_from_openai(resp) -> int | None:
+    """Input tokens for one embeddings request, or None if not reported.
+
+    OpenAI (and Azure, and most compatible vendors) put the count on
+    `resp.usage.prompt_tokens`. An embedding has no completion side, so this is
+    the whole cost of the call.
+    """
+    usage = getattr(resp, "usage", None)
+    return _int_or_none(getattr(usage, "prompt_tokens", None))
+
+
+def embedding_tokens_from_gemini(resp) -> int | None:
+    """Gemini reports embedding usage as `usage_metadata.prompt_token_count`
+    when it reports it at all - several model/version combinations omit it,
+    which is why None has to be a supported answer rather than an error."""
+    meta = getattr(resp, "usage_metadata", None)
+    if meta is None:
+        return None
+    # Batched calls may return a list, one entry per input.
+    if isinstance(meta, list):
+        counts = [_int_or_none(getattr(m, "prompt_token_count", None)) for m in meta]
+        known = [c for c in counts if c is not None]
+        return sum(known) if known else None
+    return _int_or_none(getattr(meta, "prompt_token_count", None))

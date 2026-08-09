@@ -2,7 +2,13 @@ import httpx
 from openai import OpenAI
 
 from .base import ProviderUnavailableError, ensure_width
-from .base import TokenUsage, usage_from_openai
+from ..services import embedding_usage
+from .base import (
+    TokenUsage,
+    embedding_tokens_from_openai,
+    stream_openai_chat,
+    usage_from_openai,
+)
 
 # SDK defaults are 600s + 2 retries: a hung upstream would pin a threadpool
 # thread (and the request's DB connection) for ~10 minutes and triple provider
@@ -44,6 +50,7 @@ class OpenAIEmbedder:
             resp = self.client.embeddings.create(
                 model=self.model, input=texts[i : i + self.batch_size], **params
             )
+            embedding_usage.record(self.model, embedding_tokens_from_openai(resp))
             out.extend(item.embedding for item in resp.data)
         return ensure_width(out, self.dimensions, "OpenAI", self.model)
 
@@ -88,16 +95,14 @@ class OpenAILLM:
         )
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
-        """Yield answer text deltas as the model produces them."""
-        stream = self.client.chat.completions.create(
-            model=self.model,
-            messages=self._messages(system_prompt, user_prompt),
-            stream=True,
-            **self._params(),
-        )
-        for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        """Yield answer text deltas as the model produces them, returning usage."""
+        def create(**extra):
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=self._messages(system_prompt, user_prompt),
+                stream=True,
+                **self._params(),
+                **extra,
+            )
+
+        return (yield from stream_openai_chat(create, self.model))

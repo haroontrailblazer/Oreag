@@ -7,7 +7,7 @@ from ..config import settings
 from ..models import Project
 from ..providers import resolver
 from ..providers.registry import get_llm
-from .tracing import observed_generate
+from .tracing import observed_generate, observed_stream
 
 logger = logging.getLogger(__name__)
 
@@ -228,9 +228,12 @@ def generate_answer_stream(
     provider falls back to yielding the full answer once, so the same code path
     works everywhere.
 
-    ``usage_acc`` only receives numbers on the fallback branch: streamed
-    deltas carry no usage from any provider here, so a streamed generation
-    stays UNMEASURED - its token columns end up NULL, never an estimate.
+    ``usage_acc`` receives numbers on BOTH branches. A streaming provider
+    reports its totals through the generator's return value (delivered by
+    ``yield from``), which is why the streamers had to become generators that
+    return rather than merely yield. A vendor that still reports nothing -
+    several OpenAI-compatible ones reject ``stream_options`` - leaves the
+    counts NULL, which reads as "not measured", never as an estimate.
     """
     if llm_fn is not None:
         llm = llm_fn()
@@ -244,7 +247,19 @@ def generate_answer_stream(
     release_connection(db)
     streamer = getattr(llm, "generate_stream", None)
     if callable(streamer):
-        yield from streamer(system_prompt, user_prompt)
+        usage = yield from observed_stream(
+            llm,
+            streamer,
+            system_prompt,
+            user_prompt,
+            name="generate-answer",
+            metadata={"depth": depth, "sources": len(sources), "streamed": True},
+        )
+        if usage_acc is not None:
+            try:
+                usage_acc.add(usage)
+            except Exception:
+                logger.debug("Usage accumulation failed", exc_info=True)
     else:
         # One blocking call - trace and meter it exactly like generate_answer.
         text, usage = observed_generate(

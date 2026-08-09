@@ -319,8 +319,14 @@ class UsageTotals(BaseModel):
     cost_usd: float | None
     saved_prompt_tokens: int | None
     saved_completion_tokens: int | None
-    # Estimated from in-window measured rates; None when nothing priced.
+    # Priced per row at write time from the model that produced the cached
+    # answer - a measurement, not a rate blended across the window.
     saved_cost_usd: float | None
+    # The EMBEDDER's side: retrieval, ingestion, memory writes, cache probes.
+    # Kept separate from prompt_tokens because embedding tokens are 10-100x
+    # cheaper, so one combined number would be wrong for both.
+    embedding_tokens: int | None
+    embedding_cost_usd: float | None
 
 
 class UsageByModel(BaseModel):
@@ -329,6 +335,11 @@ class UsageByModel(BaseModel):
     prompt_tokens: int | None
     completion_tokens: int | None
     cost_usd: float | None
+    # True for rows aggregated from embedding_model rather than model, so the
+    # UI can label an embedder as such instead of implying it answered
+    # questions. Chat and embedding models appear in one list because "what did
+    # this account spend, by model" is one question.
+    kind: str = "llm"
 
 
 class UsageByApiKey(BaseModel):
@@ -367,6 +378,8 @@ class UsageDaily(BaseModel):
     completion_tokens: int | None
     cost_usd: float | None
     saved_prompt_tokens: int | None
+    embedding_tokens: int | None
+    embedding_cost_usd: float | None
 
 
 class UsageCaveats(BaseModel):
@@ -374,10 +387,11 @@ class UsageCaveats(BaseModel):
 
     unmeasured_requests: int  # rows whose provider reported no token usage
     unmeasured_models: list[str]  # distinct models on those rows
-    # Embedding during ingest, image captioning and audio transcription bypass
-    # the LLM factory and are not metered. For a document-heavy project that is
-    # plausibly the largest real cost, so the UI must be able to say so.
-    ingestion_excluded: bool
+    # Embedding IS now metered end to end - ingest included. What remains
+    # outside the numbers is image captioning and audio transcription, which
+    # build their SDK clients directly instead of going through the provider
+    # factory, so no wrapper sees them.
+    vision_and_audio_excluded: bool
 
 
 class UsageReport(BaseModel):

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from .config import settings
-from .services import tracing
+from .services import embedding_usage, tracing
 from .routers import (
     account,
     files,
@@ -212,6 +212,29 @@ if _preview_regex:
         settings.vercel_project,
         settings.vercel_scope,
     )
+
+class EmbeddingUsageMiddleware:
+    """Open one embedding-usage scope per HTTP request.
+
+    Pure ASGI rather than `BaseHTTPMiddleware` on purpose: this runs in the
+    SAME task as the endpoint, so the ContextVar is visible to every embedder
+    called during the request AND for the whole lifetime of a streaming
+    response body - which is produced long after a BaseHTTPMiddleware would
+    have handed control back.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        with embedding_usage.scope():
+            await self.app(scope, receive, send)
+
+
+app.add_middleware(EmbeddingUsageMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

@@ -228,11 +228,11 @@ class TestCaveats:
         caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
         assert caveats.unmeasured_requests == 4
         assert caveats.unmeasured_models == ["ollama-x", "sarvam-m"]
-        assert caveats.ingestion_excluded is True
+        assert caveats.vision_and_audio_excluded is True
 
-    def test_ingestion_excluded_is_true_even_when_empty(self, db):
+    def test_vision_and_audio_excluded_is_true_even_when_empty(self, db):
         caveats = usage_report.build_report(db, uuid.uuid4(), days=30).caveats
-        assert caveats.ingestion_excluded is True
+        assert caveats.vision_and_audio_excluded is True
 
 
 # ── breakdowns ──────────────────────────────────────────────────────────────
@@ -388,21 +388,41 @@ class TestWindow:
 # ── saved-cost estimate ─────────────────────────────────────────────────────
 
 
-class TestSavedCostEstimate:
-    def test_estimated_from_the_same_models_measured_rate(self, db):
-        """1000 tokens cost $0.01 on this model, the cache saved 500 more,
-        so the saving is about $0.005."""
+class TestSavedCostIsMeasuredNotEstimated:
+    """`saved_cost_usd` used to be derived from the window's blended $/token,
+    which meant a FIXED set of cache hits reported a different saving as
+    unrelated traffic arrived. It is now priced per row at write time."""
+
+    def test_summed_from_the_stored_column(self, db):
         project = _project(db, uuid.uuid4())
-        _event(db, project, model="gpt", prompt_tokens=800,
-               completion_tokens=200, cost_usd=0.01)
         _event(db, project, model="gpt", saved_prompt_tokens=400,
-               saved_completion_tokens=100, cache_layer="l1")
+               saved_completion_tokens=100, saved_cost_usd=0.005,
+               cache_layer="l1")
+        _event(db, project, model="gpt", saved_prompt_tokens=200,
+               saved_completion_tokens=50, saved_cost_usd=0.0025,
+               cache_layer="l2")
 
         totals = usage_report.build_report(db, project.owner_id, days=30).totals
-        assert totals.saved_cost_usd == pytest.approx(0.005)
+        assert totals.saved_cost_usd == pytest.approx(0.0075)
 
-    def test_null_when_savings_exist_but_nothing_was_ever_priced(self, db):
-        """No rate to derive - an invented estimate would be worse than null."""
+    def test_unrelated_traffic_cannot_move_it(self, db):
+        """The regression the estimator had: spend on OTHER models changed the
+        blended rate, and with it a saving that had not changed at all."""
+        project = _project(db, uuid.uuid4())
+        _event(db, project, model="gpt", saved_prompt_tokens=400,
+               saved_completion_tokens=100, saved_cost_usd=0.005,
+               cache_layer="l1")
+        before = usage_report.build_report(db, project.owner_id, days=30).totals
+
+        _event(db, project, model="expensive-model", prompt_tokens=10_000,
+               completion_tokens=10_000, cost_usd=9.99)
+        after = usage_report.build_report(db, project.owner_id, days=30).totals
+
+        assert after.saved_cost_usd == before.saved_cost_usd == pytest.approx(0.005)
+
+    def test_null_when_the_saving_could_not_be_priced(self, db):
+        """An unpriced model, or an original run that went unmeasured: the
+        tokens are real, the dollars are unknowable. NULL, not 0."""
         project = _project(db, uuid.uuid4())
         _event(db, project, saved_prompt_tokens=100, cache_layer="l1")
 
@@ -447,6 +467,8 @@ class TestEndpoint:
                 "saved_prompt_tokens": None,
                 "saved_completion_tokens": None,
                 "saved_cost_usd": None,
+                "embedding_tokens": None,
+                "embedding_cost_usd": None,
             },
             "by_model": [],
             "by_api_key": [],
@@ -455,7 +477,7 @@ class TestEndpoint:
             "caveats": {
                 "unmeasured_requests": 0,
                 "unmeasured_models": [],
-                "ingestion_excluded": True,
+                "vision_and_audio_excluded": True,
             },
         }
 
@@ -530,3 +552,48 @@ def test_a_cache_hit_is_not_reported_as_unmeasured(db):
         "the cache hit was wrongly counted as unmeasured"
     )
     assert report.caveats.unmeasured_models == ["some-local-model"]
+
+
+class TestCubeCompilesForPostgres:
+    """The suite runs on SQLite; production runs on Postgres. This is the one
+    difference that has already bitten: SQLite accepted a GROUP BY that
+    Postgres rejected outright, so every test passed and the live Usage page
+    would have 500'd.
+
+    The cause was `case((col.is_(None), 1), else_=0)` used as a grouping key.
+    SQLAlchemy renders those 1/0 literals as BIND PARAMETERS and numbers them
+    independently in the SELECT list and in the GROUP BY, so Postgres sees two
+    different expressions and refuses to group by one of them.
+    """
+
+    def _compiled(self):
+        from sqlalchemy.dialects import postgresql
+
+        from app.models import UsageEvent
+        from app.services.usage_report import cube_query
+
+        in_window = (
+            UsageEvent.owner_id == uuid.uuid4(),
+            UsageEvent.created_at >= _now(),
+        )
+        day = sa.func.to_char(
+            sa.func.timezone("UTC", UsageEvent.created_at), "YYYY-MM-DD"
+        ).label("day")
+        return str(
+            cube_query(in_window, day).compile(dialect=postgresql.dialect())
+        )
+
+    def test_group_by_carries_no_bind_parameters(self):
+        sql = self._compiled()
+        group_by = sql[sql.index("GROUP BY"):]
+        assert "%(param" not in group_by, (
+            "a bind parameter in GROUP BY means SELECT and GROUP BY render "
+            "different expressions - Postgres rejects the query"
+        )
+
+    def test_every_grouping_key_appears_in_the_select_list(self):
+        sql = self._compiled()
+        select_list = sql[len("SELECT "):sql.index(" \nFROM")]
+        group_by = sql[sql.index("GROUP BY") + len("GROUP BY "):]
+        for key in [k.strip() for k in group_by.split(",")]:
+            assert key in select_list, f"{key!r} is grouped on but not selected"

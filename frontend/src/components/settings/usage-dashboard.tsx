@@ -201,13 +201,76 @@ function HitRateMeter({ rate }: { rate: number }) {
  * ------------------------------------------------------------------------- */
 
 function TotalsRow({ totals }: { totals: UsageTotals }) {
+  // Total spend is the two sides added, but only where BOTH are known -
+  // adding a measured number to an unmeasured one would silently present a
+  // partial figure as a total.
+  const totalCost =
+    totals.cost_usd == null && totals.embedding_cost_usd == null
+      ? null
+      : (totals.cost_usd ?? 0) + (totals.embedding_cost_usd ?? 0)
+
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
       <StatTile label="Requests" value={totals.requests} />
-      <StatTile label="Prompt tokens" value={totals.prompt_tokens} />
+      <StatTile label="LLM tokens" value={totals.prompt_tokens} />
       <StatTile label="Completion tokens" value={totals.completion_tokens} />
-      <CostTile label="Cost" value={totals.cost_usd} />
+      {/* Shown beside the LLM tokens rather than folded into them: embedding
+          is usually the larger VOLUME and the smaller COST, and one combined
+          number would hide both facts. */}
+      <StatTile label="Embedding tokens" value={totals.embedding_tokens} />
+      <CostTile label="Total cost" value={totalCost} />
     </div>
+  )
+}
+
+function SpendSplit({ totals }: { totals: UsageTotals }) {
+  const llm = totals.cost_usd ?? 0
+  const embedding = totals.embedding_cost_usd ?? 0
+  const total = llm + embedding
+  if (total <= 0) return null
+  const llmPct = (llm / total) * 100
+
+  return (
+    <Card className="gap-4">
+      <CardHeader>
+        <CardTitle>Where the money goes</CardTitle>
+        <CardDescription>
+          Answering questions versus building and searching the index. On a
+          document-heavy account embedding is often the larger bill - it used
+          to be invisible here.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div
+          className="flex h-3 w-full overflow-hidden rounded-full bg-muted"
+          role="img"
+          aria-label={`Generation ${formatCost(llm)}, embedding ${formatCost(embedding)}`}
+        >
+          <div
+            className="bg-[var(--chart-1)]"
+            style={{ width: `${llmPct}%` }}
+          />
+          <div
+            className="bg-[var(--chart-2)]"
+            style={{ width: `${100 - llmPct}%` }}
+          />
+        </div>
+        <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="size-2.5 rounded-full bg-[var(--chart-1)]" />
+            <span className="text-muted-foreground">Generation</span>
+            <span className="font-medium tabular-nums">{formatCost(llm)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="size-2.5 rounded-full bg-[var(--chart-2)]" />
+            <span className="text-muted-foreground">Embedding</span>
+            <span className="font-medium tabular-nums">
+              {formatCost(embedding)}
+            </span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -277,12 +340,12 @@ function CaveatsNote({ caveats }: { caveats: UsageCaveats }) {
       <Info />
       <AlertTitle>What these numbers leave out</AlertTitle>
       <AlertDescription>
-        {caveats.ingestion_excluded && (
+        {caveats.vision_and_audio_excluded && (
           <p>
-            Ingestion is not counted: embedding while indexing documents, image
-            captioning and audio transcription all happen outside this meter.
-            For a document-heavy project that can be the largest share of real
-            spend.
+            Image captioning and audio transcription are not counted: they
+            build their provider clients directly rather than going through the
+            factory this meter wraps. Embedding while indexing documents{" "}
+            <em>is</em> now counted.
           </p>
         )}
         {n > 0 && (
@@ -309,6 +372,9 @@ const tokensChartConfig = {
   prompt_tokens: { label: "Prompt", color: "var(--chart-1)" },
   completion_tokens: { label: "Completion", color: "var(--chart-2)" },
   saved_prompt_tokens: { label: "Saved prompt", color: "var(--chart-3)" },
+  // Usually an order of magnitude larger than the others, which is itself the
+  // point: on a document-heavy account the embedding line dwarfs generation.
+  embedding_tokens: { label: "Embedding", color: "var(--chart-4)" },
 } satisfies ChartConfig
 
 function DailyTrends({ daily }: { daily: UsageDaily[] }) {
@@ -320,7 +386,8 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
     (d) =>
       d.prompt_tokens != null ||
       d.completion_tokens != null ||
-      d.saved_prompt_tokens != null
+      d.saved_prompt_tokens != null ||
+      d.embedding_tokens != null
   )
   // Dots only on the short window: at 7 points they anchor the days (and keep
   // an isolated measured day between two unmeasured ones visible); at 30+ the
@@ -461,6 +528,16 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
                     stroke="var(--color-saved_prompt_tokens)"
                     strokeWidth={2}
                     dot={dotFor("saved_prompt_tokens")}
+                    activeDot={{ r: 4 }}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    dataKey="embedding_tokens"
+                    type="monotone"
+                    stroke="var(--color-embedding_tokens)"
+                    strokeWidth={2}
+                    dot={dotFor("embedding_tokens")}
                     activeDot={{ r: 4 }}
                     connectNulls={false}
                     isAnimationActive={false}
@@ -606,8 +683,9 @@ function ModelsTable({
       <CardHeader>
         <CardTitle className="text-base">By model</CardTitle>
         <CardDescription>
-          Token spend per model. Models whose provider reports no usage show as
-          not measured.
+          Token spend per model, across every key on this account. Embedders
+          are tagged - their tokens are far cheaper than an LLM's, so the two
+          are never summed into one figure.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -628,9 +706,14 @@ function ModelsTable({
             </TableHeader>
             <TableBody>
               {rows.map((row) => (
-                <TableRow key={row.model}>
+                <TableRow key={`${row.kind}:${row.model}`}>
                   <TableCell className="pl-6">
                     <span className="font-mono text-xs">{row.model}</span>
+                    {row.kind === "embedding" && (
+                      <Badge variant="secondary" className="ml-2">
+                        embedding
+                      </Badge>
+                    )}
                     {unmeasuredModels.includes(row.model) && (
                       <Badge variant="outline" className="ml-2">
                         no usage reported
@@ -801,7 +884,10 @@ export function UsageView({ data }: { data: AccountUsage }) {
   return (
     <>
       <TotalsRow totals={data.totals} />
-      <CacheSavingsCard totals={data.totals} />
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+        <SpendSplit totals={data.totals} />
+        <CacheSavingsCard totals={data.totals} />
+      </div>
       <CaveatsNote caveats={data.caveats} />
       <DailyTrends daily={data.daily} />
       <ApiKeysTable rows={data.by_api_key} />

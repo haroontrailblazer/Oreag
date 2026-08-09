@@ -2,7 +2,8 @@ import httpx
 
 from ..config import settings
 from .base import ProviderUnavailableError, ensure_width
-from .base import TokenUsage, usage_from_ollama
+from ..services import embedding_usage
+from .base import TokenUsage, _int_or_none, usage_from_ollama
 
 
 def _post(path: str, payload: dict, timeout: float) -> dict:
@@ -48,6 +49,12 @@ class OllamaEmbedder:
                 {"model": self.model, "input": texts[i : i + self.batch_size]},
                 timeout=300,
             )
+            # Ollama runs locally, so these tokens cost nothing in dollars -
+            # but they are still the volume being processed, and reporting them
+            # keeps "how much did we embed?" answerable on every provider.
+            embedding_usage.record(
+                self.model, _int_or_none(data.get("prompt_eval_count"))
+            )
             out.extend(data["embeddings"])
         # Ollama's /api/embed takes NO dimensions parameter - the width is
         # whatever the pulled model produces, and `self.dimensions` is only
@@ -87,8 +94,10 @@ class OllamaLLM:
         return data["message"]["content"], usage_from_ollama(data, self.model)
 
     def generate_stream(self, system_prompt: str, user_prompt: str):
-        """Yield answer text deltas from Ollama's NDJSON chat stream."""
+        """Yield answer text deltas from Ollama's NDJSON chat stream, returning usage."""
         import json
+
+        usage = TokenUsage(model=self.model)
 
         payload = {
             "model": self.model,
@@ -109,7 +118,14 @@ class OllamaLLM:
                 for line in resp.iter_lines():
                     if not line:
                         continue
-                    piece = json.loads(line).get("message", {}).get("content")
+                    event = json.loads(line)
+                    # The final NDJSON line carries `done: true` plus the
+                    # eval counts for the whole call and no content - the
+                    # loop used to read only `message.content` and drop it.
+                    found = usage_from_ollama(event, self.model)
+                    if found.known:
+                        usage = found
+                    piece = event.get("message", {}).get("content")
                     if piece:
                         yield piece
         except httpx.ConnectError:
@@ -120,3 +136,4 @@ class OllamaLLM:
             raise ProviderUnavailableError(
                 f"Ollama error ({exc.response.status_code}): {exc.response.text[:300]}"
             )
+        return usage

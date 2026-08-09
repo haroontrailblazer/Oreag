@@ -333,5 +333,15 @@ class UsageEvent(Base):
     # miss, which is a different fact from 0.
     saved_prompt_tokens: Mapped[int | None] = mapped_column(Integer)
     saved_completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    # What those saved tokens were worth, priced from the ORIGINAL run's model
+    # at write time - not blended from the window, which made a fixed set of
+    # cache hits report a different saving as unrelated traffic arrived.
+    saved_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    # The EMBEDDER's side of the same request, kept apart from the LLM's
+    # because embedding tokens are 10-100x cheaper and pricing them together
+    # would be wrong for both. Ingestion rows carry only these.
+    embedding_tokens: Mapped[int | None] = mapped_column(Integer)
+    embedding_model: Mapped[str | None] = mapped_column(Text)
+    embedding_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
     cache_layer: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
