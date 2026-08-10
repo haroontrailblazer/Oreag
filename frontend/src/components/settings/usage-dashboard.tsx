@@ -11,7 +11,13 @@ import {
   StackIcon as Stack,
   InfoIcon as Info,
 } from "@phosphor-icons/react/dist/ssr"
-import { type ReactNode, useState } from "react"
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import {
   Bar,
   BarChart,
@@ -110,6 +116,78 @@ function shareOf(value: number | null, total: number | null): number | null {
   return (value / total) * 100
 }
 
+function AnimatedValue({
+  value,
+  className,
+  style,
+}: {
+  value: string
+  className?: string
+  style?: CSSProperties
+}) {
+  return (
+    <span
+      key={value}
+      className={cn("usage-number-in inline-block", className)}
+      style={style}
+    >
+      {value}
+    </span>
+  )
+}
+
+function useInViewOnce<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+
+    if (!("IntersectionObserver" in window)) {
+      const frame = requestAnimationFrame(() => setVisible(true))
+      return () => cancelAnimationFrame(frame)
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return
+        setVisible(true)
+        observer.disconnect()
+      },
+      { rootMargin: "120px 0px", threshold: 0.08 }
+    )
+
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  return { ref, visible }
+}
+
+function MotionReveal({
+  children,
+  className,
+  delay = 0,
+}: {
+  children: ReactNode
+  className?: string
+  delay?: number
+}) {
+  const { ref, visible } = useInViewOnce<HTMLDivElement>()
+
+  return (
+    <div
+      ref={ref}
+      data-visible={visible ? "true" : undefined}
+      className={cn("usage-reveal", className)}
+      style={{ "--usage-delay": `${delay}ms` } as CSSProperties}
+    >
+      {children}
+    </div>
+  )
+}
+
 /** "Aug 3" from "2026-08-03", parsed as local (new Date("YYYY-MM-DD") is UTC
  *  midnight and can shift a day in negative-offset timezones). */
 function dayLabel(date: string): string {
@@ -134,17 +212,17 @@ function NotMeasured({ className }: { className?: string }) {
 
 function IntCell({ value }: { value: number | null }) {
   if (value == null) return <NotMeasured />
-  return <span className="tabular-nums">{intFmt.format(value)}</span>
+  return <AnimatedValue value={intFmt.format(value)} className="tabular-nums" />
 }
 
 function CostCell({ value }: { value: number | null }) {
   if (value == null) return <NotMeasured />
-  return <span className="tabular-nums">{formatCost(value)}</span>
+  return <AnimatedValue value={formatCost(value)} className="tabular-nums" />
 }
 
 function SimilarityCell({ value }: { value: number | null }) {
   if (value == null) return <NotMeasured />
-  return <span className="tabular-nums">{value.toFixed(2)}</span>
+  return <AnimatedValue value={value.toFixed(2)} className="tabular-nums" />
 }
 
 /* ------------------------------------------------------------------------- *
@@ -232,11 +310,14 @@ function HitRateMeter({
         }}
       >
         <span
-          className="block h-full rounded-full"
+          className="usage-meter-fill block h-full rounded-full"
           style={{ width: `${pct}%`, background: "var(--chart-1)" }}
         />
       </span>
-      <span className="tabular-nums">{Math.round(pct)}%</span>
+      <AnimatedValue
+        value={`${Math.round(pct)}%`}
+        className="tabular-nums"
+      />
     </span>
   )
 }
@@ -391,7 +472,7 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
         <div className="grid items-center gap-6 sm:grid-cols-[11rem_1fr]">
           <div className="flex justify-center">
             <div
-              className="relative flex size-40 items-center justify-center rounded-full"
+              className="usage-donut-in relative flex size-40 items-center justify-center rounded-full"
               style={{
                 background: `conic-gradient(var(--chart-1) 0 ${llmPct}%, var(--chart-2) ${llmPct}% 100%)`,
               }}
@@ -402,9 +483,10 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
                 <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Total spent
                 </span>
-                <span className="mt-1 text-2xl font-semibold tracking-tight">
-                  {formatCost(total)}
-                </span>
+                <AnimatedValue
+                  value={formatCost(total)}
+                  className="mt-1 text-2xl font-semibold tracking-tight"
+                />
               </div>
             </div>
           </div>
@@ -473,9 +555,11 @@ function EfficiencyMetric({
       {value == null ? (
         <NotMeasured />
       ) : (
-        <div className="font-semibold tabular-nums" style={{ color }}>
-          {formatCost(value)} / 1M tokens
-        </div>
+        <AnimatedValue
+          value={`${formatCost(value)} / 1M tokens`}
+          className="font-semibold tabular-nums"
+          style={{ color }}
+        />
       )}
     </div>
   )
@@ -509,15 +593,19 @@ function SpendLegendRow({
           </div>
         </div>
         <div className="text-right">
-          <div className="font-semibold tabular-nums">{formatCost(cost)}</div>
-          <div className="text-xs text-muted-foreground tabular-nums">
-            {formatPercent(percent)}
-          </div>
+          <AnimatedValue
+            value={formatCost(cost)}
+            className="font-semibold tabular-nums"
+          />
+          <AnimatedValue
+            value={formatPercent(percent)}
+            className="block text-xs text-muted-foreground tabular-nums"
+          />
         </div>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full"
+          className="usage-meter-fill h-full rounded-full"
           style={{ width: `${percent}%`, background: color }}
         />
       </div>
@@ -575,12 +663,11 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
                   Not measured
                 </div>
               ) : (
-                <div
+                <AnimatedValue
+                  value={formatPercent(tokenSavingsPct)}
                   className="mt-1 text-4xl font-semibold tracking-tight"
                   style={{ color: "var(--chart-3)" }}
-                >
-                  {formatPercent(tokenSavingsPct)}
-                </div>
+                />
               )}
             </div>
             <div className="text-right text-xs text-muted-foreground">
@@ -588,9 +675,10 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
                 <NotMeasured />
               ) : (
                 <>
-                  <span className="block text-base font-semibold text-foreground">
-                    {compactFmt.format(savedGenerationTokens)}
-                  </span>
+                  <AnimatedValue
+                    value={compactFmt.format(savedGenerationTokens)}
+                    className="block text-base font-semibold text-foreground"
+                  />
                   of potential generation volume
                 </>
               )}
@@ -598,7 +686,7 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full"
+              className="usage-meter-fill h-full rounded-full"
               style={{
                 width: `${tokenSavingsPct ?? 0}%`,
                 background: "var(--chart-3)",
@@ -651,9 +739,10 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
             {totals.saved_embedding_tokens == null ? (
               <NotMeasured />
             ) : (
-              <span className="font-semibold">
-                {compactFmt.format(totals.saved_embedding_tokens)} tokens
-              </span>
+              <AnimatedValue
+                value={`${compactFmt.format(totals.saved_embedding_tokens)} tokens`}
+                className="font-semibold"
+              />
             )}
             {totals.saved_embedding_cost_usd != null && (
               <Badge variant="secondary">
@@ -690,7 +779,10 @@ function SavingsMetric({
       {value == null ? (
         <NotMeasured />
       ) : (
-        <div className="text-xl font-semibold tracking-tight">{value}</div>
+        <AnimatedValue
+          value={value}
+          className="text-xl font-semibold tracking-tight"
+        />
       )}
       <div className="text-xs leading-relaxed text-muted-foreground">
         {detail}
@@ -745,6 +837,8 @@ const tokensChartConfig = {
 
 function DailyTrends({ daily }: { daily: UsageDaily[] }) {
   const [showTable, setShowTable] = useState(false)
+  const { ref: trendsRef, visible: trendsVisible } =
+    useInViewOnce<HTMLDivElement>()
 
   // ISO dates sort lexicographically; don't trust the backend's order.
   const series = [...daily].sort((a, b) => (a.date < b.date ? -1 : 1))
@@ -755,6 +849,10 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
       d.saved_prompt_tokens != null ||
       d.embedding_tokens != null
   )
+  // Remounts the charts when the WINDOW changes (7 -> 30 -> 90) so the entry
+  // animation replays, while leaving them mounted across an in-place refresh -
+  // the five-minute poll must not restart the animation under the reader.
+  const seriesKey = `${series[0]?.date ?? "empty"}:${series.at(-1)?.date ?? "empty"}`
   // Dots only on the short window: at 7 points they anchor the days (and keep
   // an isolated measured day between two unmeasured ones visible); at 30+ the
   // dots sit so close that their surface rings eat the line and the stroke
@@ -778,9 +876,9 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
   } as const
 
   return (
-    <div className="space-y-2">
+    <div ref={trendsRef} className="space-y-2">
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-        <Card className="gap-4 overflow-hidden">
+        <Card className="usage-chart-card gap-4 overflow-hidden">
           <CardHeader className="border-b bg-muted/20 pb-5">
             <CardTitle className="flex items-center gap-2 text-base">
               <ChartBar className="size-4 text-muted-foreground" />
@@ -793,6 +891,7 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
               className="h-56 w-full"
             >
               <BarChart
+                key={`requests:${seriesKey}:${trendsVisible}`}
                 accessibilityLayer
                 data={series}
                 margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
@@ -817,22 +916,22 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
                     />
                   }
                 />
-                {/* No entry animation: on a range switch the previous window
-                    is held on screen (keepPreviousData) and replaying a
-                    grow-in would read as a flash of fake change. */}
                 <Bar
                   dataKey="requests"
                   fill="var(--color-requests)"
                   radius={[4, 4, 0, 0]}
                   maxBarSize={24}
-                  isAnimationActive={false}
+                  isAnimationActive={trendsVisible}
+                  animationBegin={80}
+                  animationDuration={700}
+                  animationEasing="ease-out"
                 />
               </BarChart>
             </ChartContainer>
           </CardContent>
         </Card>
 
-        <Card className="gap-4 overflow-hidden">
+        <Card className="usage-chart-card gap-4 overflow-hidden">
           <CardHeader className="border-b bg-muted/20 pb-5">
             <CardTitle className="flex items-center gap-2 text-base">
               <Stack className="size-4 text-muted-foreground" />
@@ -850,6 +949,7 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
                 className="h-56 w-full"
               >
                 <LineChart
+                  key={`tokens:${seriesKey}:${trendsVisible}`}
                   accessibilityLayer
                   data={series}
                   margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
@@ -882,7 +982,10 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
                     dot={dotFor("prompt_tokens")}
                     activeDot={{ r: 4 }}
                     connectNulls={false}
-                    isAnimationActive={false}
+                    isAnimationActive={trendsVisible}
+                    animationBegin={100}
+                    animationDuration={720}
+                    animationEasing="ease-out"
                   />
                   <Line
                     dataKey="completion_tokens"
@@ -892,7 +995,10 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
                     dot={dotFor("completion_tokens")}
                     activeDot={{ r: 4 }}
                     connectNulls={false}
-                    isAnimationActive={false}
+                    isAnimationActive={trendsVisible}
+                    animationBegin={160}
+                    animationDuration={720}
+                    animationEasing="ease-out"
                   />
                   <Line
                     dataKey="saved_prompt_tokens"
@@ -902,7 +1008,10 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
                     dot={dotFor("saved_prompt_tokens")}
                     activeDot={{ r: 4 }}
                     connectNulls={false}
-                    isAnimationActive={false}
+                    isAnimationActive={trendsVisible}
+                    animationBegin={220}
+                    animationDuration={720}
+                    animationEasing="ease-out"
                   />
                   <Line
                     dataKey="embedding_tokens"
@@ -912,7 +1021,10 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
                     dot={dotFor("embedding_tokens")}
                     activeDot={{ r: 4 }}
                     connectNulls={false}
-                    isAnimationActive={false}
+                    isAnimationActive={trendsVisible}
+                    animationBegin={280}
+                    animationDuration={720}
+                    animationEasing="ease-out"
                   />
                 </LineChart>
               </ChartContainer>
@@ -935,7 +1047,11 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
       >
         {showTable ? "Hide daily table" : "View daily data as a table"}
       </Button>
-      {showTable && <DailyTable series={series} />}
+      {showTable && (
+        <div className="usage-enter">
+          <DailyTable series={series} />
+        </div>
+      )}
     </div>
   )
 }
@@ -959,9 +1075,10 @@ function DailyTable({ series }: { series: UsageDaily[] }) {
               </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                 <MobileDatum label="Requests">
-                  <span className="tabular-nums">
-                    {intFmt.format(day.requests)}
-                  </span>
+                  <AnimatedValue
+                    value={intFmt.format(day.requests)}
+                    className="tabular-nums"
+                  />
                 </MobileDatum>
                 <MobileDatum label="Prompt tokens">
                   <IntCell value={day.prompt_tokens} />
@@ -993,7 +1110,7 @@ function DailyTable({ series }: { series: UsageDaily[] }) {
                 <TableRow key={day.date}>
                   <TableCell className="pl-6">{dayLabel(day.date)}</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {intFmt.format(day.requests)}
+                    <AnimatedValue value={intFmt.format(day.requests)} />
                   </TableCell>
                   <TableCell className="text-right">
                     <IntCell value={day.prompt_tokens} />
@@ -1060,9 +1177,10 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <MobileDatum label="Requests">
-                      <span className="tabular-nums">
-                        {intFmt.format(row.requests)}
-                      </span>
+                      <AnimatedValue
+                        value={intFmt.format(row.requests)}
+                        className="tabular-nums"
+                      />
                     </MobileDatum>
                     <MobileDatum label="Prompt">
                       <IntCell value={row.prompt_tokens} />
@@ -1097,7 +1215,7 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
                     )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {intFmt.format(row.requests)}
+                    <AnimatedValue value={intFmt.format(row.requests)} />
                   </TableCell>
                   <TableCell className="text-right">
                     <IntCell value={row.prompt_tokens} />
@@ -1173,9 +1291,10 @@ function ModelsTable({
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <MobileDatum label="Requests">
-                      <span className="tabular-nums">
-                        {intFmt.format(row.requests)}
-                      </span>
+                      <AnimatedValue
+                        value={intFmt.format(row.requests)}
+                        className="tabular-nums"
+                      />
                     </MobileDatum>
                     <MobileDatum label="Prompt">
                       <IntCell value={row.prompt_tokens} />
@@ -1215,7 +1334,7 @@ function ModelsTable({
                         )}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {intFmt.format(row.requests)}
+                        <AnimatedValue value={intFmt.format(row.requests)} />
                       </TableCell>
                       <TableCell className="text-right">
                         <IntCell value={row.prompt_tokens} />
@@ -1248,9 +1367,17 @@ function SavedTokensCell({
   if (prompt == null && completion == null) return <NotMeasured />
   return (
     <span className="tabular-nums">
-      {prompt == null ? <NotMeasured /> : intFmt.format(prompt)}
+      {prompt == null ? (
+        <NotMeasured />
+      ) : (
+        <AnimatedValue value={intFmt.format(prompt)} />
+      )}
       <span className="text-muted-foreground"> / </span>
-      {completion == null ? <NotMeasured /> : intFmt.format(completion)}
+      {completion == null ? (
+        <NotMeasured />
+      ) : (
+        <AnimatedValue value={intFmt.format(completion)} />
+      )}
     </span>
   )
 }
@@ -1304,7 +1431,9 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
                     <div className="min-w-0">
                       <div className="break-words font-medium">{row.name}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {intFmt.format(row.requests)} requests
+                        <AnimatedValue
+                          value={`${intFmt.format(row.requests)} requests`}
+                        />
                       </div>
                     </div>
                     <MobileDatum label="Cost" className="shrink-0 text-right">
@@ -1313,19 +1442,22 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
                   </div>
                   <div className="grid grid-cols-3 gap-x-3 gap-y-4">
                     <MobileDatum label="L1 hits">
-                      <span className="tabular-nums">
-                        {intFmt.format(row.cache.l1)}
-                      </span>
+                      <AnimatedValue
+                        value={intFmt.format(row.cache.l1)}
+                        className="tabular-nums"
+                      />
                     </MobileDatum>
                     <MobileDatum label="L2 hits">
-                      <span className="tabular-nums">
-                        {intFmt.format(row.cache.l2)}
-                      </span>
+                      <AnimatedValue
+                        value={intFmt.format(row.cache.l2)}
+                        className="tabular-nums"
+                      />
                     </MobileDatum>
                     <MobileDatum label="Misses">
-                      <span className="tabular-nums">
-                        {intFmt.format(row.cache.miss)}
-                      </span>
+                      <AnimatedValue
+                        value={intFmt.format(row.cache.miss)}
+                        className="tabular-nums"
+                      />
                     </MobileDatum>
                     <MobileDatum label="Retrieval similarity">
                       <SimilarityCell value={row.avg_retrieval_similarity} />
@@ -1398,19 +1530,19 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
                         {row.name}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {intFmt.format(row.requests)}
+                        <AnimatedValue value={intFmt.format(row.requests)} />
                       </TableCell>
                       <TableCell className="text-right">
                         <CostCell value={row.cost_usd} />
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {intFmt.format(row.cache.l1)}
+                        <AnimatedValue value={intFmt.format(row.cache.l1)} />
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {intFmt.format(row.cache.l2)}
+                        <AnimatedValue value={intFmt.format(row.cache.l2)} />
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {intFmt.format(row.cache.miss)}
+                        <AnimatedValue value={intFmt.format(row.cache.miss)} />
                       </TableCell>
                       <TableCell className="text-right">
                         <HitRateMeter rate={row.cache.hit_rate} />
@@ -1477,20 +1609,34 @@ export function UsageView({ data }: { data: AccountUsage }) {
     return <EmptyState days={data.window_days} />
   }
   return (
-    <div className="flex min-h-full flex-col gap-4 sm:gap-6">
-      <TotalsRow totals={data.totals} days={data.window_days} />
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-        <SpendSplit totals={data.totals} />
-        <CacheSavingsCard totals={data.totals} />
-      </div>
-      <CaveatsNote caveats={data.caveats} />
-      <DailyTrends daily={data.daily} />
-      <ApiKeysTable rows={data.by_api_key} />
-      <ModelsTable
-        rows={data.by_model}
-        unmeasuredModels={data.caveats.unmeasured_models}
-      />
-      <ProjectsTable rows={data.by_project} />
+    <div className="usage-motion flex min-h-full flex-col gap-4 sm:gap-6">
+      <MotionReveal>
+        <TotalsRow totals={data.totals} days={data.window_days} />
+      </MotionReveal>
+      <MotionReveal delay={60}>
+        <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+          <SpendSplit totals={data.totals} />
+          <CacheSavingsCard totals={data.totals} />
+        </div>
+      </MotionReveal>
+      <MotionReveal delay={80}>
+        <CaveatsNote caveats={data.caveats} />
+      </MotionReveal>
+      <MotionReveal delay={90}>
+        <DailyTrends daily={data.daily} />
+      </MotionReveal>
+      <MotionReveal delay={70}>
+        <ApiKeysTable rows={data.by_api_key} />
+      </MotionReveal>
+      <MotionReveal delay={70}>
+        <ModelsTable
+          rows={data.by_model}
+          unmeasuredModels={data.caveats.unmeasured_models}
+        />
+      </MotionReveal>
+      <MotionReveal delay={70}>
+        <ProjectsTable rows={data.by_project} />
+      </MotionReveal>
     </div>
   )
 }

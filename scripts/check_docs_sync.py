@@ -33,7 +33,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-C4 = ROOT / "oreag_1.c4"
+# The LikeC4 model. It lives under frontend/public/ because it is a
+# PUBLISHED artifact: served at /architecture.c4 and rendered into the
+# viewer at /architecture. Exactly one .c4 exists in the repo - a second
+# copy makes the LikeC4 tooling report every element as declared twice.
+C4 = ROOT / "frontend/public/architecture.c4"
 README = ROOT / "Readme.md"
 FLOW = ROOT / "flow.md"
 DOCS_JSON = ROOT / "frontend/src/app/docs/content.json"
@@ -469,36 +473,23 @@ def check_api_tab(rep: Report, cfg: dict) -> None:
 
 
 
-def check_published_architecture_matches(rep: Report) -> None:
-    """The architecture model served to users must be the one in the repo.
+def check_architecture_model_exists(rep: Report) -> None:
+    """Fail loudly when the C4 model is missing, instead of passing vacuously.
 
-    oreag_1.c4 is the source of truth and lives at the root, because it
-    describes the backend as much as the frontend. It is ALSO published as a
-    static asset at frontend/public/architecture.c4, linked from the docs page,
-    because Vercel builds with the frontend as its root directory and files
-    above that root are not guaranteed to be present at build time.
+    Every other C4 check reads the file through `read()`, which returns "" for a
+    missing path - so each one compared against an empty string, found no
+    contradictions, and reported success. When the model was moved, this script
+    printed "Docs are in sync" while its entire architecture-coverage section
+    was dead.
 
-    A committed copy is what makes that reliable, and a committed copy is
-    exactly the kind of thing that silently goes stale - the docs would then
-    serve an architecture that has not been true for months. `npm run build`
-    refreshes it (see frontend/scripts/sync-architecture.mjs); this is what
-    fails the build when someone edits the model and does not.
+    A check that cannot run is not a check that passed.
     """
-    published = ROOT / "frontend/public/architecture.c4"
     if not C4.exists():
-        return
-    if not published.exists():
         rep.fail(
-            "architecture-published",
-            "frontend/public/architecture.c4 is missing - the docs link 404s",
-            "run `npm run build` in frontend/ (or node scripts/sync-architecture.mjs)",
-        )
-        return
-    if read(published) != read(C4):
-        rep.fail(
-            "architecture-published",
-            "frontend/public/architecture.c4 is stale - it differs from oreag_1.c4",
-            "run `npm run build` in frontend/ (or node scripts/sync-architecture.mjs)",
+            "architecture-model",
+            f"{C4.relative_to(ROOT)} is missing - every C4 check below is "
+            "silently comparing against an empty string",
+            "restore the model, or repoint C4 in this script",
         )
 
 
@@ -566,7 +557,7 @@ def run() -> Report:
     check_feature_surfaces(rep)
     check_api_tab(rep, cfg)
     check_auth_redirects_are_public(rep)
-    check_published_architecture_matches(rep)
+    check_architecture_model_exists(rep)
     return rep
 
 

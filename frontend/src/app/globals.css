@@ -247,6 +247,163 @@
   }
 }
 
+/* Usage analytics motion. Sections wait until they approach the scrollport;
+   numbers and fills are paused at their first frame until that section is
+   visible, so lower charts do not finish animating before the user reaches
+   them. All transforms stay compositor-friendly. */
+@keyframes usage-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes usage-number-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes usage-meter-in {
+  from {
+    opacity: 0.45;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes usage-donut-in {
+  from {
+    opacity: 0;
+    transform: rotate(-24deg) scale(0.82);
+  }
+  70% {
+    opacity: 1;
+    transform: rotate(2deg) scale(1.025);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0) scale(1);
+  }
+}
+
+@keyframes usage-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.usage-reveal {
+  opacity: 0;
+  transform: translateY(14px) scale(0.992);
+}
+
+.usage-reveal[data-visible="true"] {
+  animation: usage-section-in 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--usage-delay, 0ms);
+}
+
+.usage-enter {
+  animation: usage-section-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.usage-number-in,
+.usage-meter-fill,
+.usage-donut-in {
+  animation-play-state: paused;
+}
+
+.usage-number-in {
+  animation-name: usage-number-in;
+  animation-duration: 460ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+
+.usage-meter-fill {
+  transform-origin: left center;
+  animation-name: usage-meter-in;
+  animation-duration: 720ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+
+.usage-donut-in {
+  animation-name: usage-donut-in;
+  animation-duration: 760ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+
+.usage-reveal[data-visible="true"] :is(
+    .usage-number-in,
+    .usage-meter-fill,
+    .usage-donut-in
+  ),
+.usage-enter :is(.usage-number-in, .usage-meter-fill, .usage-donut-in) {
+  animation-play-state: running;
+}
+
+.usage-reveal[data-visible="true"] :is(tbody tr, .divide-y > div),
+.usage-enter :is(tbody tr, .divide-y > div) {
+  animation: usage-row-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.usage-reveal[data-visible="true"] :is(tbody tr, .divide-y > div):nth-child(2),
+.usage-enter :is(tbody tr, .divide-y > div):nth-child(2) {
+  animation-delay: 35ms;
+}
+
+.usage-reveal[data-visible="true"] :is(tbody tr, .divide-y > div):nth-child(3),
+.usage-enter :is(tbody tr, .divide-y > div):nth-child(3) {
+  animation-delay: 70ms;
+}
+
+.usage-reveal[data-visible="true"] :is(tbody tr, .divide-y > div):nth-child(4),
+.usage-enter :is(tbody tr, .divide-y > div):nth-child(4) {
+  animation-delay: 105ms;
+}
+
+.usage-reveal[data-visible="true"] :is(tbody tr, .divide-y > div):nth-child(n + 5),
+.usage-enter :is(tbody tr, .divide-y > div):nth-child(n + 5) {
+  animation-delay: 140ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usage-reveal,
+  .usage-reveal[data-visible="true"],
+  .usage-enter,
+  .usage-number-in,
+  .usage-meter-fill,
+  .usage-donut-in,
+  .usage-reveal[data-visible="true"] :is(tbody tr, .divide-y > div),
+  .usage-enter :is(tbody tr, .divide-y > div) {
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+    animation: none !important;
+  }
+}
+
 /* Drawer (Sheet) enter/leave - referenced via arbitrary `animate-[...]` classes
    in components/ui/sheet.tsx. Radix keeps the element mounted for the duration
    of these so the close animation can play. */
