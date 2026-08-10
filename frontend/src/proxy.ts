@@ -18,7 +18,6 @@ import { NextResponse, type NextRequest } from "next/server"
 const PUBLIC_PATHS = [
   "/",
   "/docs",
-  "/usage-preview",
   "/login",
   "/signup",
   "/auth/callback", // PKCE ?code= exchange (OAuth)
