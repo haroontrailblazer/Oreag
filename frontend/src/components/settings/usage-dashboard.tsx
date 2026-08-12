@@ -468,7 +468,7 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
       : null
 
   return (
-    <Card className="usage-feature-card gap-5 overflow-hidden">
+    <Card className="usage-feature-card usage-spend-card gap-5 overflow-hidden">
       <CardHeader className="grid grid-cols-[1fr_auto] gap-3 border-b border-border/70 pb-5">
         <div className="flex flex-col gap-2">
           <CardTitle className="text-[17px] tracking-[-0.02em]">
@@ -485,7 +485,7 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <div className="grid items-center gap-6 sm:grid-cols-[11rem_1fr]">
-          <div className="flex justify-center">
+          <div className="usage-donut-shell flex justify-center rounded-2xl py-3">
             <div
               className="usage-donut-in relative flex size-40 items-center justify-center rounded-full"
               style={{
@@ -522,7 +522,7 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
             />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="usage-cost-density-grid grid grid-cols-2 gap-3 rounded-xl border bg-muted/20 p-3">
           <EfficiencyMetric
             label="Generation cost density"
             value={generationCostPerMillion}
@@ -669,7 +669,7 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
         </span>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
-        <div className="flex flex-col gap-4">
+        <div className="usage-savings-hero flex flex-col gap-4 rounded-2xl border p-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -711,7 +711,7 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
             />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="usage-savings-metrics grid grid-cols-2 gap-3 rounded-xl border bg-card/70 p-3 sm:grid-cols-3">
           <SavingsMetric
             label="Cost saved"
             value={
@@ -954,10 +954,6 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
               <Stack className="size-4 text-muted-foreground" />
               Tokens per day
             </CardTitle>
-            <CardDescription>
-              Gaps are days the provider reported nothing - unmeasured, not
-              zero.
-            </CardDescription>
           </CardHeader>
           <CardContent>
             {hasTokenData ? (
@@ -1076,8 +1072,8 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
 function DailyTable({ series }: { series: UsageDaily[] }) {
   const rows = [...series].reverse() // most recent first
   return (
-    <Card className="gap-3 py-4">
-      <CardContent className="p-0">
+    <Card className="usage-daily-table h-[32rem] gap-0 overflow-hidden py-0 md:h-[24rem]">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
         <div className="divide-y md:hidden">
           {rows.map((day) => (
             <div
@@ -1112,7 +1108,7 @@ function DailyTable({ series }: { series: UsageDaily[] }) {
         </div>
         <div className="hidden md:block">
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 bg-muted">
               <TableRow>
                 <TableHead className="pl-6">Date</TableHead>
                 <TableHead className="text-right">Requests</TableHead>
@@ -1151,10 +1147,49 @@ function DailyTable({ series }: { series: UsageDaily[] }) {
   )
 }
 
-function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
+const INITIAL_TABLE_ROWS = 3
+
+function TableDisclosure({
+  expanded,
+  total,
+  onToggle,
+}: {
+  expanded: boolean
+  total: number
+  onToggle: () => void
+}) {
+  if (total <= INITIAL_TABLE_ROWS) return null
+
   return (
-    <Card className="gap-3 overflow-hidden">
-      <CardHeader className="border-b bg-muted/20 pb-5">
+    <CardFooter className="usage-table-footer shrink-0 justify-between gap-3 border-t bg-card py-3">
+      <span className="text-xs text-muted-foreground">
+        Showing {expanded ? total : INITIAL_TABLE_ROWS} of {total}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
+        {expanded ? "Show top 3" : "View all"}
+      </Button>
+    </CardFooter>
+  )
+}
+
+function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const visibleRows = expanded ? rows : rows.slice(0, INITIAL_TABLE_ROWS)
+
+  return (
+    <Card
+      className={cn(
+        "usage-data-card gap-0 overflow-hidden",
+        rows.length > 0 && "h-[34rem] md:h-[27rem]"
+      )}
+    >
+      <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">
           <Receipt className="size-4 text-muted-foreground" />
           By API key
@@ -1164,7 +1199,7 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
           shown - never the secret.
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
         {rows.length === 0 ? (
           <p className="px-6 pb-2 text-sm text-muted-foreground">
             No API key activity in this window.
@@ -1172,7 +1207,7 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
         ) : (
           <>
             <div className="divide-y md:hidden">
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <div
                   key={`${row.api_key_id}:mobile`}
                   className="flex flex-col gap-4 px-4 py-5"
@@ -1211,7 +1246,7 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
             </div>
             <div className="hidden md:block">
               <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 bg-muted">
               <TableRow>
                 <TableHead className="pl-6">Key</TableHead>
                 <TableHead className="text-right">Requests</TableHead>
@@ -1221,7 +1256,7 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <TableRow key={row.api_key_id}>
                   <TableCell className="pl-6">
                     <span className="font-mono text-xs">{row.key_prefix}…</span>
@@ -1251,6 +1286,11 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
           </>
         )}
       </CardContent>
+      <TableDisclosure
+        expanded={expanded}
+        total={rows.length}
+        onToggle={() => setExpanded((value) => !value)}
+      />
     </Card>
   )
 }
@@ -1262,9 +1302,17 @@ function ModelsTable({
   rows: UsageByModel[]
   unmeasuredModels: string[]
 }) {
+  const [expanded, setExpanded] = useState(false)
+  const visibleRows = expanded ? rows : rows.slice(0, INITIAL_TABLE_ROWS)
+
   return (
-    <Card className="gap-3 overflow-hidden">
-      <CardHeader className="border-b bg-muted/20 pb-5">
+    <Card
+      className={cn(
+        "usage-data-card gap-0 overflow-hidden",
+        rows.length > 0 && "h-[34rem] md:h-[27rem]"
+      )}
+    >
+      <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">
           <Stack className="size-4 text-muted-foreground" />
           By model
@@ -1275,7 +1323,7 @@ function ModelsTable({
           are never summed into one figure.
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
         {rows.length === 0 ? (
           <p className="px-6 pb-2 text-sm text-muted-foreground">
             No model activity in this window.
@@ -1283,7 +1331,7 @@ function ModelsTable({
         ) : (
           <>
             <div className="divide-y md:hidden">
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <div
                   key={`${row.kind}:${row.model}:mobile`}
                   className="flex flex-col gap-4 px-4 py-5"
@@ -1325,7 +1373,7 @@ function ModelsTable({
             </div>
             <div className="hidden md:block">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 bg-muted">
                   <TableRow>
                     <TableHead className="pl-6">Model</TableHead>
                     <TableHead className="text-right">Requests</TableHead>
@@ -1335,7 +1383,7 @@ function ModelsTable({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => (
+                  {visibleRows.map((row) => (
                     <TableRow key={`${row.kind}:${row.model}`}>
                       <TableCell className="pl-6">
                         <span className="font-mono text-xs">{row.model}</span>
@@ -1370,6 +1418,11 @@ function ModelsTable({
           </>
         )}
       </CardContent>
+      <TableDisclosure
+        expanded={expanded}
+        total={rows.length}
+        onToggle={() => setExpanded((value) => !value)}
+      />
     </Card>
   )
 }
@@ -1419,9 +1472,17 @@ function MobileDatum({
 }
 
 function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const visibleRows = expanded ? rows : rows.slice(0, INITIAL_TABLE_ROWS)
+
   return (
-    <Card className="gap-3 overflow-hidden">
-      <CardHeader className="border-b bg-muted/20 pb-5">
+    <Card
+      className={cn(
+        "usage-data-card gap-0 overflow-hidden",
+        rows.length > 0 && "h-[38rem] md:h-[27rem]"
+      )}
+    >
+      <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">
           <Database className="size-4 text-muted-foreground" />
           By project
@@ -1431,7 +1492,7 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
           share of requests answered from the L1 or L2 cache.
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
         {rows.length === 0 ? (
           <p className="px-6 pb-2 text-sm text-muted-foreground">
             No project activity in this window.
@@ -1439,7 +1500,7 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
         ) : (
           <>
             <div className="divide-y md:hidden">
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <div
                   key={`${row.project_id}:mobile`}
                   className="flex flex-col gap-4 px-4 py-5"
@@ -1511,7 +1572,7 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
             </div>
             <div className="hidden md:block">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 bg-muted">
                   <TableRow>
                     <TableHead className="pl-6">Project</TableHead>
                     <TableHead className="text-right">Requests</TableHead>
@@ -1541,7 +1602,7 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => (
+                  {visibleRows.map((row) => (
                     <TableRow key={row.project_id}>
                       <TableCell className="max-w-48 truncate pl-6 font-medium">
                         {row.name}
@@ -1591,6 +1652,11 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
           </>
         )}
       </CardContent>
+      <TableDisclosure
+        expanded={expanded}
+        total={rows.length}
+        onToggle={() => setExpanded((value) => !value)}
+      />
     </Card>
   )
 }
@@ -1664,10 +1730,8 @@ export function UsageView({ data }: { data: AccountUsage }) {
             <EndpointBreakdown rows={data.by_endpoint} />
             <CacheTrend daily={data.daily} />
           </div>
-          <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-            <ModelUsage rows={data.by_model} />
-            <RetrievalQuality daily={data.daily} />
-          </div>
+          <ModelUsage rows={data.by_model} />
+          <RetrievalQuality daily={data.daily} />
         </section>
       </MotionReveal>
       <MotionReveal delay={70}>

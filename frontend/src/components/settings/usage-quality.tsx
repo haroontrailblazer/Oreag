@@ -8,11 +8,11 @@
  * and where is the volume going".
  */
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  Line,
-  LineChart,
   XAxis,
   YAxis,
 } from "recharts"
@@ -103,9 +103,9 @@ export function RetrievalQuality({ daily }: { daily: UsageDaily[] }) {
               color: "var(--chart-3)",
             },
           }}
-          className="h-52 w-full"
+          className="h-64 w-full"
         >
-          <LineChart
+          <AreaChart
             accessibilityLayer
             data={series}
             margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
@@ -136,11 +136,13 @@ export function RetrievalQuality({ daily }: { daily: UsageDaily[] }) {
                 />
               }
             />
-            <Line
+            <Area
               dataKey="avg_retrieval_similarity"
               type="monotone"
               stroke="var(--color-avg_retrieval_similarity)"
-              strokeWidth={2}
+              fill="var(--color-avg_retrieval_similarity)"
+              fillOpacity={0.14}
+              strokeWidth={2.25}
               dot={{
                 r: 3,
                 fill: "var(--color-avg_retrieval_similarity)",
@@ -151,7 +153,7 @@ export function RetrievalQuality({ daily }: { daily: UsageDaily[] }) {
               connectNulls={false}
               isAnimationActive={false}
             />
-          </LineChart>
+          </AreaChart>
         </ChartContainer>
       </CardContent>
     </Card>

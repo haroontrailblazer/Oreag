@@ -24,11 +24,11 @@
  * is not a line.
  */
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  Line,
-  LineChart,
   XAxis,
   YAxis,
 } from "recharts"
@@ -104,8 +104,8 @@ export function LatencyTrend({ daily }: { daily: UsageDaily[] }) {
             No timed queries in this window.
           </p>
         ) : (
-          <ChartContainer config={latencyConfig} className="h-56 w-full">
-            <LineChart
+          <ChartContainer config={latencyConfig} className="h-64 w-full">
+            <AreaChart
               accessibilityLayer
               data={series}
               margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
@@ -138,11 +138,19 @@ export function LatencyTrend({ daily }: { daily: UsageDaily[] }) {
               {(
                 ["p50_latency_ms", "p95_latency_ms", "p99_latency_ms"] as const
               ).map((key) => (
-                <Line
+                <Area
                   key={key}
                   dataKey={key}
                   type="monotone"
                   stroke={`var(--color-${key})`}
+                  fill={`var(--color-${key})`}
+                  fillOpacity={
+                    key === "p50_latency_ms"
+                      ? 0.14
+                      : key === "p95_latency_ms"
+                        ? 0.09
+                        : 0.055
+                  }
                   strokeWidth={2}
                   dot={
                     series.length <= 14
@@ -160,7 +168,7 @@ export function LatencyTrend({ daily }: { daily: UsageDaily[] }) {
                   isAnimationActive={false}
                 />
               ))}
-            </LineChart>
+            </AreaChart>
           </ChartContainer>
         )}
       </CardContent>
