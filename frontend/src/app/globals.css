@@ -388,6 +388,145 @@
   animation-delay: 140ms;
 }
 
+/* Usage dashboard visual system. Scoped so the enterprise analytics treatment
+   does not leak into sibling settings surfaces. The data and chart semantics
+   remain in their components; this layer only establishes visual hierarchy. */
+.usage-dashboard,
+.usage-dashboard-content {
+  --usage-panel-shadow: 0 18px 50px -40px rgba(15, 23, 42, 0.36);
+}
+
+.usage-dashboard-content [data-slot="card"] {
+  min-width: 0;
+  border-color: color-mix(in oklab, var(--border) 82%, var(--chart-1) 18%);
+  box-shadow: var(--usage-panel-shadow);
+}
+
+.usage-dashboard-content [data-slot="chart"] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.usage-dashboard-content [data-slot="card-title"] {
+  letter-spacing: -0.018em;
+}
+
+.usage-dashboard-content [data-slot="card-description"] {
+  line-height: 1.55;
+}
+
+.usage-summary-grid .usage-metric-card {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.usage-summary-grid .usage-metric-card:not(:nth-child(2n + 1)) {
+  border-left: 1px solid color-mix(in oklab, var(--border) 74%, var(--chart-1) 26%);
+}
+
+.usage-summary-grid .usage-metric-card:nth-child(n + 3) {
+  border-top: 1px solid color-mix(in oklab, var(--border) 74%, var(--chart-1) 26%);
+}
+
+.usage-metric-icon {
+  background: color-mix(in oklab, currentColor 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 13%, transparent);
+}
+
+.usage-feature-card {
+  min-height: 25.5rem;
+}
+
+.usage-savings-card {
+  background:
+    linear-gradient(145deg, color-mix(in oklab, var(--chart-3) 5%, var(--card)), var(--card) 42%);
+}
+
+.usage-caveat [data-slot="alert-title"] {
+  color: color-mix(in oklab, var(--chart-1) 78%, var(--foreground));
+}
+
+.usage-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.25rem;
+}
+
+.usage-section-heading h2 {
+  font-size: 1.05rem;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.025em;
+}
+
+.usage-section-heading p {
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.usage-chart-card [data-slot="chart"] {
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--border) 32%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--border) 32%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: 0 1px;
+}
+
+.usage-dashboard-content [data-slot="table-header"] {
+  background: color-mix(in oklab, var(--muted) 62%, var(--card));
+}
+
+.usage-dashboard-content [data-slot="table-head"] {
+  height: 2.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.025em;
+}
+
+.usage-dashboard-content [data-slot="table-row"] {
+  height: 3.25rem;
+}
+
+.usage-dashboard-content [data-slot="table-cell"] {
+  font-size: 0.77rem;
+}
+
+.usage-scroll {
+  scrollbar-gutter: stable;
+}
+
+@media (min-width: 80rem) {
+  .usage-summary-grid .usage-metric-card:nth-child(n) {
+    border-top: 0;
+  }
+
+  .usage-summary-grid .usage-metric-card:not(:first-child) {
+    border-left: 1px solid color-mix(in oklab, var(--border) 74%, var(--chart-1) 26%);
+  }
+}
+
+@media (max-width: 39.999rem) {
+  .usage-dashboard-header {
+    align-items: flex-start;
+  }
+
+  .usage-feature-card {
+    min-height: auto;
+  }
+
+  .usage-section-heading p {
+    max-width: 32rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .usage-reveal,
   .usage-reveal[data-visible="true"],

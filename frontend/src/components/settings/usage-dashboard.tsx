@@ -263,36 +263,40 @@ function MetricTile({
         : compactFmt.format(value)
 
   return (
-    <Card className={cn("relative gap-3 overflow-hidden py-4", className)}>
-      <span
-        aria-hidden="true"
-        className="absolute inset-x-0 top-0 h-0.5"
-        style={{ background: accent }}
-      />
-      <CardHeader className="grid grid-cols-[1fr_auto] items-center px-4">
-        <CardDescription className="font-medium text-foreground/70">
-          {label}
-        </CardDescription>
-        <span aria-hidden="true" style={{ color: accent }}>
+    <Card
+      className={cn(
+        "usage-metric-card group relative gap-4 overflow-hidden py-5",
+        className
+      )}
+    >
+      <CardHeader className="grid grid-cols-[auto_1fr] items-center gap-3 px-5">
+        <span
+          aria-hidden="true"
+          className="usage-metric-icon flex size-9 items-center justify-center rounded-lg"
+          style={{ color: accent }}
+        >
           {icon}
         </span>
+        <CardDescription className="text-xs font-semibold tracking-[-0.01em] text-foreground/72">
+          {label}
+        </CardDescription>
       </CardHeader>
-      <CardContent className="px-4">
+      <CardContent className="px-5">
         {value == null ? (
           <div className="text-base font-medium italic text-muted-foreground">
             Not measured
           </div>
         ) : (
-          <div className="text-2xl font-semibold tracking-tight">
+          <div className="text-[1.75rem] font-semibold leading-none tracking-[-0.035em] sm:text-[2rem]">
             <TextScrambleEffect
               key={formattedValue}
               text={formattedValue ?? ""}
-              className="font-mono tabular-nums"
+              className="tabular-nums"
             />
           </div>
         )}
       </CardContent>
-      <CardFooter className="min-h-5 px-4 text-xs text-muted-foreground">
+      <CardFooter className="min-h-5 px-5 text-[11px] leading-relaxed text-muted-foreground">
         {detail}
       </CardFooter>
     </Card>
@@ -368,7 +372,7 @@ function TotalsRow({
       : null
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
+    <div className="usage-summary-grid grid grid-cols-2 overflow-hidden rounded-2xl border border-blue-500/20 bg-blue-50/35 shadow-[0_16px_50px_-42px_rgba(37,99,235,0.55)] xl:grid-cols-5 dark:bg-blue-950/10">
       <MetricTile
         label="Requests"
         value={totals.requests}
@@ -464,10 +468,12 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
       : null
 
   return (
-    <Card className="gap-5 overflow-hidden">
-      <CardHeader className="grid grid-cols-[1fr_auto] gap-3">
+    <Card className="usage-feature-card gap-5 overflow-hidden">
+      <CardHeader className="grid grid-cols-[1fr_auto] gap-3 border-b border-border/70 pb-5">
         <div className="flex flex-col gap-2">
-          <CardTitle>Where the money goes</CardTitle>
+          <CardTitle className="text-[17px] tracking-[-0.02em]">
+            Where the money goes
+          </CardTitle>
           <CardDescription>
             Generation answers questions; embedding builds and searches the
             index.
@@ -647,10 +653,12 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
   )
 
   return (
-    <Card className="gap-5 overflow-hidden">
-      <CardHeader className="grid grid-cols-[1fr_auto] gap-3">
+    <Card className="usage-feature-card usage-savings-card gap-5 overflow-hidden">
+      <CardHeader className="grid grid-cols-[1fr_auto] gap-3 border-b border-border/70 pb-5">
         <div className="flex flex-col gap-2">
-          <CardTitle>Saved by the cache</CardTitle>
+          <CardTitle className="text-[17px] tracking-[-0.02em]">
+            Saved by the cache
+          </CardTitle>
           <CardDescription>
             L1 and L2 cache hits skip provider generation, avoiding tokens and
             cost.
@@ -803,7 +811,7 @@ function SavingsMetric({
 function CaveatsNote({ caveats }: { caveats: UsageCaveats }) {
   const n = caveats.unmeasured_requests
   return (
-    <Alert>
+    <Alert className="usage-caveat border-blue-500/20 bg-blue-50/45 py-3.5 dark:bg-blue-950/15">
       <Info />
       <AlertTitle>What these numbers leave out</AlertTitle>
       <AlertDescription>
@@ -885,10 +893,10 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
   } as const
 
   return (
-    <div ref={trendsRef} className="space-y-2">
+    <div ref={trendsRef} className="flex flex-col gap-3">
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <Card className="usage-chart-card gap-4 overflow-hidden">
-          <CardHeader className="border-b bg-muted/20 pb-5">
+          <CardHeader className="border-b border-border/70 bg-muted/15 pb-5">
             <CardTitle className="flex items-center gap-2 text-base">
               <ChartBar className="size-4 text-muted-foreground" />
               Requests per day
@@ -941,7 +949,7 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
         </Card>
 
         <Card className="usage-chart-card gap-4 overflow-hidden">
-          <CardHeader className="border-b bg-muted/20 pb-5">
+          <CardHeader className="border-b border-border/70 bg-muted/15 pb-5">
             <CardTitle className="flex items-center gap-2 text-base">
               <Stack className="size-4 text-muted-foreground" />
               Tokens per day
@@ -1618,12 +1626,12 @@ export function UsageView({ data }: { data: AccountUsage }) {
     return <EmptyState days={data.window_days} />
   }
   return (
-    <div className="usage-motion flex min-h-full flex-col gap-4 sm:gap-6">
+    <div className="usage-dashboard-content usage-motion flex min-h-full flex-col gap-6 sm:gap-8">
       <MotionReveal>
         <TotalsRow totals={data.totals} days={data.window_days} />
       </MotionReveal>
       <MotionReveal delay={60}>
-        <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2">
           <SpendSplit totals={data.totals} />
           <CacheSavingsCard totals={data.totals} />
         </div>
@@ -1632,27 +1640,51 @@ export function UsageView({ data }: { data: AccountUsage }) {
         <CaveatsNote caveats={data.caveats} />
       </MotionReveal>
       <MotionReveal delay={90}>
-        <DailyTrends daily={data.daily} />
-      {/* Operational half: how the system BEHAVED, next to what it spent. */}
-      <LatencyTrend daily={data.daily} />
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-        <EndpointBreakdown rows={data.by_endpoint} />
-        <CacheTrend daily={data.daily} />
-      </div>
-      <ModelUsage rows={data.by_model} />
-      <RetrievalQuality daily={data.daily} />
+        <section className="flex flex-col gap-4" aria-labelledby="usage-activity-heading">
+          <div className="usage-section-heading">
+            <div>
+              <h2 id="usage-activity-heading">Activity over time</h2>
+              <p>Traffic, token volume and delivery performance across the selected window.</p>
+            </div>
+          </div>
+          <DailyTrends daily={data.daily} />
+        </section>
       </MotionReveal>
       <MotionReveal delay={70}>
-        <ApiKeysTable rows={data.by_api_key} />
+        <section className="flex flex-col gap-4" aria-labelledby="usage-operations-heading">
+          <div className="usage-section-heading">
+            <div>
+              <h2 id="usage-operations-heading">Operational performance</h2>
+              <p>Latency, endpoint demand, cache behavior and retrieval quality.</p>
+            </div>
+          </div>
+          {/* Operational half: how the system BEHAVED, next to what it spent. */}
+          <LatencyTrend daily={data.daily} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <EndpointBreakdown rows={data.by_endpoint} />
+            <CacheTrend daily={data.daily} />
+          </div>
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+            <ModelUsage rows={data.by_model} />
+            <RetrievalQuality daily={data.daily} />
+          </div>
+        </section>
       </MotionReveal>
       <MotionReveal delay={70}>
-        <ModelsTable
-          rows={data.by_model}
-          unmeasuredModels={data.caveats.unmeasured_models}
-        />
-      </MotionReveal>
-      <MotionReveal delay={70}>
-        <ProjectsTable rows={data.by_project} />
+        <section className="flex flex-col gap-4" aria-labelledby="usage-allocation-heading">
+          <div className="usage-section-heading">
+            <div>
+              <h2 id="usage-allocation-heading">Allocation &amp; governance</h2>
+              <p>Trace account consumption across credentials, models and projects.</p>
+            </div>
+          </div>
+          <ApiKeysTable rows={data.by_api_key} />
+          <ModelsTable
+            rows={data.by_model}
+            unmeasuredModels={data.caveats.unmeasured_models}
+          />
+          <ProjectsTable rows={data.by_project} />
+        </section>
       </MotionReveal>
     </div>
   )
@@ -1676,11 +1708,11 @@ export function UsageDashboard() {
   return (
     // Fixed frame like the sibling settings pages: the heading and range
     // selector never move, only the content below scrolls.
-    <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-3 overflow-hidden sm:gap-6 md:h-full">
-      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
+    <div className="usage-dashboard flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-4 overflow-hidden md:h-full">
+      <div className="usage-dashboard-header flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border/70 pb-4 sm:pb-5">
         <div>
-          <h1 className="text-2xl font-semibold">Usage</h1>
-          <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">
+          <h1 className="text-[1.75rem] font-semibold leading-tight tracking-[-0.035em]">Usage</h1>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground sm:text-sm">
             Requests, tokens and cost across your API keys, models and
             projects.
           </p>
@@ -1689,9 +1721,9 @@ export function UsageDashboard() {
           value={String(days)}
           onValueChange={(value) => setDays(Number(value) as UsageWindow)}
         >
-          <TabsList>
+          <TabsList className="h-10 rounded-xl border border-border/80 bg-muted/60 p-1 shadow-sm">
             {USAGE_WINDOWS.map((window) => (
-              <TabsTrigger key={window} value={String(window)} className="px-3">
+              <TabsTrigger key={window} value={String(window)} className="rounded-lg px-3.5 text-xs font-semibold data-[state=active]:shadow-sm">
                 {window} days
               </TabsTrigger>
             ))}
@@ -1725,7 +1757,7 @@ export function UsageDashboard() {
       {data && (
         <div
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto pb-2",
+            "usage-scroll min-h-0 flex-1 overflow-y-auto pb-3 pr-0.5",
             isLoading && "opacity-60 transition-opacity"
           )}
         >
