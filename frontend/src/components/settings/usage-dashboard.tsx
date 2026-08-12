@@ -54,6 +54,10 @@ import {
   EndpointBreakdown,
   LatencyTrend,
 } from "@/components/settings/usage-monitoring"
+import {
+  ModelUsage,
+  RetrievalQuality,
+} from "@/components/settings/usage-quality"
 import { TextScrambleEffect } from "@/components/ui/text-scramble-effect"
 import {
   Table,
@@ -1635,6 +1639,8 @@ export function UsageView({ data }: { data: AccountUsage }) {
         <EndpointBreakdown rows={data.by_endpoint} />
         <CacheTrend daily={data.daily} />
       </div>
+      <ModelUsage rows={data.by_model} />
+      <RetrievalQuality daily={data.daily} />
       </MotionReveal>
       <MotionReveal delay={70}>
         <ApiKeysTable rows={data.by_api_key} />
