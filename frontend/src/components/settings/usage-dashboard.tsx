@@ -49,6 +49,11 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  CacheTrend,
+  EndpointBreakdown,
+  LatencyTrend,
+} from "@/components/settings/usage-monitoring"
 import { TextScrambleEffect } from "@/components/ui/text-scramble-effect"
 import {
   Table,
@@ -1624,6 +1629,12 @@ export function UsageView({ data }: { data: AccountUsage }) {
       </MotionReveal>
       <MotionReveal delay={90}>
         <DailyTrends daily={data.daily} />
+      {/* Operational half: how the system BEHAVED, next to what it spent. */}
+      <LatencyTrend daily={data.daily} />
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+        <EndpointBreakdown rows={data.by_endpoint} />
+        <CacheTrend daily={data.daily} />
+      </div>
       </MotionReveal>
       <MotionReveal delay={70}>
         <ApiKeysTable rows={data.by_api_key} />

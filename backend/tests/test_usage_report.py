@@ -473,6 +473,7 @@ class TestEndpoint:
                 "saved_embedding_cost_usd": None,
             },
             "by_model": [],
+            "by_endpoint": [],
             "by_api_key": [],
             "by_project": [],
             "daily": [],

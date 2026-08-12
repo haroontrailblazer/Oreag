@@ -283,6 +283,7 @@ async def public_upload_files(
     403), a per-file size cap, a per-request file-count cap, a per-project
     total-file quota, and a per-project ingest rate limit.
     """
+    upload_started = time.perf_counter()
     if not api_key.can_upload:
         raise HTTPException(
             403, "This API key is read-only - create a key with upload permission to ingest."
@@ -398,7 +399,13 @@ async def public_upload_files(
             record.status = "failed"
             record.error = "Upload to storage failed - retry from the Files tab"
     db.commit()
-    record_usage(db, project=project, api_key_id=api_key.id, endpoint="files_upload")
+    record_usage(
+        db, project=project, api_key_id=api_key.id, endpoint="files_upload",
+        # Upload time only - the INDEXING that follows is timed separately
+        # under file_ingest, because it happens on a worker minutes later and
+        # folding the two would report a fast upload as a slow one.
+        latency_ms=int((time.perf_counter() - upload_started) * 1000),
+    )
     # No task scheduling: rows sit in status='pending' and the durable queue
     # workers claim them - the queue survives restarts and deploys.
     return created

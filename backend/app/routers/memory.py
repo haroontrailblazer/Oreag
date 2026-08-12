@@ -1,3 +1,4 @@
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -38,8 +39,15 @@ def create_memory(
 ):
     project = _get_project(db, project_id)
     enforce_rate_limit(api_key.id, project.id)
+    started = time.perf_counter()
     memory = memory_service.save_memory(db, project, body)
-    record_usage(db, project=project, api_key_id=api_key.id, endpoint="memory_create")
+    # Timed like every other endpoint. Without this the Usage page's latency
+    # chart covered only the query routes - a quarter of all rows - so the
+    # slowest thing most projects do (embedding a memory) was invisible.
+    record_usage(
+        db, project=project, api_key_id=api_key.id, endpoint="memory_create",
+        latency_ms=int((time.perf_counter() - started) * 1000),
+    )
     out = MemoryOut.model_validate(memory)
     if memory.embedding is None:
         out.warning = (
@@ -57,13 +65,17 @@ def search_memory(
 ):
     project = _get_project(db, project_id)
     enforce_rate_limit(api_key.id, project.id)
+    started = time.perf_counter()
     try:
         results = memory_service.search_memories(
             db, project, body.query, body.top_k or 5
         )
     except ProviderUnavailableError as exc:
         raise HTTPException(503, str(exc))
-    record_usage(db, project=project, api_key_id=api_key.id, endpoint="memory_search")
+    record_usage(
+        db, project=project, api_key_id=api_key.id, endpoint="memory_search",
+        latency_ms=int((time.perf_counter() - started) * 1000),
+    )
     return [
         MemorySearchResult(
             **MemoryOut.model_validate(m).model_dump(), similarity=sim

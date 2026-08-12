@@ -273,6 +273,25 @@ export interface UsageDaily {
   saved_prompt_tokens: number | null
   embedding_tokens: number | null
   embedding_cost_usd: number | null
+  /** Percentiles, never a mean - an average latency hides the tail it is
+   *  asked about. p50 is the typical request, p95 the one users complain about. */
+  p50_latency_ms: number | null
+  p95_latency_ms: number | null
+  p99_latency_ms: number | null
+  cache_l1: number
+  cache_l2: number
+  cache_miss: number
+  avg_retrieval_similarity: number | null
+}
+
+export interface UsageByEndpoint {
+  endpoint: string
+  requests: number
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  embedding_tokens: number | null
+  cost_usd: number | null
+  p50_latency_ms: number | null
 }
 
 export interface UsageCaveats {
@@ -289,6 +308,7 @@ export interface AccountUsage {
   window_days: number
   totals: UsageTotals
   by_model: UsageByModel[]
+  by_endpoint: UsageByEndpoint[]
   by_api_key: UsageByApiKey[]
   by_project: UsageByProject[]
   daily: UsageDaily[]

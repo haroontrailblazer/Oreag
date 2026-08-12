@@ -1,5 +1,6 @@
 import logging
 import math
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -280,6 +281,7 @@ def ingest_file(file_id: uuid.UUID) -> None:
     one document embeds every chunk of it and is routinely the largest single
     cost in the product, so it is exactly the spend that must not be invisible.
     """
+    started = time.perf_counter()
     with embedding_usage.scope() as _embedding:
         try:
             _ingest_file_inner(file_id)
@@ -287,10 +289,13 @@ def ingest_file(file_id: uuid.UUID) -> None:
             # In a finally: a file that fails PART way through has still paid
             # for whatever it embedded before failing, and that spend is just
             # as real as a successful one.
-            _record_ingest_usage(file_id, _embedding)
+            _record_ingest_usage(
+                file_id, _embedding,
+                int((time.perf_counter() - started) * 1000),
+            )
 
 
-def _record_ingest_usage(file_id: uuid.UUID, embedding) -> None:
+def _record_ingest_usage(file_id: uuid.UUID, embedding, latency_ms=None) -> None:
     """Write the usage row for one ingest. Never raises - see services/usage."""
     # EITHER side is enough to be worth a row: an audio file spends only on
     # transcription and embeds a short transcript; an image-heavy PDF spends
@@ -315,6 +320,9 @@ def _record_ingest_usage(file_id: uuid.UUID, embedding) -> None:
             # would misreport which key spent the money.
             api_key_id=None,
             endpoint="file_ingest",
+            # How long indexing this file actually took. Usually the slowest
+            # thing the product does, and it carried no timing at all.
+            latency_ms=latency_ms,
             embedding=embedding.total,
             # Image captioning and audio transcription: real chat calls on the
             # user's own key, priced by the chat table. They were the last

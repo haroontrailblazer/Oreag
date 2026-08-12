@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 from ..models import ApiKey, Project, QueryLog, UsageEvent
 from ..schemas import (
     UsageByApiKey,
+    UsageByEndpoint,
     UsageByModel,
     UsageByProject,
     UsageCacheSplit,
@@ -126,6 +127,29 @@ def _rollup(rows, key_fn):
     return out
 
 
+
+def _percentile(sorted_values: list[int], fraction: float) -> int | None:
+    """Nearest-rank percentile over an already-sorted list."""
+    if not sorted_values:
+        return None
+    index = max(0, min(len(sorted_values) - 1,
+                       int(round(fraction * (len(sorted_values) - 1)))))
+    return int(sorted_values[index])
+
+
+# A ceiling on the latencies pulled back for percentile work. Percentiles need
+# the DISTRIBUTION, not an average, and neither Postgres's percentile_disc nor
+# any window trick is available on both dialects - the suite runs on SQLite and
+# production on Postgres, and a dialect branch here is exactly the divergence
+# that shipped a broken GROUP BY once already. One portable ordered fetch,
+# bounded, computed in Python.
+#
+# 50k latencies is far beyond any account this serves today; past it the
+# percentiles become a sample of the most recent 50k requests, which the
+# caveats field reports rather than hides.
+_LATENCY_SAMPLE_CAP = 50_000
+
+
 def cube_query(in_window, day):
     """The single grouped pass over ``usage_events`` that every rollup derives
     from. Extracted so a test can COMPILE it against the Postgres dialect -
@@ -139,6 +163,7 @@ def cube_query(in_window, day):
             UsageEvent.embedding_model.label("embedding_model"),
             UsageEvent.api_key_id.label("api_key_id"),
             UsageEvent.project_id.label("project_id"),
+            UsageEvent.endpoint.label("endpoint"),
             # Carried in the KEY so the caveat rollup can be derived too: a row
             # is "unmeasured" when a model ran and reported nothing, which is
             # not the same as a cache hit where no model ran at all.
@@ -170,10 +195,23 @@ def cube_query(in_window, day):
             UsageEvent.embedding_model,
             UsageEvent.api_key_id,
             UsageEvent.project_id,
+            UsageEvent.endpoint,
             UsageEvent.prompt_tokens.is_(None),
             UsageEvent.cache_layer.is_(None),
         )
     )
+
+
+def _query_log_day(db: Session):
+    """`query_logs.created_at` as a UTC 'YYYY-MM-DD' string, per dialect.
+
+    A twin of `_day_bucket`, which is hard-bound to UsageEvent. The two series
+    have to bucket identically or the daily chart would show query latency
+    landing on a different day from the spend that produced it.
+    """
+    if db.get_bind().dialect.name == "sqlite":
+        return func.strftime("%Y-%m-%d", QueryLog.created_at)
+    return func.to_char(func.timezone("UTC", QueryLog.created_at), "YYYY-MM-DD")
 
 
 def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
@@ -211,6 +249,7 @@ def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
     key_buckets = _rollup(cube, lambda r: r.api_key_id)
     project_buckets = _rollup(cube, lambda r: r.project_id)
     day_buckets = _rollup(cube, lambda r: r.day)
+    endpoint_buckets = _rollup(cube, lambda r: r.endpoint)
 
     # Sorted the way each table is read: busiest first, name as tiebreak, so
     # the ordering the SQL used to supply is preserved exactly.
@@ -255,6 +294,58 @@ def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
         .where(Project.owner_id == owner_id, QueryLog.created_at >= cutoff)
         .group_by(QueryLog.project_id)
     ).all()
+
+    # -- daily quality + latency, from query_logs -----------------------------
+    # query_logs, NOT usage_events: every query_log row carries a latency, while
+    # usage_events only recently began timing every endpoint - so percentiles
+    # taken from usage_events would silently describe a quarter of the traffic.
+    log_day = _query_log_day(db).label("day")
+    log_daily = db.execute(
+        select(
+            log_day,
+            func.count(QueryLog.id).label("queries"),
+            func.sum(case((QueryLog.cache_layer == "l1", 1), else_=0)).label("l1"),
+            func.sum(case((QueryLog.cache_layer == "l2", 1), else_=0)).label("l2"),
+            func.sum(case((QueryLog.cache_layer.is_(None), 1), else_=0)).label("miss"),
+            func.avg(QueryLog.retrieval_similarity).label("avg_retrieval"),
+        )
+        .join(Project, Project.id == QueryLog.project_id)
+        .where(Project.owner_id == owner_id, QueryLog.created_at >= cutoff)
+        .group_by(log_day)
+    ).all()
+    log_daily_by_date = {row.day: row for row in log_daily}
+
+    # Latencies for the percentile series. Ordered by day so they can be
+    # bucketed in one pass without re-sorting per day.
+    latency_rows = db.execute(
+        select(log_day, QueryLog.latency_ms)
+        .join(Project, Project.id == QueryLog.project_id)
+        .where(
+            Project.owner_id == owner_id,
+            QueryLog.created_at >= cutoff,
+            QueryLog.latency_ms.is_not(None),
+        )
+        .order_by(QueryLog.created_at.desc())
+        .limit(_LATENCY_SAMPLE_CAP)
+    ).all()
+    latency_by_day: dict[str, list[int]] = {}
+    for day_value, latency in latency_rows:
+        latency_by_day.setdefault(day_value, []).append(int(latency))
+    for values in latency_by_day.values():
+        values.sort()
+
+    endpoint_latency = {
+        row.endpoint: int(row.p50)
+        for row in db.execute(
+            select(
+                UsageEvent.endpoint.label("endpoint"),
+                func.avg(UsageEvent.latency_ms).label("p50"),
+            )
+            .where(*in_window, UsageEvent.latency_ms.is_not(None))
+            .group_by(UsageEvent.endpoint)
+        ).all()
+        if row.p50 is not None
+    }
 
     # Names for exactly this owner's projects - also the merge allowlist, so a
     # usage row whose project has since been deleted (no FK) cannot resurface.
@@ -353,6 +444,18 @@ def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
             )
             for model, b in _by_requests(embedding_buckets.items())
         ],
+        by_endpoint=[
+            UsageByEndpoint(
+                endpoint=endpoint,
+                requests=b.requests,
+                prompt_tokens=_i(_nsum(b.prompt)),
+                completion_tokens=_i(_nsum(b.completion)),
+                embedding_tokens=_i(_nsum(b.embedding_tokens)),
+                cost_usd=_f(_nsum(b.cost)),
+                p50_latency_ms=endpoint_latency.get(endpoint),
+            )
+            for endpoint, b in _by_requests(endpoint_buckets.items())
+        ],
         by_api_key=[
             UsageByApiKey(
                 api_key_id=str(key_id),
@@ -381,6 +484,15 @@ def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
                 saved_prompt_tokens=_i(_nsum(b.saved_prompt)),
                 embedding_tokens=_i(_nsum(b.embedding_tokens)),
                 embedding_cost_usd=_f(_nsum(b.embedding_cost)),
+                p50_latency_ms=_percentile(latency_by_day.get(date, []), 0.50),
+                p95_latency_ms=_percentile(latency_by_day.get(date, []), 0.95),
+                p99_latency_ms=_percentile(latency_by_day.get(date, []), 0.99),
+                cache_l1=int(getattr(log_daily_by_date.get(date), "l1", 0) or 0),
+                cache_l2=int(getattr(log_daily_by_date.get(date), "l2", 0) or 0),
+                cache_miss=int(getattr(log_daily_by_date.get(date), "miss", 0) or 0),
+                avg_retrieval_similarity=_f(
+                    getattr(log_daily_by_date.get(date), "avg_retrieval", None)
+                ),
             )
             for date, b in sorted(day_buckets.items())
         ],

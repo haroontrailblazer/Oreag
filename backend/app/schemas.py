@@ -386,6 +386,37 @@ class UsageDaily(BaseModel):
     saved_prompt_tokens: int | None
     embedding_tokens: int | None
     embedding_cost_usd: float | None
+    # Latency percentiles over the day's queries, from query_logs. p50 is the
+    # typical experience; p95 is the one users complain about. Both, never a
+    # mean - an average latency hides exactly the tail it is asked about.
+    p50_latency_ms: int | None
+    p95_latency_ms: int | None
+    p99_latency_ms: int | None
+    # Cache split for the day, so the hit rate can be read as a trend rather
+    # than one lifetime number.
+    cache_l1: int
+    cache_l2: int
+    cache_miss: int
+    # Mean similarity of the chunks retrieval returned that day - the closest
+    # thing to an answer-quality trend that costs nothing to collect.
+    avg_retrieval_similarity: float | None
+
+
+class UsageByEndpoint(BaseModel):
+    """One row per API surface: /query vs ingest vs memory vs the judge.
+
+    `usage_events.endpoint` has been recorded since metering began and was
+    never once shown, so "what is this account actually doing" had no answer -
+    a spike in spend could not be attributed to a surface.
+    """
+
+    endpoint: str
+    requests: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    embedding_tokens: int | None
+    cost_usd: float | None
+    p50_latency_ms: int | None
 
 
 class UsageCaveats(BaseModel):
@@ -404,6 +435,7 @@ class UsageReport(BaseModel):
     window_days: int
     totals: UsageTotals
     by_model: list[UsageByModel]
+    by_endpoint: list[UsageByEndpoint]
     by_api_key: list[UsageByApiKey]
     by_project: list[UsageByProject]
     daily: list[UsageDaily]
