@@ -370,9 +370,17 @@ function TotalsRow({
     totalCost != null && totals.requests > 0
       ? totalCost / totals.requests
       : null
+  const potentialGenerationCost = measuredSum([
+    totals.cost_usd,
+    totals.saved_cost_usd,
+  ])
+  const costAvoidedShare = shareOf(
+    totals.saved_cost_usd,
+    potentialGenerationCost
+  )
 
   return (
-    <div className="usage-summary-grid grid grid-cols-2 overflow-hidden rounded-2xl border border-blue-500/20 bg-blue-50/35 shadow-[0_16px_50px_-42px_rgba(37,99,235,0.55)] xl:grid-cols-5 dark:bg-blue-950/10">
+    <div className="usage-summary-grid grid grid-cols-2 overflow-hidden rounded-2xl border border-blue-500/20 bg-blue-50/35 shadow-[0_16px_50px_-42px_rgba(37,99,235,0.55)] xl:grid-cols-6 dark:bg-blue-950/10">
       <MetricTile
         label="Requests"
         value={totals.requests}
@@ -427,7 +435,18 @@ function TotalsRow({
         icon={<Receipt className="size-4" weight="bold" />}
         accent="var(--chart-5)"
         format="cost"
-        className="col-span-2 xl:col-span-1"
+      />
+      <MetricTile
+        label="Cost avoided"
+        value={totals.saved_cost_usd}
+        detail={
+          costAvoidedShare == null
+            ? "Savings rate not measured"
+            : `${formatPercent(costAvoidedShare)} of potential generation cost`
+        }
+        icon={<PiggyBank className="size-4" weight="bold" />}
+        accent="var(--chart-3)"
+        format="cost"
       />
     </div>
   )
