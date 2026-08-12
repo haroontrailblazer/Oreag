@@ -483,9 +483,9 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
           <ChartDonut className="size-5" weight="regular" />
         </span>
       </CardHeader>
-      <CardContent className="flex flex-col gap-5">
+      <CardContent className="flex flex-col gap-6">
         <div className="grid items-center gap-6 sm:grid-cols-[11rem_1fr]">
-          <div className="usage-donut-shell flex justify-center rounded-2xl py-3">
+          <div className="flex justify-center py-1">
             <div
               className="usage-donut-in relative flex size-40 items-center justify-center rounded-full"
               style={{
@@ -522,7 +522,7 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
             />
           </div>
         </div>
-        <div className="usage-cost-density-grid grid grid-cols-2 gap-3 rounded-xl border bg-muted/20 p-3">
+        <div className="grid grid-cols-2 gap-6 border-t border-border/70 pt-5">
           <EfficiencyMetric
             label="Generation cost density"
             value={generationCostPerMillion}
@@ -668,8 +668,8 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
           <PiggyBank className="size-5" weight="regular" />
         </span>
       </CardHeader>
-      <CardContent className="flex flex-col gap-5">
-        <div className="usage-savings-hero flex flex-col gap-4 rounded-2xl border p-4">
+      <CardContent className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -711,7 +711,7 @@ function CacheSavingsCard({ totals }: { totals: UsageTotals }) {
             />
           </div>
         </div>
-        <div className="usage-savings-metrics grid grid-cols-2 gap-3 rounded-xl border bg-card/70 p-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-5 border-t border-border/70 pt-5 sm:grid-cols-3">
           <SavingsMetric
             label="Cost saved"
             value={

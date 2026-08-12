@@ -446,24 +446,9 @@
     var(--card);
 }
 
-.usage-donut-shell {
-  background: radial-gradient(circle, color-mix(in oklab, var(--chart-1) 10%, transparent), transparent 66%);
-}
-
-.usage-cost-density-grid,
-.usage-savings-metrics {
-  border-color: color-mix(in oklab, var(--border) 84%, var(--chart-1) 16%);
-}
-
 .usage-savings-card {
   background:
     linear-gradient(145deg, color-mix(in oklab, var(--chart-3) 5%, var(--card)), var(--card) 42%);
-}
-
-.usage-savings-hero {
-  border-color: color-mix(in oklab, var(--chart-3) 23%, var(--border));
-  background: color-mix(in oklab, var(--chart-3) 5%, var(--card));
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--chart-3) 10%, transparent);
 }
 
 .usage-caveat [data-slot="alert-title"] {
