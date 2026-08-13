@@ -60,6 +60,12 @@ SEMANTIC_SQL = text(
 # websearch_to_tsquery is forgiving of raw user input (plain words, "quoted
 # phrases", OR). Cosine similarity is still selected so lexical-only hits
 # carry a meaningful `similarity` downstream.
+#
+# 'english' MUST match the config on the generated `content_tsv` column
+# (migration 0031). Stemmed index + unstemmed query means the terms never meet
+# and this half silently returns nothing - no error, just an empty result set
+# that looks like "no lexical matches". Changing one without the other is the
+# failure mode to watch for.
 LEXICAL_SQL = text(
     """
     SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename,
@@ -67,8 +73,8 @@ LEXICAL_SQL = text(
     FROM chunks c
     JOIN files f ON f.id = c.file_id
     WHERE c.project_id = :project_id
-      AND c.content_tsv @@ websearch_to_tsquery('simple', :question)
-    ORDER BY ts_rank_cd(c.content_tsv, websearch_to_tsquery('simple', :question)) DESC
+      AND c.content_tsv @@ websearch_to_tsquery('english', :question)
+    ORDER BY ts_rank_cd(c.content_tsv, websearch_to_tsquery('english', :question)) DESC
     LIMIT :limit
     """
 )
