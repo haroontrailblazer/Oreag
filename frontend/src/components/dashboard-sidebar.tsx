@@ -46,8 +46,8 @@ import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const mainNav = [
-  { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/projects/new", label: "New project", icon: Plus },
+  { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
   { href: "/settings/usage", label: "Usage", icon: ChartBar },
 ]
