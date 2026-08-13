@@ -58,6 +58,7 @@ import {
   ModelUsage,
   RetrievalQuality,
 } from "@/components/settings/usage-quality"
+import { ProjectPortfolio } from "@/components/settings/usage-projects"
 import { TextScrambleEffect } from "@/components/ui/text-scramble-effect"
 import {
   Table,
@@ -1761,6 +1762,7 @@ export function UsageView({ data }: { data: AccountUsage }) {
               <p>Trace account consumption across credentials, models and projects.</p>
             </div>
           </div>
+          <ProjectPortfolio rows={data.by_project} />
           <ApiKeysTable rows={data.by_api_key} />
           <ModelsTable
             rows={data.by_model}
