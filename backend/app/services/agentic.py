@@ -186,6 +186,16 @@ def merge_sources(lists: list[list[dict]]) -> list[dict]:
     return sorted(best.values(), key=lambda s: s["similarity"], reverse=True)
 
 
+# How far the grounding floor may be relaxed on the LAST attempt, as a fraction
+# of the configured threshold. 0.85 mirrors RAGFlow's 0.2 -> 0.17 fallback.
+#
+# Small on purpose. A large relaxation would answer from material the system
+# does not really believe in, which is the failure the threshold exists to
+# prevent; a small one recovers the near-misses that were never worth
+# interrupting a human over.
+RELAXED_SIMILARITY_RATIO = 0.85
+
+
 def is_sufficient(
     sources: list[dict], min_similarity: float, min_strong: int
 ) -> bool:
@@ -283,6 +293,32 @@ def gather_context(
         # Not enough yet - broaden the net and re-query the literal question.
         queries = [question]
         top_k = min(top_k * 2, 20)
+
+    # Before giving up, try once at a RELAXED floor.
+    #
+    # Borrowed from RAGFlow, which drops its similarity threshold from 0.2 to
+    # 0.17 (and min_match from 0.3 to 0.1) when a pass comes back empty rather
+    # than escalating immediately.
+    #
+    # The case it fixes here: the best source scored 0.19 against a floor of
+    # 0.2, so the loop asked a clarifying question about material it had
+    # already found. Widening top_k - the only thing the loop did before - does
+    # not help that at all, because the problem was never the number of
+    # candidates, it was the bar.
+    #
+    # Deliberately NOT the same as lowering min_similarity outright: this only
+    # applies after every normal round has failed, and it still needs
+    # min_strong sources to clear the relaxed floor, so a question the corpus
+    # genuinely does not cover still reaches a human.
+    relaxed = min_similarity * RELAXED_SIMILARITY_RATIO
+    if relaxed < min_similarity and is_sufficient(gathered, relaxed, min_strong):
+        return GatheredContext(
+            sources=gathered,
+            depth=depth,
+            sub_queries=sub_queries,
+            rounds=rounds,
+            needs_clarification=False,
+        )
 
     # Loop exhausted without enough grounding → keep a human in the loop.
     return GatheredContext(
