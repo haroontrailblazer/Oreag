@@ -13,7 +13,7 @@ import { ogImages } from "@/lib/og-image"
 
 const DOCS_TITLE = "Documentation - Oreag"
 const DOCS_DESCRIPTION =
-  "Everything in Oreag: projects, uploading documents, the RAG query API, " +
+  "Everything in Oreag: projects, uploading documents, usage analytics, the RAG query API, " +
   "agentic retrieval, agent memory, the memory graph, the MCP server, and API keys."
 
 export const metadata: Metadata = {
