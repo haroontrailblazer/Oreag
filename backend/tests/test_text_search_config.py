@@ -20,14 +20,33 @@ def _query_configs() -> set[str]:
 
 
 def _latest_tsv_migration() -> str:
-    """Source of the LATEST migration that (re)defines content_tsv."""
+    """Source of the LATEST migration that (re)defines content_tsv.
+
+    Two shapes count: `generated always as` (0012, 0031) and PG17's
+    `alter column ... set expression as` (0033, which avoids dropping the
+    column so the SQL editor stops flagging it as destructive).
+    """
     latest = None
     for path in sorted((ROOT / "supabase/migrations").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
-        if "generated always as" in text and "content_tsv" in text:
+        if "content_tsv" not in text:
+            continue
+        if "generated always as" in text or "set expression as" in text:
             latest = text
     assert latest, "no migration defines content_tsv"
     return latest
+
+
+def _executable_sql(src: str) -> str:
+    """The part of a migration Postgres actually runs.
+
+    Everything before the first statement is commentary, which may legitimately
+    contain CJK examples; only the statements have to be ASCII.
+    """
+    starts = [i for i in (src.find("do $"), src.find("drop index"),
+                          src.find("alter table")) if i != -1]
+    assert starts, "no executable statement found in the migration"
+    return src[min(starts):]
 
 
 def _index_config() -> str:
@@ -35,7 +54,7 @@ def _index_config() -> str:
     # Tolerant of whitespace: 0033 wraps the expression across several lines,
     # so the config name no longer sits on the same line as `generated always`.
     matches = re.findall(
-        r"generated always as \(\s*to_tsvector\(\s*'(\w+)'", _latest_tsv_migration()
+        r"to_tsvector\(\s*'(\w+)'", _executable_sql(_latest_tsv_migration())
     )
     assert matches, "no migration defines content_tsv"
     return matches[-1]
@@ -58,6 +77,37 @@ class TestConfigsAgree:
         """'simple' does not stem, so "investing" never reached "invest" and
         the lexical half was close to dead weight on prose."""
         assert _index_config() != "simple"
+
+
+class TestMigrationIsRunnableByOurOwnTooling:
+    """scripts/apply_migration.py executes the file through psycopg.
+
+    psycopg scans the whole statement - comments included - for its own
+    placeholders and refuses any other percent sign. A `format('...%s...')`
+    in the migration made the Supabase SQL editor happy and the repo's own
+    migration runner throw, which is a split that only shows up at deploy time.
+    """
+
+    def test_no_percent_sign_anywhere(self):
+        sql = _latest_tsv_migration()
+        assert "%" not in sql, (
+            "a percent sign makes this migration unrunnable by "
+            "scripts/apply_migration.py (psycopg placeholder parsing)"
+        )
+
+
+class TestMigrationIsNotDestructive:
+    """The SQL editor flags `drop column` / `drop index`, and it is right to.
+
+    `content_tsv` is GENERATED STORED so nothing is lost either way, but a
+    migration whose safety has to be argued gets run nervously or not at all.
+    PG17's SET EXPRESSION changes it in place instead.
+    """
+
+    def test_the_latest_migration_drops_nothing(self):
+        body = _executable_sql(_latest_tsv_migration()).lower()
+        for phrase in ("drop index", "drop column", "drop table", "truncate"):
+            assert phrase not in body, f"latest content_tsv migration runs {phrase!r}"
 
 
 def _char_classes(src: str) -> list[str]:
@@ -105,7 +155,6 @@ class TestUnspacedScriptNormalisationAgrees:
         cannot silently turn it into a class that matches nothing - which would
         fail the same quiet way the original bug did.
         """
-        sql = _latest_tsv_migration()
-        body = sql[sql.index("drop index"):]
+        body = _executable_sql(_latest_tsv_migration())
         offenders = [ch for ch in body if ord(ch) > 127]
         assert not offenders, f"non-ASCII in executable SQL: {offenders[:5]}"
