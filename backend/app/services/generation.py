@@ -50,9 +50,55 @@ LONG_SYSTEM_PROMPT = (
 SYSTEM_PROMPT = SHORT_SYSTEM_PROMPT
 
 
-def system_prompt_for(depth: str) -> str:
-    """Pick the grounding prompt for the detected answer depth."""
-    return LONG_SYSTEM_PROMPT if depth == "long" else SHORT_SYSTEM_PROMPT
+def system_prompt_for(
+    depth: str,
+    language: str | None = None,
+    disclaimer: str | None = None,
+) -> str:
+    """Pick the grounding prompt for the detected answer depth.
+
+    ``language`` and ``disclaimer`` come from the project (migration 0032) and
+    are appended rather than folded into the constants, so a project that sets
+    neither gets byte-identical output to before - which is what keeps both
+    answer caches valid for existing projects.
+
+    Language is APPENDED, not substituted: the base prompts say nothing about
+    language, so without this a question asked in Hindi could be answered in
+    English purely because the sources were English. Mirroring is the default
+    because it needs no configuration; ``language`` forces one instead.
+    """
+    base = LONG_SYSTEM_PROMPT if depth == "long" else SHORT_SYSTEM_PROMPT
+    extra = []
+    if language:
+        extra.append(
+            f"Write the entire answer in {language}, regardless of the language "
+            "of the question or of the source material."
+        )
+    else:
+        extra.append(
+            "Write the answer in the same language the question was asked in, "
+            "even when the source material is in another language."
+        )
+    if disclaimer:
+        # Verbatim and last, so a regulator-facing notice cannot be paraphrased
+        # into something weaker by the model.
+        extra.append(
+            "End every answer with this notice on its own line, reproduced "
+            f"exactly and never reworded: {disclaimer}"
+        )
+    return base + " " + " ".join(extra)
+
+
+def policy_for(project) -> tuple[str | None, str | None]:
+    """The project's (language, disclaimer), tolerant of older rows.
+
+    getattr rather than attribute access: tests and any caller holding a
+    lightweight stand-in for Project should not have to know about 0032.
+    """
+    return (
+        getattr(project, "answer_language", None),
+        getattr(project, "answer_disclaimer", None),
+    )
 
 
 def build_user_prompt(question: str, sources: list[dict]) -> str:
@@ -191,7 +237,7 @@ def generate_answer(
     else:
         api_key = resolver.resolve_llm_key(db, project)
         llm = get_llm(project.llm_provider, project.llm_model, api_key)
-    system_prompt = system_prompt_for(depth)
+    system_prompt = system_prompt_for(depth, *policy_for(project))
     user_prompt = build_user_prompt(question, sources)
     # The key is resolved and both prompts are built from plain data - nothing
     # below this line touches the database, so the pool slot goes back before
@@ -240,7 +286,7 @@ def generate_answer_stream(
     else:
         api_key = resolver.resolve_llm_key(db, project)
         llm = get_llm(project.llm_provider, project.llm_model, api_key)
-    system_prompt = system_prompt_for(depth)
+    system_prompt = system_prompt_for(depth, *policy_for(project))
     user_prompt = build_user_prompt(question, sources)
     # See generate_answer - a streamed answer holds the slot even longer, for
     # as long as the client keeps reading.

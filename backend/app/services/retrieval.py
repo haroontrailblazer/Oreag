@@ -57,24 +57,43 @@ SEMANTIC_SQL = text(
     """
 )
 
+# Split unspaced scripts (CJK, Thai) one character per token.
+#
+# THIS MUST STAY BYTE-IDENTICAL to the expression generating `content_tsv` in
+# migration 0033. The index side and the query side have to agree: transform
+# one and not the other and lexical search silently returns nothing - no error,
+# just an empty result set indistinguishable from "this corpus had no keyword
+# matches". test_text_search_config.py parses both files and fails on drift.
+#
+# Postgres has no segmenter for these scripts, so without it an entire Han run
+# is ONE token and no substring query can match. Every other script - Latin,
+# all 22 scheduled Indian languages, Hangul, Arabic - is left untouched by the
+# character class, verified byte-identical against the live database.
+_UNSPACED_SPLIT = (
+    r"regexp_replace({col}, "
+    r"E'([\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\u0E00-\u0E7F])', "
+    r"' \1 ', 'g')"
+)
+_TSV_QUERY = "websearch_to_tsquery('english', " + _UNSPACED_SPLIT.format(col=":question") + ")"
+
 # websearch_to_tsquery is forgiving of raw user input (plain words, "quoted
-# phrases", OR). Cosine similarity is still selected so lexical-only hits
-# carry a meaningful `similarity` downstream.
+# phrases", OR) and never raises on malformed input - which is why the query is
+# normalised with a regexp rather than hand-built as a tsquery string.
+# Cosine similarity is still selected so lexical-only hits carry a meaningful
+# `similarity` downstream.
 #
 # 'english' MUST match the config on the generated `content_tsv` column
-# (migration 0031). Stemmed index + unstemmed query means the terms never meet
-# and this half silently returns nothing - no error, just an empty result set
-# that looks like "no lexical matches". Changing one without the other is the
-# failure mode to watch for.
+# (migrations 0031, 0033). Stemmed index + unstemmed query means the terms
+# never meet and this half silently returns nothing.
 LEXICAL_SQL = text(
-    """
+    f"""
     SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename,
            1 - (c.embedding <=> CAST(:qvec AS vector)) AS similarity
     FROM chunks c
     JOIN files f ON f.id = c.file_id
     WHERE c.project_id = :project_id
-      AND c.content_tsv @@ websearch_to_tsquery('english', :question)
-    ORDER BY ts_rank_cd(c.content_tsv, websearch_to_tsquery('english', :question)) DESC
+      AND c.content_tsv @@ {_TSV_QUERY}
+    ORDER BY ts_rank_cd(c.content_tsv, {_TSV_QUERY}) DESC
     LIMIT :limit
     """
 )

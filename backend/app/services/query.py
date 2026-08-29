@@ -1,6 +1,8 @@
 import dataclasses
+import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -212,6 +214,83 @@ def _mean_similarity(sources) -> float | None:
     return round(sum(values) / len(values), 4)
 
 
+_CITE_RE = re.compile(r"\[(\d{1,3})\]")
+
+
+def _grounding_policy(project) -> tuple[float, int]:
+    """This project's (min_similarity, min_strong), falling back to the globals.
+
+    Reads defensively rather than as ``project.min_similarity`` for a reason
+    that outlives the tests: during a rolling deploy new code runs against a
+    database that has not had migration 0032 applied yet, so the attribute is
+    absent or None on a row loaded in that window. Falling back to the config
+    default there reproduces exactly the pre-0032 behaviour instead of raising
+    on every query until the migration lands.
+
+    ``is not None`` and NOT ``or``: 0.0 and 0 are meaningful ("never abstain"),
+    and ``or`` would silently swap them for the global default.
+    """
+    sim = getattr(project, "min_similarity", None)
+    strong = getattr(project, "min_strong", None)
+    return (
+        sim if sim is not None else settings.agentic_min_similarity,
+        strong if strong is not None else settings.agentic_min_strong,
+    )
+
+
+def _answer_signature(project) -> str:
+    """Everything that changes the ANSWER but not the CONTENT.
+
+    The cache key already covers models, top_k and content_version. The answer
+    policy from migration 0032 does not appear there, so without this a project
+    that tightens its grounding floor or sets a disclaimer keeps being served
+    the answer computed under the old policy - for up to the L2 TTL of 24h.
+
+    Rendered as a compact string rather than new columns: both cache layers
+    already compare this one signature for equality, so extending it costs
+    nothing and needs no migration on a high-churn table.
+    """
+    parts = [f"v{project.content_version}"]
+    # getattr keeps this working for the lightweight project stand-ins used in
+    # tests, which do not carry the 0032 columns.
+    sim = getattr(project, "min_similarity", None)
+    strong = getattr(project, "min_strong", None)
+    lang = getattr(project, "answer_language", None)
+    disc = getattr(project, "answer_disclaimer", None)
+    if sim is not None:
+        parts.append(f"s{sim}")
+    if strong is not None:
+        parts.append(f"n{strong}")
+    if lang:
+        parts.append(f"l{lang}")
+    if disc:
+        # Hashed, not inlined: a 500-char disclaimer would otherwise dominate
+        # the key, and only its identity matters here.
+        parts.append("d" + hashlib.sha256(disc.encode("utf-8")).hexdigest()[:12])
+    return "|".join(parts)
+
+
+def _mark_cited(answer: str | None, sources: list[dict]) -> list[dict]:
+    """Flag the sources the answer actually cited as [n].
+
+    ``sources`` is everything the loop retrieved, which is deliberately wider
+    than what the answer used. Reporting all of it as "sources" without saying
+    which were cited lets a reader assume every one supported the claim.
+
+    Best effort by design: the markers come from model output, so an answer
+    that cites nothing simply leaves every flag False - which is itself the
+    honest signal, not an error.
+    """
+    if not sources:
+        return sources
+    cited: set[int] = set()
+    for match in _CITE_RE.finditer(answer or ""):
+        idx = int(match.group(1)) - 1  # blocks are numbered from 1
+        if 0 <= idx < len(sources):
+            cited.add(idx)
+    return [{**s, "cited": i in cited} for i, s in enumerate(sources)]
+
+
 def _fill_usage_out(
     usage_out: dict | None,
     request_usage: _UsageAccumulator,
@@ -417,8 +496,8 @@ def run_query(
                     ),
                 ),
                 top_k=top_k,
-                min_similarity=settings.agentic_min_similarity,
-                min_strong=settings.agentic_min_strong,
+                min_similarity=_grounding_policy(project)[0],
+                min_strong=_grounding_policy(project)[1],
                 max_rounds=settings.agentic_max_rounds,
             )
             return dataclasses.replace(
@@ -434,7 +513,7 @@ def run_query(
         # threshold reuses the cached answer, below it the query runs for real.
         # Both are scoped by models + top_k + content_version, so ANY content
         # write (including in-place edits) instantly orphans stale answers.
-        signature = f"v{project.content_version}"
+        signature = _answer_signature(project)
         semantic_vector: list[float] | None = None
         cache_layer: str | None = None
         cache_similarity: float | None = None
@@ -533,7 +612,7 @@ def run_query(
 
     return QueryResponse(
         answer=answer,
-        sources=[SourceChunk(**s) for s in result.sources],
+        sources=[SourceChunk(**s) for s in _mark_cited(answer, result.sources)],
         model=model,
         latency_ms=latency_ms,
         depth=result.depth,
@@ -543,6 +622,7 @@ def run_query(
         conversation_id=conversation_id,
         cache_layer=cache_layer,
         cache_similarity=cache_similarity,
+        retrieval_similarity=_mean_similarity(result.sources),
     )
 
 
@@ -596,7 +676,7 @@ def run_query_stream(
         project_id = project.id
         project_key = str(project_id)
         model = f"{project.llm_provider}/{project.llm_model}"
-        signature = f"v{project.content_version}"
+        signature = _answer_signature(project)
         top_k = min(top_k_override or project.top_k, 20)
         has_chunks = bool(
             db.scalar(select(Chunk.id).where(Chunk.project_id == project.id).limit(1))
@@ -810,8 +890,8 @@ def run_query_stream(
                             ),
                         ),
                         top_k=top_k,
-                        min_similarity=settings.agentic_min_similarity,
-                        min_strong=settings.agentic_min_strong,
+                        min_similarity=_grounding_policy(project)[0],
+                        min_strong=_grounding_policy(project)[1],
                         max_rounds=settings.agentic_max_rounds,
                     )
                     while True:
@@ -922,7 +1002,7 @@ def run_query_stream(
         "type": "done",
         "response": {
             "answer": answer,
-            "sources": [dict(s) for s in final.sources],
+            "sources": [dict(s) for s in _mark_cited(answer, final.sources)],
             "model": model,
             "latency_ms": latency_ms,
             "depth": final.depth,
@@ -932,5 +1012,6 @@ def run_query_stream(
             "conversation_id": conversation_id,
             "cache_layer": cache_layer,
             "cache_similarity": cache_similarity,
+            "retrieval_similarity": _mean_similarity(final.sources),
         },
     }

@@ -18,6 +18,10 @@ from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, deferred, mapped_column
 
+# Safe: config imports nothing from the app, so this cannot cycle. Used only to
+# seed NEW projects' answer policy from the deployment defaults.
+from .config import settings
+
 
 class Base(DeclarativeBase):
     pass
@@ -45,6 +49,20 @@ class Project(Base):
     llm_provider: Mapped[str] = mapped_column(Text, default="openai")
     llm_model: Mapped[str] = mapped_column(Text, default="gpt-4o-mini")
     top_k: Mapped[int] = mapped_column(Integer, default=5)
+    # Answer policy (migration 0032). NOT NULL with defaults rather than
+    # nullable-inherit: 0 and 0.0 are meaningful ("never abstain"), so an `or`
+    # fallback would silently restore the global default while the UI showed 0.
+    # The config values seed NEW projects; they no longer steer existing ones.
+    min_similarity: Mapped[float] = mapped_column(
+        Float, default=lambda: settings.agentic_min_similarity, server_default="0.2"
+    )
+    min_strong: Mapped[int] = mapped_column(
+        Integer, default=lambda: settings.agentic_min_strong, server_default="1"
+    )
+    # NULL = mirror the question's language / no disclaimer. Both are read at
+    # the single generation chokepoint, so they cost nothing when unset.
+    answer_language: Mapped[str | None] = mapped_column(Text)
+    answer_disclaimer: Mapped[str | None] = mapped_column(Text)
     # Optional per-project BYOK key overrides (Fernet ciphertext + last4 for
     # display). When null, key resolution falls back to the owner's account key.
     embedding_key_encrypted: Mapped[str | None] = mapped_column(Text)

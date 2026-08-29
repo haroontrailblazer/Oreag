@@ -32,8 +32,9 @@ sentence-transformers), stored encrypted at rest.
 
 - **Any document to an API** - upload, auto-convert to Markdown, chunk, embed, and serve.
 - **Per-project RAG endpoint** - `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
-- **Agentic retrieval loop** - auto depth detection (short vs long), query decomposition for big/exam questions, multi-round retrieve-and-merge with a sufficiency check, and human-in-the-loop clarification instead of a dead "no reference".
-- **Hybrid retrieval** - semantic pgvector search and lexical Postgres full-text search run together and are fused with Reciprocal Rank Fusion (RRF), so exact terms (error codes, IDs, names) embeddings fumble are still caught. Degrades to semantic-only automatically if the lexical column is missing.
+- **Agentic retrieval loop** - auto depth detection (short vs long), query decomposition for big/exam questions, multi-round retrieve-and-merge with a sufficiency check, and human-in-the-loop clarification instead of a dead "no reference". Depth detection is **script-aware**: directive verbs are recognised across Latin, Devanagari, Bengali, Tamil, Telugu, Kannada, Malayalam, Gujarati, Gurmukhi, Odia, Arabic, Han, Kana, Hangul and Thai, with a vocabulary-free length fallback (approximate word count, character-derived for scripts without spaces) so a substantial question reaches the loop even in a language nobody enumerated. This matters more than it looks: depth gates decomposition, so an English-only classifier silently made the whole multi-query path - and the structured long-form answer - unreachable in every other language, and nothing failed because "short" is a valid depth.
+- **Per-project answer policy** - how sure retrieval must be before a project answers at all, and how the answer is framed, set per project rather than per deployment (migration 0032). A **grounding threshold** (`min_similarity`, default 0.2) is the cosine a chunk must clear to count as evidence, and **sources required** (`min_strong`, default 1) is how many must clear it before the loop may answer - below that it asks a clarifying question instead of guessing. Sources under the threshold are now **dropped from the prompt**, not merely counted, so a weak chunk can no longer sit in the context as `[2]` and be cited as if it supported the claim. An optional **answer language** forces every reply into one language (blank mirrors whatever language the question was asked in, even when the documents are in another), and an optional **standing notice** is appended verbatim to every answer - an "information, not legal advice" line, say. The policy joins the cache signature, so changing it invalidates cached answers immediately instead of serving pre-change ones for up to 24 h. Responses carry `retrieval_similarity` (mean similarity behind the answer, null when nothing was retrieved) and mark each source `cited` when the answer actually referenced it as `[n]`.
+- **Hybrid retrieval, in every language** - semantic pgvector search and lexical Postgres full-text search run together and are fused with Reciprocal Rank Fusion (RRF), so exact terms (error codes, IDs, names) embeddings fumble are still caught. Degrades to semantic-only automatically if the lexical column is missing. Postgres ships no word segmenter for **Chinese, Japanese or Thai**, so an entire Han run was one token and a term the document literally contained could not be found - measured, the lexical half was dead for exactly those three of 20 languages tested. Migration 0033 splits unspaced scripts one character per token on **both** the index and the query side, which needs no extension (`zhparser`/`pg_bigm` are unavailable on managed Postgres) and leaves every other script byte-identical - verified for Latin, Devanagari, Hangul and Arabic. Trade-off, stated: per-character tokens match as a conjunction rather than a substring, so a scattered-character decoy can hit - measured at rank 0.02 against 0.10 for a true match, which `ts_rank_cd` and RRF order correctly.
 - **Two-layer answer cache** - used by every query surface (playground, `/v1` API, MCP). L1 is an exact-match CAG cache in Redis (in-memory fallback, single-flight de-duplication, 1 h TTL); L2 is a semantic cache in Postgres/pgvector - a new question whose cosine similarity to an answered one is >= 0.75 is served from cache at the cost of one embedding call (24 h TTL). Both layers are scoped by project, models, top-K, and `content_version`, so new content or model changes invalidate automatically. Responses report `cache_layer` and `cache_similarity`.
 - **Streaming answers (SSE)** - `POST /v1/projects/{id}/query/stream` and the dashboard playground stream the answer token by token over Server-Sent Events. Same brain, same caches, same agentic loop; only the final generation is streamed. Frames are `{"type":"token"}`, a terminal `{"type":"done","response":{…}}` carrying sources and cache info, and `{"type":"error"}` (errors arrive as frames, since the 200 headers are already sent). Cache hits are sliced so the experience is identical, and keep-alive pings cover the silent retrieval phase. Native streaming for OpenAI and OpenAI-compatible vendors, Anthropic, Gemini, Sarvam and Ollama.
 - **Durable ingestion queue** - the `files` table *is* the queue: workers claim the oldest pending row with `FOR UPDATE SKIP LOCKED` under a time lease, so a restart or a dead worker never loses a job and never double-processes one. Up to 3 attempts, then the file is failed with its chunks removed. Chunks commit per batch, so a crash loses at most one batch.
@@ -45,7 +46,7 @@ sentence-transformers), stored encrypted at rest.
 - **Visualize tab** - a 3D interactive knowledge graph inside each project: the project, its files, chunks, and memories as nodes with structural and similarity edges - orbit/zoom, hover tooltips, and a click-through details panel with a "View file" action.
 - **BYOK, multi-provider** - 16 keyed providers (OpenAI, Google Gemini, Anthropic, Azure OpenAI, Mistral, Cohere, Together AI, Fireworks AI, xAI Grok, Groq, DeepSeek, OpenRouter, Perplexity, Voyage AI, Jina AI, Sarvam) plus keyless local Ollama, LM Studio, and sentence-transformers. Keys encrypted with Fernet; per-account **and** per-project overrides.
 - **Secure by design** - Supabase Auth (JWT/JWKS), Row-Level Security, SHA-256-hashed API keys, Fernet-encrypted provider keys.
-- **Tunable** - chunk size/overlap (global or per-file), embedding model, LLM, top-K - with one-click re-index.
+- **Tunable** - chunk size/overlap (global or per-file), embedding model, LLM, top-K, and the answer policy above (grounding threshold, sources required, answer language, standing notice) - with one-click re-index. Everything except the embedding config takes effect instantly.
 - **Matryoshka (MRL) dimensions** - MRL-capable embedding models (OpenAI text-embedding-3, gemini-embedding-001, Cohere embed-v4.0, Jina v3) offer multiple sizes; shrinking the same model truncates stored vectors (chunks **and** memories) in place instantly with zero re-embedding, while growing or switching models re-embeds everything.
 - **Approximate vector search (HNSW)** - migration 0018 builds one *partial* HNSW index per embedding dimension (256/384/512/768/1024/1536; 3072 is over pgvector's 2,000-dimension limit and stays exact). A query is only routed onto an index when four gates pass: the feature flag, pgvector >= 0.8, a valid cosine index for that exact dimension, and a project holding >= 20,000 chunks *and* >= 2% of all indexed rows - because a global index must post-filter by `project_id`, so recall depends on the project's share while exact cost depends on its size. Everything else keeps the exact scan, which is never removed. See [flow.md §9.1](flow.md#9-structural-scale--indexes-pooling-fleet-wide-locks).
 - **Passkeys, verification codes and two-factor** - sign in with a **passkey** in one step (no password, phishing-resistant, and it ends the ceremony because it is already possession plus biometric), or with a password or a 6-digit emailed code. Weaker paths pass through an optional **two-factor** gate; passkey sign-ins skip it by design rather than by special case. Every email carries both a code and a link, so a code works on a phone while the link still works for anyone who clicks it. Changing a password while signed in now requires an emailed code that is verified BEFORE the password fields appear, closing the hole where a stolen session became permanent takeover. **Lost your authenticator?** Ten single-use recovery codes are issued when you enrol; entering one removes the account's second factors so you can sign in and set it up again (a code cannot grant `aal2` - only Supabase issues that - so removing the factor is the only shape that works). Only SHA-256 hashes are stored. Enforcement is server-side: `backend/app/auth/jwt.py` reads the JWT's `aal` claim and refuses a session below `aal2` for any account with a verified factor, so lifting a token out of the browser and calling the API with curl does not bypass the prompt. See [flow.md §10](flow.md#10-passkeys-codes-and-two-factor).
@@ -197,11 +198,11 @@ sequenceDiagram
         API->>L: condense_question() → standalone question
     end
 
-    API->>QC: L1 exact lookup, then L2 semantic (cosine >= 0.75)<br/>scoped by project · models · top_k · content sig
+    API->>QC: L1 exact lookup, then L2 semantic (cosine >= 0.75)<br/>scoped by project · models · top_k · content sig · answer policy
     alt cache hit (L1 or L2)
         QC-->>API: cached answer (no retrieval, no LLM)
     else double miss (single-flight)
-        API->>AG: detect_depth(question) → short | long
+        API->>AG: detect_depth(question) → short | long (script-aware)
         opt long
             AG->>L: plan_subqueries() (literal question kept)
         end
@@ -210,9 +211,10 @@ sequenceDiagram
             R->>DB: hybrid search - pgvector + full-text, fused with RRF
             DB-->>R: top-k chunks
             R-->>AG: sources
-            AG->>AG: merge + de-duplicate · is_sufficient()
+            AG->>AG: merge + de-duplicate · is_sufficient(project policy)
         end
         alt sufficient
+            AG->>AG: drop sources under the grounding threshold
             AG->>L: depth-aware answer (long = structured · short = strict)
             L-->>AG: grounded answer
         else still insufficient
@@ -226,7 +228,7 @@ sequenceDiagram
         API->>CV: save turn (question + answer)
     end
     API->>DB: write query_logs
-    API-->>-C: 200 - answer + sources + depth + cache_layer + latency
+    API-->>-C: 200 - answer + sources (cited flagged) + depth<br/>+ cache_layer + retrieval_similarity + latency
 ```
 
 ### 3. BYOK Key Resolution
@@ -369,7 +371,7 @@ Oreag/
 │       └── models.py, schemas.py, config.py, db.py, main.py
 ├── mcp-server/               # Oreag MCP server (FastMCP) - 9 agent memory + docs tools
 ├── supabase/
-│   ├── migrations/           # 0001…0031 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering, HNSW vector indexes, MFA enforcement, passkey-aware login lookup, MFA recovery codes, per-key model listings, conversion reuse, reversible Matryoshka archive, memory chunking + its HNSW indexes, usage analytics columns, measured cache savings, embedding spend, Matryoshka savings, english text search)
+│   ├── migrations/           # 0001…0033 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering, HNSW vector indexes, MFA enforcement, passkey-aware login lookup, MFA recovery codes, per-key model listings, conversion reuse, reversible Matryoshka archive, memory chunking + its HNSW indexes, usage analytics columns, measured cache savings, embedding spend, Matryoshka savings, english text search, per-project answer policy, CJK/Thai lexical search)
 │   └── templates/            # branded auth email templates
 ├── scripts/
 │   └── check_docs_sync.py    # documentation drift harness - see below

@@ -15,6 +15,14 @@ export interface Project {
   llm_provider: string
   llm_model: string
   top_k: number
+  // Answer policy (migration 0032). Always concrete - there is no "inherit"
+  // state, so the form never has to render a blank that means "the global
+  // default, whatever that currently is".
+  min_similarity: number
+  min_strong: number
+  // null = mirror the question's language / no disclaimer.
+  answer_language: string | null
+  answer_disclaimer: string | null
   status: "empty" | "indexing" | "ready" | "error"
   // When true the public /v1 API + MCP are blocked (403) until resumed.
   suspended: boolean
@@ -109,6 +117,9 @@ export interface SourceChunk {
   chunk_index: number
   content: string
   similarity: number
+  // True when the answer actually cited this block as [n]. `sources` is
+  // everything retrieval returned, which is wider than what the answer used.
+  cited?: boolean
 }
 
 export interface QueryResponse {
@@ -129,6 +140,9 @@ export interface QueryResponse {
   // similar question, or null/undefined when computed fresh.
   cache_layer?: "l1" | "l2" | null
   cache_similarity?: number | null
+  // Mean similarity of the sources behind this answer. null - never 0 - when
+  // nothing was retrieved.
+  retrieval_similarity?: number | null
 }
 
 /** Node in the project "brain" graph (files, sections, chunks, memories). */

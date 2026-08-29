@@ -135,6 +135,13 @@ function SourceChips({ sources }: { sources: SourceChunk[] }) {
               <span className="text-[10px] tabular-nums text-muted-foreground">
                 {(source.similarity * 100).toFixed(0)}%
               </span>
+              {source.cited ? (
+                <span
+                  aria-hidden
+                  title="Cited in the answer"
+                  className="size-1.5 shrink-0 rounded-full bg-foreground/70"
+                />
+              ) : null}
             </button>
           )
         })}
@@ -154,6 +161,7 @@ function SourceChips({ sources }: { sources: SourceChunk[] }) {
               </span>
             </span>
             <span className="shrink-0 text-muted-foreground">
+              {active.cited ? "Cited · " : ""}
               {(active.similarity * 100).toFixed(0)}% match
             </span>
           </div>

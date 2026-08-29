@@ -171,6 +171,18 @@ def update_project(
         project.description = body.description.strip() or None
     if body.top_k is not None:
         project.top_k = body.top_k
+    # Answer policy. `is not None` and NOT `or`: 0.0 and 0 are meaningful here
+    # ("never abstain"), and `or` would discard them for the current value.
+    if body.min_similarity is not None:
+        project.min_similarity = body.min_similarity
+    if body.min_strong is not None:
+        project.min_strong = body.min_strong
+    # Blank collapses to NULL so "unset" has one representation, matching
+    # description above.
+    if body.answer_language is not None:
+        project.answer_language = body.answer_language.strip() or None
+    if body.answer_disclaimer is not None:
+        project.answer_disclaimer = body.answer_disclaimer.strip() or None
     _set_key_override(project, "embedding", body.embedding_api_key)
     _set_key_override(project, "llm", body.llm_api_key)
     db.commit()

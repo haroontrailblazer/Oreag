@@ -18,6 +18,16 @@ import argparse
 import pathlib
 import sys
 
+# A Windows console defaults to cp1252, which cannot encode the CJK examples in
+# migration 0033's comments - so printing the SQL crashed the script before it
+# could apply anything. The migration statements themselves are ASCII; only the
+# commentary is not. Reconfigure rather than strip, so the SQL is echoed as
+# written.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):  # pragma: no cover - non-standard stdout
+    pass
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MIGRATIONS = ROOT / "supabase" / "migrations"
 

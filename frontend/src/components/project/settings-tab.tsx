@@ -4,6 +4,7 @@ import {
   ChatCircleIcon as ChatCircle,
   CubeIcon as Cube,
   GaugeIcon as Gauge,
+  ScalesIcon as Scales,
   GearSixIcon as GearSix,
   WarningOctagonIcon as WarningOctagon,
 } from "@phosphor-icons/react/dist/ssr"
@@ -100,6 +101,16 @@ export function SettingsTab({
   const [confirmReindex, setConfirmReindex] = useState(false)
   const [reindexing, setReindexing] = useState(false)
 
+  // Answer policy (0032). Held as strings so the inputs stay editable while
+  // half-typed ("0." is not a number yet); parsed once, on save.
+  const [minSimilarity, setMinSimilarity] = useState(String(project.min_similarity))
+  const [minStrong, setMinStrong] = useState(String(project.min_strong))
+  const [answerLanguage, setAnswerLanguage] = useState(project.answer_language ?? "")
+  const [answerDisclaimer, setAnswerDisclaimer] = useState(
+    project.answer_disclaimer ?? ""
+  )
+  const [savingPolicy, setSavingPolicy] = useState(false)
+
   // Re-sync the form when the PROJECT changes underneath it.
   //
   // Every field above is a useState seeded once, at mount - and this tab is
@@ -147,6 +158,20 @@ export function SettingsTab({
     )
     setEmbDimensions((v) =>
       v === synced.embedding_dimensions ? project.embedding_dimensions : v
+    )
+    setMinSimilarity((v) =>
+      v === String(synced.min_similarity) ? String(project.min_similarity) : v
+    )
+    setMinStrong((v) =>
+      v === String(synced.min_strong) ? String(project.min_strong) : v
+    )
+    setAnswerLanguage((v) =>
+      v === (synced.answer_language ?? "") ? project.answer_language ?? "" : v
+    )
+    setAnswerDisclaimer((v) =>
+      v === (synced.answer_disclaimer ?? "")
+        ? project.answer_disclaimer ?? ""
+        : v
     )
   }
 
@@ -260,6 +285,39 @@ export function SettingsTab({
       toast.error(err instanceof Error ? err.message : "Save failed")
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleSavePolicy() {
+    const sim = Number(minSimilarity)
+    const strong = Number(minStrong)
+    if (!Number.isFinite(sim) || sim < 0 || sim > 1) {
+      toast.error("Grounding threshold must be between 0 and 1")
+      return
+    }
+    if (!Number.isInteger(strong) || strong < 0 || strong > 20) {
+      toast.error("Sources required must be a whole number from 0 to 20")
+      return
+    }
+    setSavingPolicy(true)
+    try {
+      await api(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        // Blank strings, not nulls: null means "leave it alone", so it cannot
+        // double as the clear signal - same contract as description.
+        body: JSON.stringify({
+          min_similarity: sim,
+          min_strong: strong,
+          answer_language: answerLanguage.trim(),
+          answer_disclaimer: answerDisclaimer.trim(),
+        }),
+      })
+      toast.success("Answer policy saved")
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed")
+    } finally {
+      setSavingPolicy(false)
     }
   }
 
@@ -611,6 +669,88 @@ export function SettingsTab({
           </div>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? <Spin /> : "Save"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Scales className="size-4 text-muted-foreground" />
+            Answer policy
+          </CardTitle>
+          <CardDescription>
+            How sure retrieval must be before this project answers at all, and
+            how the answer is framed. Raise the threshold for a corpus where a
+            wrong answer is expensive.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="settings-minsim">Grounding threshold</Label>
+              <Input
+                id="settings-minsim"
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={minSimilarity}
+                onChange={(e) => setMinSimilarity(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                A chunk must match this closely (0-1) to count as evidence.
+                Anything below it is dropped from the answer entirely. 0.2 is
+                the default and is deliberately permissive.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="settings-minstrong">Sources required</Label>
+              <Input
+                id="settings-minstrong"
+                type="number"
+                min={0}
+                max={20}
+                step={1}
+                value={minStrong}
+                onChange={(e) => setMinStrong(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                How many must clear the threshold before answering. Below this
+                the project asks a clarifying question instead of guessing. 0
+                means never refuse.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-lang">Answer language</Label>
+            <Input
+              id="settings-lang"
+              placeholder="Leave blank to match the question"
+              value={answerLanguage}
+              onChange={(e) => setAnswerLanguage(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Blank mirrors whatever language each question is asked in, even
+              when the documents are in another. Name a language to force it.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-disclaimer">Standing notice</Label>
+            <Textarea
+              id="settings-disclaimer"
+              rows={2}
+              placeholder="Leave blank for none"
+              value={answerDisclaimer}
+              onChange={(e) => setAnswerDisclaimer(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Appended verbatim to every answer, e.g. an &ldquo;information, not
+              legal advice&rdquo; notice.
+            </p>
+          </div>
+          <Button onClick={handleSavePolicy} disabled={savingPolicy}>
+            {savingPolicy ? <Spin /> : "Save policy"}
           </Button>
         </CardContent>
       </Card>

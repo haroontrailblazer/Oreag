@@ -20,16 +20,124 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 # Directive verbs that signal a question wants a thorough, structured answer.
+#
+# Latin-script languages share this tuple because they share \b word
+# boundaries; other scripts are matched by substring below, where \b does not
+# apply.
 _LONG_DIRECTIVES = (
+    # English
     "explain", "discuss", "describe", "elaborate", "compare", "contrast",
     "analyze", "analyse", "evaluate", "illustrate", "examine", "outline",
     "derive", "summarize", "summarise", "justify", "differentiate", "list",
+    # Spanish
+    "explique", "explica", "describa", "compare", "analice", "discuta",
+    "evalúe", "resuma", "enumere",
+    # French
+    "expliquez", "explique", "décrivez", "comparez", "analysez", "discutez",
+    "évaluez", "résumez", "énumérez",
+    # German
+    "erklären", "erkläre", "erläutern", "beschreiben", "vergleichen",
+    "analysieren", "diskutieren", "bewerten", "zusammenfassen",
+    # Portuguese / Italian - the remaining widely-used Latin-script pair
+    "explique", "descreva", "compare", "analise", "discuta",
+    "spiega", "descrivi", "confronta", "analizza", "discuti",
+)
+# The same directives in other scripts.
+#
+# WHY THIS EXISTS: the tuple above is ASCII-only, and \b in Python's `re` is
+# defined on word characters, so a Devanagari question matched NEITHER regex
+# and always fell through to "short". That silently skipped plan_subqueries
+# (decomposition is gated on depth == "long"), which meant the entire agentic
+# multi-query path - and the structured long-form answer - were unreachable in
+# any non-Latin language. No amount of non-English content fixes that; it is
+# the classifier, not the corpus.
+#
+# Substring matching, not \b: Devanagari and CJK are not word-delimited the way
+# \b assumes, so a boundary assertion would fail on exactly the scripts this
+# is here to serve.
+_LONG_DIRECTIVES_INTL = (
+    # Hindi / Marathi (Devanagari)
+    "व्याख्या", "समझाइए", "समझाएं", "वर्णन", "विवेचना", "तुलना", "अंतर",
+    "मूल्यांकन", "विश्लेषण", "चर्चा", "सूची", "प्रकिये",
+    # Bengali / Assamese
+    "ব্যাখ্যা", "বর্ণনা", "তুলনা", "আলোচনা", "বিশ্লেষণ",
+    # Tamil
+    "விளக்கு", "விவரி", "ஒப்பிடு", "ஆராய்", "பட்டியலிடு",
+    # Telugu
+    "వివరించండి", "వర్ణించండి", "పోల్చండి", "చర్చించండి", "విశ్లేషించండి",
+    # Kannada
+    "ವಿವರಿಸಿ", "ವರ್ಣಿಸಿ", "ಹೋಲಿಸಿ", "ಚರ್ಚಿಸಿ", "ವಿಶ್ಲೇಷಿಸಿ",
+    # Malayalam
+    "വിശദീകരി", "വിവരി", "താരതമ്യ", "ചർച്ച", "വിശകലനം",
+    # Gujarati
+    "સમજાવો", "વર્ણવો", "સરખામણી", "ચર્ચા", "વિશ્લેષણ",
+    # Punjabi (Gurmukhi)
+    "ਵਿਆਖਿਆ", "ਸਮਝਾਓ", "ਵਰਣਨ", "ਤੁਲਨਾ", "ਚਰਚਾ", "ਵਿਸ਼ਲੇਸ਼ਣ",
+    # Odia
+    "ବ୍ୟାଖ୍ୟା", "ବର୍ଣ୍ଣନା", "ତୁଳନା", "ଆଲୋଚନା", "ବିଶ୍ଳେଷଣ",
+    # Urdu / Arabic (Arabic script)
+    "وضاحت", "بیان", "موازنہ", "تجزیہ", "تشریح",
+    "اشرح", "وضح", "قارن", "ناقش", "حلل", "لخص",
+    # Chinese - the supplied corpus is bilingual, so this is not hypothetical
+    "解释", "说明", "描述", "比较", "分析", "讨论", "评价", "概述",
+    # Japanese
+    "説明", "述べ", "比較", "論じ", "分析", "要約",
+    # Korean
+    "설명", "서술", "비교", "논하", "분석", "요약",
+    # Thai
+    "อธิบาย", "เปรียบเทียบ", "วิเคราะห์", "อภิปราย", "สรุป", "บรรยาย",
+)
+
+# Scripts that are not whitespace-delimited, so "word count" has to be
+# approximated from character count instead.
+_UNSPACED_RANGES = (
+    (0x3040, 0x30FF),  # Japanese kana
+    (0x3400, 0x4DBF),  # CJK extension A
+    (0x4E00, 0x9FFF),  # CJK unified ideographs
+    (0x0E00, 0x0E7F),  # Thai
 )
 # "13 marks", "13 mark", "13marks" - an exam weighting demands a full answer.
 _MARKS_RE = re.compile(r"\b\d{1,2}\s*marks?\b", re.IGNORECASE)
+# अंक / मार्क्स - the same weighting written in Devanagari.
+_MARKS_INTL_RE = re.compile(r"\d{1,2}\s*(?:अंक|मार्क्स|மதிப்பெண்|分)")
 _DIRECTIVE_RE = re.compile(
     r"\b(" + "|".join(_LONG_DIRECTIVES) + r")\b", re.IGNORECASE
 )
+
+
+# Approximate words past which a question is treated as wanting a long answer,
+# whatever language it is in.
+_LONG_WORD_COUNT = 25
+# Chinese/Japanese/Thai average roughly this many characters per word, so a
+# character count divided by it approximates the word count those scripts do
+# not expose through whitespace.
+_CHARS_PER_UNSPACED_WORD = 2
+
+
+def _approx_words(question: str) -> int:
+    """Word count that works for scripts without spaces.
+
+    Whitespace splitting counts a whole Chinese sentence as one word, which
+    would make every CJK question look trivially short. Characters in the
+    unspaced ranges are counted separately and converted at
+    _CHARS_PER_UNSPACED_WORD; everything else is counted by whitespace.
+    """
+    unspaced_chars = []
+    rest = []
+    for ch in question:
+        code = ord(ch)
+        if any(lo <= code <= hi for lo, hi in _UNSPACED_RANGES):
+            unspaced_chars.append(ch)
+        else:
+            rest.append(ch)
+    # The unspaced characters are REMOVED before the whitespace count, not
+    # merely counted alongside it. Leaving them in double-counts: a pure CJK
+    # sentence is one whitespace "word" AND len/2 character-derived words, so
+    # it came out one higher than it should. Mixed text (a Chinese abstract
+    # carrying English drug names) still contributes both halves, which is the
+    # behaviour that matters.
+    spaced = len("".join(rest).split())
+    return spaced + len(unspaced_chars) // _CHARS_PER_UNSPACED_WORD
 
 
 def detect_depth(question: str) -> str:
@@ -37,10 +145,30 @@ def detect_depth(question: str) -> str:
 
     Heuristic and deterministic (no model call): an explicit marks weighting or
     a broad directive verb means the caller wants a comprehensive answer.
+
+    Script-aware - see _LONG_DIRECTIVES_INTL for why a Latin-only classifier
+    disabled the whole agentic path for other languages.
     """
-    if _MARKS_RE.search(question):
+    if _MARKS_RE.search(question) or _MARKS_INTL_RE.search(question):
         return "long"
     if _DIRECTIVE_RE.search(question):
+        return "long"
+    if any(d in question for d in _LONG_DIRECTIVES_INTL):
+        return "long"
+    # Last resort, and the only rule that needs no vocabulary at all.
+    #
+    # The two rules above are lists of words, and a list can only ever cover
+    # the languages someone remembered to add - measured, the original
+    # English-only tuple served 7 of 20 languages. This catches a substantial
+    # question in a language nobody has enumerated, including one that does not
+    # exist yet.
+    #
+    # The threshold is deliberately high. A directive verb is EVIDENCE that a
+    # long answer is wanted; length is only a proxy, so it must not fire on the
+    # ordinary questions the short path handles well and cheaply - a long
+    # answer costs several times more tokens. 25 approximate words is well past
+    # anything conversational.
+    if _approx_words(question) >= _LONG_WORD_COUNT:
         return "long"
     return "short"
 
@@ -209,6 +337,25 @@ def is_sufficient(
     return strong >= min_strong
 
 
+def grounding_only(sources: list[dict], floor: float) -> list[dict]:
+    """Drop what did not clear the floor that authorised the answer.
+
+    is_sufficient COUNTS how many sources clear the bar; it never filtered the
+    list it was handed. So the whole retrieved set - including chunks scoring
+    near zero - reached the prompt as numbered, citable blocks and was reported
+    to the caller as `sources`. One chunk at 0.21 could authorise an answer
+    while chunks at 0.05 sat in the context as [2] and [3], available to be
+    cited as if they supported the claim.
+
+    Called only on the paths where sufficiency already passed, so the result is
+    non-empty by construction. The fallback is belt-and-braces for min_strong=0
+    ("never abstain"), where sufficiency passes without anything clearing the
+    floor and filtering would leave the model nothing at all.
+    """
+    kept = [s for s in sources if s["similarity"] >= floor]
+    return kept or sources
+
+
 @dataclass
 class AgenticResult:
     """Outcome of the loop: either a grounded answer, or a request for help."""
@@ -284,7 +431,7 @@ def gather_context(
         gathered = merge_sources([gathered, *round_results])
         if is_sufficient(gathered, min_similarity, min_strong):
             return GatheredContext(
-                sources=gathered,
+                sources=grounding_only(gathered, min_similarity),
                 depth=depth,
                 sub_queries=sub_queries,
                 rounds=rounds,
@@ -313,7 +460,9 @@ def gather_context(
     relaxed = min_similarity * RELAXED_SIMILARITY_RATIO
     if relaxed < min_similarity and is_sufficient(gathered, relaxed, min_strong):
         return GatheredContext(
-            sources=gathered,
+            # Filtered at the RELAXED floor - the bar that actually authorised
+            # this answer - not at min_similarity, which nothing here cleared.
+            sources=grounding_only(gathered, relaxed),
             depth=depth,
             sub_queries=sub_queries,
             rounds=rounds,

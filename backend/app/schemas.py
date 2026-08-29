@@ -2,7 +2,9 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .config import settings
 
 # Per-project BYOK key override fields. None = leave unchanged; "" = clear
 # (fall back to the account-level key); any other value = set for this project.
@@ -32,6 +34,14 @@ class ProjectUpdate(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     top_k: int | None = Field(default=None, ge=1, le=20)
+    # Answer policy. Bounds mirror the CHECK constraints in migration 0032 so
+    # the API and the database reject the same values.
+    min_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_strong: int | None = Field(default=None, ge=0, le=20)
+    # "" clears back to NULL, exactly as description does - null means "leave
+    # it alone", so it cannot double as the clear signal.
+    answer_language: str | None = Field(default=None, max_length=60)
+    answer_disclaimer: str | None = Field(default=None, max_length=500)
     # Changing a key (not the model) is a safe, instant edit - no reindex needed.
     embedding_api_key: str | None = None
     llm_api_key: str | None = None
@@ -72,6 +82,27 @@ class ProjectOut(BaseModel):
     llm_provider: str
     llm_model: str
     top_k: int
+    # Answer policy (0032). Always concrete - there is no "inherit" state.
+    #
+    # The validator below exists for the window in which new code runs against
+    # a database that has not had 0032 applied (a rolling deploy), where the
+    # attribute is absent or None on a loaded row. It reports the value the
+    # query path would actually use in that window, so the settings screen
+    # never shows a blank where a policy is in force.
+    min_similarity: float = 0.2
+    min_strong: int = 1
+    answer_language: str | None = None
+    answer_disclaimer: str | None = None
+
+    @field_validator("min_similarity", mode="before")
+    @classmethod
+    def _default_min_similarity(cls, v):
+        return settings.agentic_min_similarity if v is None else v
+
+    @field_validator("min_strong", mode="before")
+    @classmethod
+    def _default_min_strong(cls, v):
+        return settings.agentic_min_strong if v is None else v
     status: str
     suspended: bool = False
     created_at: datetime
@@ -190,6 +221,11 @@ class SourceChunk(BaseModel):
     chunk_index: int
     content: str
     similarity: float
+    # True when the answer actually cited this block as [n]. The list is
+    # everything the loop retrieved, which is deliberately wider than what the
+    # answer used - without this a caller cannot tell "supported this claim"
+    # from "was in the context and ignored".
+    cited: bool = False
 
 
 class QueryResponse(BaseModel):
@@ -211,6 +247,11 @@ class QueryResponse(BaseModel):
     # is the L2 cosine similarity that cleared the threshold.
     cache_layer: Literal["l1", "l2"] | None = None
     cache_similarity: float | None = None
+    # Mean similarity of the sources behind this answer - the same number
+    # already persisted as query_logs.retrieval_similarity and charted on the
+    # Usage page. NULL, never 0, when nothing was retrieved (a clarification):
+    # "not measured" is a different fact from "matched at 0.0".
+    retrieval_similarity: float | None = None
 
 
 class ProjectInfo(BaseModel):
