@@ -2271,6 +2271,10 @@ class TestPartialRestoreScope:
     class _F:
         def __init__(self):
             self.id = uuid.uuid4()
+            # _files_to_requeue filters superseded versions out before either
+            # branch (migration 0034); a stub without this models a File that
+            # cannot exist.
+            self.in_force_to = None
 
     def test_only_the_gap_files_are_requeued(self):
         from app.routers.files import _files_to_requeue

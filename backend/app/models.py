@@ -1,11 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     ARRAY,
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -73,6 +74,17 @@ class Project(Base):
     # When true, all external access (public /v1 API + MCP) is blocked with a
     # 403 - the keys and data are kept, but the project is paused until resumed.
     suspended: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Document versions (migration 0034). When true, an upload that looks like
+    # a new edition of a document already in this project is held in
+    # files.status = 'review' until a person confirms what it replaces. Per
+    # PROJECT, not fleet-wide: the extractor's question ("is this a new edition
+    # of something already here?") is just as true of report_v2.pdf, so a
+    # global switch would park uploads in projects that never asked for it.
+    # False leaves ingestion byte-identical to its pre-0034 behaviour, down to
+    # making no extraction LLM call.
+    version_tracking: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     # Monotonic counter bumped on every chunk/memory write - the cache
     # signature for both answer-cache layers (replaces per-request COUNT(*)s).
     content_version: Mapped[int] = mapped_column(BigInteger, default=0)
@@ -99,7 +111,12 @@ class File(Base):
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     page_count: Mapped[int | None] = mapped_column(Integer)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(Text, default="pending")  # pending|processing|indexed|failed
+    # pending|processing|indexed|failed|review. "review" (migration 0034) means
+    # converted and stored but held back from chunking because it looks like a
+    # new edition of a document already here. It is inert in the queue by
+    # construction: claim_next selects only 'pending' (or 'processing' with a
+    # lapsed lease), and files_queue_idx does not index it.
+    status: Mapped[str] = mapped_column(Text, default="pending")
     error: Mapped[str | None] = mapped_column(Text)
     conversion_error: Mapped[str | None] = mapped_column(Text)
     # Non-fatal: the file indexed, but the uploader should know how (e.g. audio
@@ -120,6 +137,21 @@ class File(Base):
     # there is no way to know that cost at restore time without doing the
     # very work being avoided, so it has to come from the past.
     embedding_tokens: Mapped[int | None] = mapped_column(Integer)
+    # Document versions (migration 0034). document_id groups the editions of
+    # one document and is NOT a foreign key: a lineage must outlive the
+    # deletion of any member, including the first. NULL means "this file is its
+    # own document", so the lineage key is always coalesce(document_id, id).
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    version_label: Mapped[str | None] = mapped_column(Text)
+    in_force_from: Mapped[date | None] = mapped_column(Date)
+    # THE indexability switch. NOT NULL means superseded: the row keeps its
+    # blobs, its conversion stamp and all its metadata, holds zero chunks, and
+    # is skipped by every requeue path. Exclusive end of a half-open interval,
+    # always written as the successor's in_force_from so the two cannot
+    # disagree. legal_status deliberately does NOT gate anything - one
+    # authority, so a descriptive edit can never drop a document out of search.
+    in_force_to: Mapped[date | None] = mapped_column(Date)
+    legal_status: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

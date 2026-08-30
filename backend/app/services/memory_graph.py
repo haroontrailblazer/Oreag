@@ -321,8 +321,18 @@ def build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
 
 
 def _build_memory_graph(db: Session, project: Project) -> MemoryGraphResponse:
+    # Superseded versions (migration 0034) are excluded. Unlike every chunk
+    # query in the product, this builder does NOT read `chunks` - it downloads
+    # each file's converted markdown and emits a section node per heading whose
+    # `text` is the raw markdown slice, rendered untruncated in the Visualize
+    # tab. Superseded versions keep that blob by design, so without this filter
+    # retired text stays fully readable here (and on /v1, which serves the same
+    # builder under an API key) while being unreachable by search - and every
+    # cache miss pays one storage download per dead version.
     files = db.scalars(
-        select(File).where(File.project_id == project.id).order_by(File.created_at)
+        select(File)
+        .where(File.project_id == project.id, File.in_force_to.is_(None))
+        .order_by(File.created_at)
     ).all()
     file_count = len(files)
     nodes: list[MemoryGraphNode] = [

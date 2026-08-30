@@ -1,12 +1,15 @@
 import logging
+import re
 import uuid
+from typing import NamedTuple
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Response, UploadFile
 from fastapi import File as FastAPIFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy import text as sql_text
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .. import crypto
@@ -14,7 +17,7 @@ from ..config import settings
 from ..db import get_db
 from ..models import Chunk, File, Project
 from ..providers import registry
-from ..schemas import FileOut, ReindexRequest
+from ..schemas import FileOut, FileVersionRequest, ReindexRequest
 from ..services import storage
 from ..services.content_version import bump_content_version
 from ..services.usage import record_usage
@@ -371,7 +374,11 @@ def _record_restore_savings(
     re-embedded and paid for.
     """
     gap = set(restore_gap)
-    restored = [f for f in files if f.id not in gap]
+    # A superseded version (migration 0034) keeps the embedding_tokens from its
+    # original ingest but has no chunks to restore, and can never be in
+    # restore_gap - the gap is computed FROM chunks. Leaving it in would report
+    # a Matryoshka saving for embedding work that was never avoided.
+    restored = [f for f in files if f.id not in gap and f.in_force_to is None]
     tokens = [f.embedding_tokens for f in restored if f.embedding_tokens is not None]
     if not tokens:
         return
@@ -386,6 +393,77 @@ def _record_restore_savings(
             model=project.embedding_model or "",
         ),
     )
+
+
+def _lineage(file) -> uuid.UUID:
+    """The document a file belongs to. NULL document_id means it is its own."""
+    return file.document_id or file.id
+
+
+class VersionOp(NamedTuple):
+    file_id: uuid.UUID
+    fields: dict  # attribute -> value to assign on the File row
+    delete_chunks: bool
+
+
+class SupersessionPlan(NamedTuple):
+    ops: list[VersionOp]
+    requeued: bool
+
+
+def plan_supersession(target, predecessor, lineage, body) -> SupersessionPlan:
+    """Every row write for one version decision, as data.
+
+    PURE: takes anything with .id / .status / .chunk_count, so the semantics
+    that actually matter - the predecessor loses its chunks AND its count in the
+    same op, the successor is queued only when it needs to be - are asserted by
+    unit tests rather than by an AST scan. CI has no database service, so this
+    is the only shape that gets them under real test.
+    """
+    fields: dict = {
+        "document_id": lineage,
+        "version_label": body.version_label,
+        "in_force_from": body.in_force_from,
+        "legal_status": body.legal_status,
+        "in_force_to": None,  # this row is the current one
+    }
+    # Queue it: a confirmed review file, or a historical version being brought
+    # back into force. An already-indexed, already-current file having only its
+    # metadata corrected is left alone - re-embedding it would be a bill for
+    # nothing.
+    requeued = target.chunk_count == 0 or target.status != "indexed"
+    if requeued:
+        fields.update(
+            status="pending",
+            error=None,
+            conversion_error=None,
+            attempts=0,  # claim_next burned one parking it; refund it
+            chunk_count=0,
+        )
+        # conversion_note is NOT cleared: it describes how the MARKDOWN was
+        # produced and the re-index REUSES that markdown, so the caveat is
+        # still true. Same reasoning as the upload requeue.
+    ops = [VersionOp(target.id, fields, delete_chunks=False)]
+    if predecessor is not None:
+        ops.append(VersionOp(
+            predecessor.id,
+            {
+                # Half-open: the successor's start date IS the predecessor's end
+                # date, so one date serves both rows and they cannot disagree.
+                # No date arithmetic anywhere.
+                "in_force_to": body.in_force_from,
+                # MUST be zeroed in the same transaction as the delete.
+                # retrieval._PROJECT_CHUNKS_SQL sums files.chunk_count to feed
+                # the ANN gate; a superseded row keeping its old count inflates
+                # both the absolute vector_ann_min_chunks check and the
+                # owned/total share, opening the HNSW path for a project whose
+                # real chunk count is below both.
+                "chunk_count": 0,
+                "lease_expires_at": None,
+            },
+            delete_chunks=True,
+        ))
+    return SupersessionPlan(ops, requeued)
 
 
 def _files_to_requeue(files: list[File], restore_gap: list[uuid.UUID]) -> list[File]:
@@ -406,6 +484,13 @@ def _files_to_requeue(files: list[File], restore_gap: list[uuid.UUID]) -> list[F
     together from its markdown, so half of one cannot be re-ingested in
     isolation.
     """
+    # Superseded versions are excluded before EITHER branch. The empty-gap
+    # branch above "must not narrow" - this is the one exception, and it is not
+    # a narrowing of intent: a superseded version is REQUIRED to hold zero
+    # chunks (migration 0034), so re-embedding it would put a retired edition
+    # of a document back into the live index. Keyed on in_force_to, never on
+    # status: a superseded file can also be 'failed'.
+    files = [f for f in files if f.in_force_to is None]
     if not restore_gap:
         return list(files)
     gap = set(restore_gap)
@@ -631,31 +716,45 @@ async def upload_files(
 
     # a new embedding model means every existing file (and every memory) must
     # be re-embedded - the old vectors live in an incompatible space
-    existing: list[File] = []
     if reindex_existing:
         new_ids = {record.id for record in created}
         db.execute(sql_delete(Chunk).where(Chunk.project_id == project.id))
         clear_memory_vectors(db, project.id)
         bump_content_version(db, project.id)
-        existing = [
-            f
-            for f in db.scalars(
-                select(File).where(File.project_id == project.id)
-            ).all()
-            if f.id not in new_ids
-        ]
-        for f in existing:
-            f.status = "pending"
-            f.chunk_count = 0
-            f.error = None
-            f.conversion_error = None
-            # conversion_note is NOT cleared. It describes how the MARKDOWN
-            # was produced ("audio used the free fallback endpoint"), and a
-            # re-index now REUSES that markdown, so clearing it would drop a
-            # caveat that is still true. ingest_file rewrites it either way:
-            # the reuse path carries it forward, a real re-conversion
-            # replaces it with a fresh one.
-            f.attempts = 0  # fresh retry budget for the re-ingest
+        # A set-based UPDATE, not a loop over a pre-loaded list. Under READ
+        # COMMITTED the SELECT could read a row as current, block on a concurrent
+        # confirm's row lock, and then write status='pending' onto a row that
+        # was superseded in between; an UPDATE re-evaluates its predicate
+        # against the row it actually locks. synchronize_session stays at its
+        # default so the in-session File objects are refreshed.
+        db.execute(
+            update(File)
+            .where(
+                File.project_id == project.id,
+                File.id.notin_(new_ids),
+                # Superseded versions must never come back into the index, and
+                # an unconfirmed review must never be chunked ahead of the
+                # human. Keyed on in_force_to, NEVER on status - a superseded
+                # file can also be 'failed' - and never on
+                # projects.version_tracking: switching the toggle off must not
+                # resurrect editions that were already retired.
+                File.in_force_to.is_(None),
+                File.status != "review",
+            )
+            .values(
+                status="pending",
+                chunk_count=0,
+                error=None,
+                conversion_error=None,
+                # conversion_note is NOT cleared. It describes how the MARKDOWN
+                # was produced ("audio used the free fallback endpoint"), and a
+                # re-index now REUSES that markdown, so clearing it would drop a
+                # caveat that is still true. ingest_file rewrites it either way:
+                # the reuse path carries it forward, a real re-conversion
+                # replaces it with a fresh one.
+                attempts=0,  # fresh retry budget for the re-ingest
+            )
+        )
 
     project.status = "indexing"
     db.commit()
@@ -688,7 +787,241 @@ def delete_file(
     bump_content_version(db, project.id)
     recompute_project_status(db, project)
     db.commit()
-    storage.delete(paths)
+    # Best-effort, and deliberately so: the row is already gone when this runs,
+    # so a raising storage.delete would return 500 for a delete that HAS
+    # succeeded, and the client's retry would 404. Orphaned blobs are a
+    # janitorial problem; a 500 on a completed destructive operation is a
+    # correctness one. Migration 0034 multiplies the number of two-blob files,
+    # which is what makes the bare call worth fixing now.
+    try:
+        storage.delete(paths)
+    except Exception:
+        logger.exception(
+            "Storage cleanup failed for deleted file %s (orphaned: %s)",
+            file_id,
+            paths,
+        )
+
+
+def _project_files(db: Session, project: Project) -> list[File]:
+    return db.scalars(
+        select(File).where(File.project_id == project.id).order_by(File.created_at)
+    ).all()
+
+
+@router.post("/files/{file_id}/version", response_model=list[FileOut])
+def set_file_version(
+    file_id: uuid.UUID,
+    body: FileVersionRequest,
+    project: Project = Depends(get_owned_project),
+    db: Session = Depends(get_db),
+):
+    """Record one version decision. The only way in or out of 'review'.
+
+    Four operations, one verb:
+      * confirm a review    - document_id = the matched lineage, supersede_file_id = its current file
+      * reject a review     - document_id = null, supersede_file_id = null
+      * retire by hand      - document_id = the old file's lineage, supersede_file_id = the old file
+      * reinstate history   - called ON the historical file, superseding the current one
+
+    ONE transaction, ONE commit, and ZERO storage calls. The successor's
+    metadata, the predecessor's in_force_to, the chunk DELETE, chunk_count = 0,
+    the requeue, the content_version bump and project.status land atomically or
+    not at all - so "the commit succeeded" and "the operation succeeded" are the
+    same statement, which is the property delete_file cannot have.
+
+    Deliberately reachable with projects.version_tracking off: the toggle gates
+    the automatic proposal, not the ability to repair a lineage afterwards.
+    """
+    # -- 0. LOCK BOTH ROWS IN ONE ID-ORDERED STATEMENT --------------------
+    # Ordering by File.id IN SQL is what makes deadlock impossible however many
+    # confirms run concurrently, and the lock is what makes the checks below
+    # true at COMMIT time rather than at read time. claim_next uses
+    # with_for_update(skip_locked=True), so a worker also skips these rows for
+    # the length of this transaction.
+    ids = {file_id}
+    if body.supersede_file_id is not None:
+        ids.add(body.supersede_file_id)
+    locked = db.scalars(
+        select(File)
+        .where(File.id.in_(ids), File.project_id == project.id)
+        .order_by(File.id)
+        .with_for_update()
+    ).all()
+    by_id = {f.id: f for f in locked}
+    target = by_id.get(file_id)
+    if target is None:
+        raise HTTPException(404, "File not found")
+    predecessor = (
+        by_id.get(body.supersede_file_id)
+        if body.supersede_file_id is not None
+        else None
+    )
+    if body.supersede_file_id is not None:
+        if predecessor is None:
+            raise HTTPException(404, "Superseded file not found")
+        if predecessor.id == target.id:
+            raise HTTPException(422, "A file cannot supersede itself")
+
+    # -- 1. IDEMPOTENCY, BEFORE ANY WRITE ---------------------------------
+    # The retry-after-timeout case is the common one, and a 409 there would show
+    # a user an error for an operation that already succeeded.
+    if (
+        target.status != "review"
+        and target.in_force_to is None
+        and target.document_id == _lineage(predecessor or target)
+        and target.version_label == body.version_label
+        and target.in_force_from == body.in_force_from
+        and target.legal_status == body.legal_status
+        and (predecessor is None or predecessor.in_force_to == body.in_force_from)
+    ):
+        return _project_files(db, project)
+
+    # -- 2. VALIDATE, all against the LOCKED rows -------------------------
+    if target.status == "processing":
+        # Its ingest is mid-flight and would overwrite status and chunk_count
+        # from under this transaction.
+        raise HTTPException(409, "File is being processed - try again shortly")
+
+    if predecessor is not None:
+        if predecessor.status in ("pending", "processing"):
+            # A pending row is claimable by claim_next and this row lock only
+            # holds for this transaction, so superseding it would leave a
+            # retired version queued for indexing. There is no honest status to
+            # move it to, so refuse.
+            raise HTTPException(
+                409,
+                "The version being replaced is queued for indexing - wait for "
+                "it to finish, then supersede it.",
+            )
+        if predecessor.in_force_to is not None:
+            raise HTTPException(
+                422, "That version is already superseded - replace the one in force"
+            )
+        if body.in_force_from is None:
+            # in_force_to is the ONLY thing keeping a superseded version out of
+            # the index, so it must never be null on a supersession - and it is
+            # DERIVED, never fabricated, so a missing date is a 422 rather than
+            # date.today(). One invented end date corrupts the whole timeline.
+            raise HTTPException(
+                422, "in_force_from is required when superseding a version"
+            )
+        if (
+            predecessor.in_force_from is not None
+            and body.in_force_from < predecessor.in_force_from
+        ):
+            # Turns a CHECK violation (a 500) into a 422.
+            raise HTTPException(
+                422,
+                "in_force_from is earlier than the version it replaces "
+                f"({predecessor.in_force_from.isoformat()})",
+            )
+        lineage = _lineage(predecessor)
+        if body.document_id is not None and body.document_id != lineage:
+            raise HTTPException(422, "document_id does not match the superseded file")
+    else:
+        lineage = body.document_id or target.id
+
+    # At most one current version per lineage. There is no unique constraint on
+    # `files` (there is none of any kind) and the key is a coalesce, so this is
+    # the invariant's only keeper. Scanned over the project's file list, which
+    # is capped at 1000 rows.
+    siblings = _project_files(db, project)
+    if (
+        body.document_id is not None
+        and predecessor is None
+        and not any(_lineage(f) == body.document_id for f in siblings)
+    ):
+        raise HTTPException(422, "document_id names no document in this project")
+    clash = next(
+        (
+            f
+            for f in siblings
+            if f.id != target.id
+            and (predecessor is None or f.id != predecessor.id)
+            and f.in_force_to is None
+            and f.status != "review"
+            and _lineage(f) == lineage
+        ),
+        None,
+    )
+    if clash is not None:
+        raise HTTPException(
+            422,
+            f"{clash.filename} is already the current version of this document - "
+            "name it as the version being superseded",
+        )
+
+    # -- 3. WRITES. One transaction, one commit, ZERO storage calls -------
+    plan = plan_supersession(target, predecessor, lineage, body)
+    for op in plan.ops:
+        row = by_id[op.file_id]
+        if op.delete_chunks:
+            db.execute(sql_delete(Chunk).where(Chunk.file_id == op.file_id))
+        for name, value in op.fields.items():
+            setattr(row, name, value)
+        # Blobs are NOT touched: storage_path, markdown_storage_path,
+        # conversion_version, page_count, size_bytes, embedding_tokens and
+        # indexed_at all survive, which is what makes history downloadable and
+        # re-indexable later without re-upload, at embedding cost only.
+
+    # -- 4. INVALIDATE AND SETTLE, in delete_file's proven order ----------
+    # Unconditional, and NOT the pin/unpin non-bump reasoning in routers/
+    # memory.py: pin/unpin reorders content that still exists, whereas a
+    # supersession REMOVES text from the corpus, and re-serving a cached answer
+    # built on repealed law is the exact harm this feature exists to prevent.
+    bump_content_version(db, project.id)
+    recompute_project_status(db, project)
+    db.commit()
+    return _project_files(db, project)
+
+
+@router.get("/files/{file_id}/content")
+async def download_file_content(
+    file_id: uuid.UUID,
+    format: str = "source",
+    project: Project = Depends(get_owned_project),
+    db: Session = Depends(get_db),
+):
+    """Download a file's original bytes or its converted markdown.
+
+    The only way to read a superseded version. Without it, keeping those blobs
+    forever buys nothing - they would be unreachable, unbilled-for storage.
+
+    Streams through the API rather than handing out a Supabase signed URL:
+    storage.download already exists and is used verbatim, whereas a signed URL
+    adds a storage helper, an expiry policy and a second auth model for
+    bandwidth on an operation measured in dozens per project per year. The
+    threadpool hop is REQUIRED - storage.download blocks, and this route shares
+    its worker with every streaming query.
+    """
+    file = db.get(File, file_id)
+    if file is None or file.project_id != project.id:
+        raise HTTPException(404, "File not found")
+    if format not in ("source", "markdown"):
+        raise HTTPException(422, "format must be 'source' or 'markdown'")
+    if format == "markdown":
+        path = file.markdown_storage_path
+        if not path:
+            raise HTTPException(404, "This file has no converted markdown")
+        media, name = "text/markdown; charset=utf-8", f"{file.filename}.md"
+    else:
+        path = file.storage_path
+        media = file.content_type or "application/octet-stream"
+        name = file.filename
+    try:
+        data = await run_in_threadpool(storage.download, path)
+    except Exception:
+        logger.warning("Storage read failed for file %s", file_id, exc_info=True)
+        raise HTTPException(502, "The stored file could not be read")
+    # Quotes and newlines stripped: filename is user-supplied and goes into a
+    # response header.
+    safe = re.sub(r'[\r\n"]', "", name)[:200]
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{safe}"'},
+    )
 
 
 @router.post("/files/{file_id}/retry", response_model=FileOut)
@@ -702,6 +1035,18 @@ def retry_file(
         raise HTTPException(404, "File not found")
     if file.status == "processing":
         raise HTTPException(409, "File is already being processed")
+    if file.status == "review":
+        raise HTTPException(
+            409,
+            "This file is waiting for a version decision - confirm or reject it "
+            "in the Files tab before re-indexing.",
+        )
+    if file.in_force_to is not None:
+        raise HTTPException(
+            409,
+            "This is a superseded version. Re-indexing it would put two versions "
+            "of the same document in the index; make it current instead.",
+        )
     file.status = "pending"  # the queue workers pick it up from here
     file.error = None
     file.conversion_error = None
@@ -850,7 +1195,6 @@ def reindex_project(
         db.commit()
         return files
 
-    requeue = _files_to_requeue(files, restore_gap)
     if restore_gap:
         # Scoped to the gap files ONLY. Their chunks must still be deleted -
         # not left alone - because a chunk stuck at the old width is not merely
@@ -863,14 +1207,33 @@ def reindex_project(
     if plan == "reembed":
         clear_memory_vectors(db, project.id)
     bump_content_version(db, project.id)
-    for file in requeue:
-        file.status = "pending"  # the durable queue workers pick these up
-        file.chunk_count = 0
-        file.error = None
-        file.conversion_error = None
-        # Preserved - see the note at the upload requeue above.
-        file.attempts = 0
-    project.status = "indexing" if requeue else "ready"
+    # Set-based, and re-stating the currency predicate, for the same
+    # READ-COMMITTED reason as the upload requeue: `files` was loaded before the
+    # vector migration ran, and a confirm can supersede a row in between.
+    # _files_to_requeue already filters, so this is defence in depth on the one
+    # operation that can put retired content back into search.
+    requeue_ids = [f.id for f in _files_to_requeue(files, restore_gap)]
+    if requeue_ids:
+        db.execute(
+            update(File)
+            .where(
+                File.id.in_(requeue_ids),
+                File.in_force_to.is_(None),
+                File.status != "review",
+            )
+            .values(
+                status="pending",  # the durable queue workers pick these up
+                chunk_count=0,
+                error=None,
+                conversion_error=None,
+                # Preserved - see the note at the upload requeue above.
+                attempts=0,
+            )
+        )
+    # Derived, not assigned: a requeue that is empty BECAUSE every file is
+    # superseded or in review must not report 'ready' - the project cannot
+    # answer anything.
+    recompute_project_status(db, project)
     db.commit()
 
     # Memories re-embed as a background task (quick) so memory search is back

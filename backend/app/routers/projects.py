@@ -183,6 +183,13 @@ def update_project(
         project.answer_language = body.answer_language.strip() or None
     if body.answer_disclaimer is not None:
         project.answer_disclaimer = body.answer_disclaimer.strip() or None
+    # Document versions (0034). Like the answer-policy fields above, this
+    # deliberately does NOT bump content_version: it changes nothing already
+    # indexed. Turning it OFF only stops new uploads being held for review -
+    # every requeue guard keys on files.in_force_to, never on this flag, so
+    # already-superseded editions stay superseded.
+    if body.version_tracking is not None:
+        project.version_tracking = body.version_tracking
     _set_key_override(project, "embedding", body.embedding_api_key)
     _set_key_override(project, "llm", body.llm_api_key)
     db.commit()

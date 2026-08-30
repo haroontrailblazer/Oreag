@@ -202,6 +202,23 @@ class Settings(BaseSettings):
     rag_memory_blend_k: int = 4            # max memories blended into one answer
     rag_memory_min_similarity: float = 0.35
 
+    # Document versions (migration 0034). The FLEET-WIDE kill switch for the
+    # extraction pass that proposes "this looks like a new edition of a
+    # document already here". Per-project opt-in lives on
+    # projects.version_tracking; BOTH must be true for extraction to run, and
+    # they are not redundant - this one exists so a misbehaving extractor can
+    # be stopped everywhere without a database write or a code deploy.
+    #
+    # Defaults False and is flipped on only once the review UI is deployed:
+    # otherwise a file could be held for a confirmation there is no screen to
+    # give. Turning it off never un-supersedes anything; it only stops new
+    # uploads being parked.
+    version_extraction_enabled: bool = False
+    # How much of the converted markdown the extractor reads. The opening is
+    # where an instrument names itself; sending more costs the user's own BYOK
+    # tokens on every first-time upload and buys nothing.
+    version_extract_chars: int = 6000
+
     # Hybrid retrieval: fuse semantic (pgvector) and lexical (Postgres
     # full-text) rankings with RRF, so exact terms (error codes, names, IDs)
     # hit alongside meaning matches. Degrades to semantic-only automatically

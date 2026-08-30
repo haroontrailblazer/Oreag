@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -42,6 +42,12 @@ class ProjectUpdate(BaseModel):
     # it alone", so it cannot double as the clear signal.
     answer_language: str | None = Field(default=None, max_length=60)
     answer_disclaimer: str | None = Field(default=None, max_length=500)
+    # Document versions (0034). Toggling this changes nothing already indexed,
+    # so - like the four answer-policy fields above - it must NOT bump
+    # content_version. Turning it OFF only stops new uploads being held for
+    # review; already-superseded versions stay superseded, because every
+    # requeue guard keys on files.in_force_to and never on this flag.
+    version_tracking: bool | None = None
     # Changing a key (not the model) is a safe, instant edit - no reindex needed.
     embedding_api_key: str | None = None
     llm_api_key: str | None = None
@@ -103,8 +109,19 @@ class ProjectOut(BaseModel):
     @classmethod
     def _default_min_strong(cls, v):
         return settings.agentic_min_strong if v is None else v
+
+    @field_validator("version_tracking", mode="before")
+    @classmethod
+    def _default_version_tracking(cls, v):
+        # Same rolling-deploy guard as the two above: on a database without
+        # 0034 the attribute loads as None, and a project that cannot be
+        # serialised takes the whole dashboard down rather than one toggle.
+        return False if v is None else v
     status: str
     suspended: bool = False
+    # Defaulted so a rolling deploy against a database without 0034 reports
+    # "off" rather than 500ing the whole settings screen.
+    version_tracking: bool = False
     created_at: datetime
     updated_at: datetime
     file_count: int = 0
@@ -130,8 +147,46 @@ class FileOut(BaseModel):
     error: str | None
     conversion_error: str | None = None
     conversion_note: str | None = None
+    # Document versions (migration 0034). Defaulted, so every route returning a
+    # FileOut carries them with no per-route work - and so a response built
+    # before the migration lands still validates. `in_force_to` non-null means
+    # superseded: stored and downloadable, but holding no chunks.
+    document_id: uuid.UUID | None = None
+    version_label: str | None = None
+    in_force_from: date | None = None
+    in_force_to: date | None = None
+    legal_status: str | None = None
     created_at: datetime
     indexed_at: datetime | None
+
+
+LEGAL_STATUSES = ("in_force", "amended", "repealed", "draft", "unknown")
+
+
+class FileVersionRequest(BaseModel):
+    """One version decision: confirm, reject, retire by hand, or reinstate.
+
+    Every field is REQUIRED so that `document_id: null` is unambiguous - it
+    means "this is a separate document", not "I forgot to send it". That
+    distinction is the whole reject path, so it cannot be left to a default.
+
+    `in_force_to` is deliberately absent: it is derived, never supplied. The
+    endpoint writes the successor's `in_force_from` onto the predecessor, so
+    the two rows cannot disagree.
+    """
+
+    # NULL = this file is its own document. Non-null must name a lineage that
+    # already exists in the project.
+    document_id: uuid.UUID | None
+    # The currently-in-force file this replaces. NULL = replace nothing.
+    supersede_file_id: uuid.UUID | None
+    version_label: str | None = Field(default=None, max_length=200)
+    # Pydantic's `date` is strict ISO-8601, so 2019-02-30 is a 422 rather than
+    # a silently wrong row. Required by the endpoint whenever a predecessor is
+    # named, because in_force_to is the only thing keeping a superseded version
+    # out of the index and it must never be invented.
+    in_force_from: date | None
+    legal_status: Literal[LEGAL_STATUSES] | None  # type: ignore[valid-type]
 
 
 class ApiKeyOut(BaseModel):

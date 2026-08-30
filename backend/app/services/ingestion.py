@@ -1,8 +1,11 @@
+import json
 import logging
 import math
+import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import NamedTuple
 
 import pymupdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -10,9 +13,11 @@ from sqlalchemy import delete as sql_delete
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..db import SessionLocal
 from ..models import Chunk, File, Project
 from ..providers.base import usage_from_openai
+from ..schemas import LEGAL_STATUSES
 from . import embedding_usage
 from .usage import record_usage
 from ..providers import registry, resolver
@@ -184,15 +189,29 @@ def recompute_project_status(db: Session, project: Project) -> None:
     # the session runs with autoflush=False, so flush pending file status
     # changes/deletes first - otherwise this SELECT reads stale rows.
     db.flush()
-    statuses = set(
-        db.scalars(select(File.status).where(File.project_id == project.id)).all()
-    )
+    # chunk_count and in_force_to ride along in the same round trip: since
+    # migration 0034 a file can exist and hold no chunks without having failed.
+    rows = db.execute(
+        select(File.status, File.chunk_count, File.in_force_to).where(
+            File.project_id == project.id
+        )
+    ).all()
+    statuses = {r.status for r in rows}
     if not statuses:
         project.status = "empty"
     elif statuses & {"pending", "processing"}:
         project.status = "indexing"
     elif "failed" in statuses:
         project.status = "error"
+    elif not any(r.in_force_to is None and r.chunk_count > 0 for r in rows):
+        # Files exist but NOTHING is searchable - every one is parked in review
+        # or superseded. "ready" has always implied at least one indexed chunk
+        # (ingestion raises "Document produced no chunks" before it can reach
+        # 'indexed'), so reporting it here would tell /v1 and the dashboard the
+        # project can answer when it provably cannot. "empty" is the existing
+        # value that already means "nothing to answer from", so this needs no
+        # new project status, no ProjectOut field and no docs change.
+        project.status = "empty"
     else:
         project.status = "ready"
 
@@ -201,6 +220,22 @@ def _file_still_exists(db: Session, file_id: uuid.UUID) -> bool:
     """Fresh SELECT (bypasses the identity map): the user may delete the file
     from another session while ingestion is mid-flight."""
     return db.scalar(select(File.id).where(File.id == file_id)) is not None
+
+
+def _file_still_current(db: Session, file_id: uuid.UUID) -> bool:
+    """False once this file has been superseded (migration 0034).
+
+    Distinct from _file_still_exists, which cannot detect this: a superseded
+    row is very much still there. A worker claims a row and commits that claim
+    immediately, holding no lock for the length of the ingest, so a confirm can
+    retire the file underneath a pass that is already running.
+
+    `.first()` on the tuple rather than `db.scalar`, because the value being
+    read is legitimately NULL for a current file and scalar() cannot tell that
+    apart from "no such row".
+    """
+    row = db.execute(select(File.in_force_to).where(File.id == file_id)).first()
+    return row is not None and row[0] is None
 
 
 def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
@@ -342,11 +377,219 @@ def _record_ingest_usage(file_id: uuid.UUID, embedding, latency_ms=None) -> None
         db.close()
 
 
+_VERSION_CANDIDATE_LIMIT = 12
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.M)
+# Legal boilerplate. Without it every filename containing "Act" and "Rules"
+# scores identically, which is most of a statutory corpus.
+_VERSION_STOPWORDS = frozenset({
+    "the", "of", "act", "and", "in", "to", "for", "a", "an", "no", "rules",
+    "regulations", "amendment", "amended", "final", "copy", "draft", "version",
+    "pdf", "docx", "doc", "scan", "scanned", "gazette", "notification",
+    "order", "part", "chapter", "schedule",
+})
+
+_VERSION_SYSTEM_PROMPT = (
+    "You identify legal and regulatory documents. You are given the opening of "
+    "a new document and a numbered list of documents already held. Reply with "
+    "ONE JSON object and nothing else:\n"
+    '{"match": <list number, or null>, "version_label": <string or null>, '
+    '"in_force_from": <"YYYY-MM-DD" or null>, '
+    '"legal_status": "in_force"|"amended"|"repealed"|"draft"|"unknown"}\n'
+    "Set match ONLY when the new document is a later version, amendment, "
+    "reprint or consolidation of that same instrument - same jurisdiction, "
+    "same title, same subject. A different instrument that merely cites it is "
+    "NOT a match, and neither is a different chapter, schedule or part of it. "
+    "When you are not sure, use null.\n"
+    "version_label is how this edition names itself, for example 'Act 18 of "
+    "2013', 'Second Amendment 2019', 'Reprint No. 4'. in_force_from is the "
+    "date this edition takes effect, not the date it was printed, gazetted or "
+    "assented to. Use null for anything the document does not state."
+)
+
+
+class VersionProposal(NamedTuple):
+    document_id: uuid.UUID  # NEVER None - the file's own id when standalone
+    version_label: str | None
+    in_force_from: date | None
+    legal_status: str | None
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        w for w in _WORD_RE.findall(text.lower())
+        if len(w) > 1 and w not in _VERSION_STOPWORDS
+    }
+
+
+def _probe_text(filename: str, markdown: str) -> str:
+    """What identifies an instrument: its filename plus its first heading.
+
+    Scanned filings arrive as scan_0001.pdf and carry their identity only in
+    the text, so the heading is pulled out EXPLICITLY rather than taking a raw
+    prefix of the markdown, which is mostly gazette boilerplate.
+    """
+    heading = _HEADING_RE.search(markdown[:4000])
+    return f"{filename} {heading.group(1) if heading else markdown[:200]}"
+
+
+def _shortlist(candidates, probe: str, limit: int = _VERSION_CANDIDATE_LIMIT):
+    """The `limit` candidates most likely to be the same instrument.
+
+    Takes anything with .filename and .version_label, so it is unit-testable
+    against a NamedTuple with no database - which is the only kind of test this
+    CI can run. A project holding fewer than `limit` current documents sends
+    all of them regardless of score.
+
+    OVERLAP COEFFICIENT, not Jaccard. After stopwords, "Companies Act 2013" vs
+    "Companies Amendment Act 2019" is {companies, 2013} vs {companies, 2019}:
+    Jaccard scores that 0.33 and ranks it below noise; overlap scores it 0.5.
+    Recall-oriented on purpose - the LLM is the precision filter and the human
+    is the gate. No embedding search: that would spend the user's money on
+    every upload, and chunk CONTENT is not what identifies an instrument.
+    """
+    if len(candidates) <= limit:
+        return list(candidates)
+    probe_tokens = _tokens(probe)
+    if not probe_tokens:
+        return sorted(candidates, key=lambda r: r.filename)[:limit]
+
+    def score(row) -> float:
+        cand = _tokens(f"{row.filename} {row.version_label or ''}")
+        if not cand:
+            return 0.0
+        return len(probe_tokens & cand) / min(len(probe_tokens), len(cand))
+
+    # Filename breaks ties so the shortlist is deterministic across runs.
+    return sorted(candidates, key=lambda r: (-score(r), r.filename))[:limit]
+
+
+def _parse_version_json(reply: str, shortlist):
+    """(matched file id, label, date, status) from the model's reply.
+
+    Every branch degrades to None. An unusable reply must mean "no match",
+    which is today's behaviour, never a failed ingest.
+    """
+    try:
+        parsed = json.loads(reply.strip())
+    except Exception:
+        found = re.search(r"\{.*\}", reply, re.S)  # fenced or prefaced JSON
+        try:
+            parsed = json.loads(found.group(0)) if found else None
+        except Exception:
+            parsed = None
+    if not isinstance(parsed, dict):
+        return None, None, None, None
+
+    matched = None
+    index = parsed.get("match")
+    # `not isinstance(index, bool)` matters: True is an int and would select [1].
+    if isinstance(index, int) and not isinstance(index, bool):
+        if 1 <= index <= len(shortlist):
+            matched = shortlist[index - 1].id
+
+    label = parsed.get("version_label")
+    label = label.strip()[:200] if isinstance(label, str) and label.strip() else None
+
+    from_date = None
+    raw = parsed.get("in_force_from")
+    if isinstance(raw, str) and len(raw.strip()) == 10:
+        try:
+            # date.fromisoformat is a REAL calendar check - it rejects
+            # 2019-02-30 - and it is stdlib, so nothing is added to
+            # requirements.txt. The `date` type then flows unconverted the whole
+            # way: model -> date column -> Pydantic date -> ISO string in JSON.
+            from_date = date.fromisoformat(raw.strip())
+        except ValueError:
+            from_date = None
+
+    status = parsed.get("legal_status")
+    status = status if status in LEGAL_STATUSES else None
+    return matched, label, from_date, status
+
+
+def _propose_version(db: Session, file, project, markdown: str) -> VersionProposal:
+    """What this file is a version of, if anything. NEVER raises.
+
+    document_id is ALWAYS set on the way out - the file's own id when nothing
+    matched. That is what makes extraction exactly-once: the caller writes it,
+    and the gate (`document_id is None`) closes permanently.
+
+    Fail-open is the whole posture. The worst extraction failure - no key, a
+    dead provider, a garbled reply - produces exactly the behaviour that
+    existed before 0034: index it as its own document. The gate is a positive
+    assertion ("this replaces THAT file"), never an absence, so a provider
+    outage cannot park a corpus.
+    """
+    standalone = VersionProposal(file.id, None, None, None)
+    # BOTH switches. The per-project flag is the opt-in; the global one is the
+    # fleet-wide kill switch. Neither is redundant.
+    if not (settings.version_extraction_enabled and project.version_tracking):
+        return standalone
+    try:
+        candidates = db.execute(
+            select(
+                File.id, File.document_id, File.filename,
+                File.version_label, File.in_force_from,
+            ).where(
+                File.project_id == file.project_id,
+                File.id != file.id,
+                # One row per lineage: the version endpoint keeps at most one
+                # file per lineage with a null in_force_to.
+                File.in_force_to.is_(None),
+                # An unconfirmed proposal is not something to be a version of.
+                File.status != "review",
+            )
+        ).all()
+        if not candidates:
+            return standalone  # nothing to match against - NO LLM call
+        shortlist = _shortlist(candidates, _probe_text(file.filename, markdown))
+        llm = registry.get_llm(
+            project.llm_provider,
+            project.llm_model,
+            resolver.resolve_llm_key(db, project),
+        )
+        listing = "\n".join(
+            f"[{i + 1}] {r.filename} | {r.version_label or '-'} | "
+            f"{r.in_force_from.isoformat() if r.in_force_from else '-'}"
+            for i, r in enumerate(shortlist)
+        )
+        reply, usage = llm.generate_with_usage(
+            _VERSION_SYSTEM_PROMPT,
+            f"Existing documents:\n{listing}\n\n"
+            f"New document (opening):\n{markdown[:settings.version_extract_chars]}",
+        )
+        # Metered by the ingest scope this already runs inside - the same
+        # accumulator image captioning and audio transcription write into. Zero
+        # new metering code, no new usage endpoint label, and the tokens land on
+        # the existing file_ingest row priced by the chat table.
+        embedding_usage.record_llm(usage)
+        matched, label, from_date, status = _parse_version_json(reply, shortlist)
+    except Exception:
+        logger.info(
+            "Version extraction unavailable for file %s", file.id, exc_info=True
+        )
+        return standalone
+    if matched is None:
+        # No lineage, but keep whatever the model did read off the document.
+        return VersionProposal(file.id, label, from_date, status)
+    row = next(r for r in shortlist if r.id == matched)
+    return VersionProposal(row.document_id or row.id, label, from_date, status)
+
+
 def _ingest_file_inner(file_id: uuid.UUID) -> None:
     db = SessionLocal()
     try:
         file = db.get(File, file_id)
         if file is None:
+            return
+        # A superseded version holds zero chunks BY DEFINITION (migration
+        # 0034), so indexing one would put retired content back into search.
+        # This sits before the 'processing' write so a stale claim - a worker
+        # that took this row just before a confirm superseded it - writes
+        # nothing at all rather than leaving a half-touched row behind.
+        if file.in_force_to is not None:
+            logger.info("File %s is a superseded version - not indexing", file_id)
             return
         project = db.get(Project, file.project_id)
         file.status = "processing"
@@ -433,6 +676,50 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
             # leaves a row claiming markdown that was never stored.
             file.conversion_version = CONVERSION_VERSION
 
+        # -- document version gate (migration 0034) -----------------------
+        #
+        # Runs at most ONCE per file: only before its first successful index
+        # (indexed_at is null) and only while it carries no version decision
+        # (document_id is null). Both matter. Without the first, bumping
+        # CONVERSION_VERSION re-converts the whole corpus and would re-examine
+        # every already-confirmed file, taking a production index offline in
+        # one deploy; no requeue path clears indexed_at, which is what makes it
+        # a reliable "has been indexed at least once" marker. Without the
+        # second, a file the user just confirmed comes back through the queue
+        # and is parked again, forever - _propose_version ALWAYS returns a
+        # non-null document_id, so writing it here closes the gate permanently.
+        #
+        # Placed AFTER the markdown upload and the conversion stamp so a park
+        # commits a file whose blob is on disk and whose pipeline version is
+        # recorded. The confirm then re-queues it and _reuse_converted_markdown
+        # serves that blob, so conversion - which for images and audio is real
+        # money on the user's own key - is never paid for twice.
+        if file.document_id is None and file.indexed_at is None:
+            proposal = _propose_version(db, file, project, converted.markdown)
+            file.document_id = proposal.document_id  # never None - closes the gate
+            file.version_label = proposal.version_label
+            file.in_force_from = proposal.in_force_from
+            file.legal_status = proposal.legal_status
+            if proposal.document_id != file.id:
+                # Suspected new edition of something already held. Stop before
+                # chunking: the predecessor keeps its chunks and stays
+                # searchable until a human confirms, so the corpus is never
+                # briefly empty on a guess. lease_expires_at is cleared so an
+                # operator reading the row is not told a dead lease is live -
+                # renew_lease is scoped to status='processing' and will return
+                # False on its next beat, ending the heartbeat thread.
+                file.status = "review"
+                file.lease_expires_at = None
+                # MUST run: the 'indexing' set at the top of this function is
+                # never unwound by the normal exit below, so a project whose
+                # last file parks would report 'indexing' forever.
+                recompute_project_status(db, project)
+                # No bump_content_version: parking changes nothing searchable,
+                # so there is no cached answer to invalidate.
+                db.commit()
+                logger.info("File %s parked for version review", file_id)
+                return
+
         # per-file overrides fall back to the project defaults
         chunk_size = file.chunk_size or project.chunk_size
         chunk_overlap = (
@@ -513,6 +800,25 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
                     row["embedding_full"] = vector
             db.execute(insert(Chunk), rows)
             db.commit()
+
+        # Superseded WHILE this ingest ran. A claim commits immediately and
+        # holds no row lock for the length of the work, so a confirm can retire
+        # this file after the worker took it. _file_still_exists cannot see
+        # this - a superseded row is very much still there.
+        #
+        # The batches already committed above are visible to search right now,
+        # so leave the shape a superseded row is required to have (zero chunks,
+        # chunk_count 0) rather than writing 'indexed' and putting a retired
+        # version back in the index. The bump is required because those batches
+        # became visible AFTER the confirm's own bump.
+        if not _file_still_current(db, file.id):
+            db.execute(sql_delete(Chunk).where(Chunk.file_id == file.id))
+            file.chunk_count = 0
+            recompute_project_status(db, project)
+            bump_content_version(db, project.id)
+            db.commit()
+            logger.info("File %s superseded mid-ingest - chunks dropped", file_id)
+            return
 
         file.status = "indexed"
         file.chunk_count = len(chunks)
