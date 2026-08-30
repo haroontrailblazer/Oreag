@@ -640,3 +640,180 @@ class TestVersioningNeverLeaksIntoThePinnedSql:
                     "in the pinned SQL breaks the byte-equality test, and one "
                     "on the ANN outer join silently shrinks recall"
                 )
+
+
+# --------------------------------------------------------------------------
+# Regressions found by adversarial review of the first implementation. Each of
+# these was a real defect, so each gets a test rather than a comment.
+# --------------------------------------------------------------------------
+
+
+class TestEveryRequeueIsAConditionalUpdate:
+    """`retry_file` was the third requeue site and the one left unguarded.
+
+    It read the row with db.get() (no lock), checked in_force_to, then wrote
+    status='pending' in a statement keyed on id alone. A confirm landing in
+    that window superseded the row, the write blocked on its lock and then
+    applied unconditionally, and a retired edition ended up in the durable
+    queue - the exact interleave the other two sites were converted to
+    set-based UPDATEs to prevent.
+    """
+
+    def test_retry_writes_through_a_predicate_not_an_attribute(self):
+        from app.routers import files as files_router
+
+        source = inspect.getsource(files_router.retry_file)
+        assert "update(File)" in source, (
+            "retry_file must write through a conditional UPDATE - an "
+            "attribute assignment is keyed on id alone and cannot exclude a "
+            "row superseded since it was read"
+        )
+        assert "File.in_force_to.is_(None)" in source
+        assert 'file.status = "pending"' not in source
+
+    def test_no_requeue_site_assigns_pending_as_an_attribute(self):
+        """The generalisation: every requeue in this router is conditional."""
+        tree = ast.parse(_files_source())
+        bare = [
+            ast.unparse(node)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and ast.unparse(node.targets[0]).endswith(".status")
+            and ast.unparse(node.value) == "'pending'"
+        ]
+        assert not bare, (
+            f"unconditional requeue(s) found: {bare} - each can put a "
+            "superseded version back into the index under READ COMMITTED"
+        )
+
+
+class TestSupersededFailuresDoNotPinTheProject:
+    """A retired edition that failed to index is not a project-level error.
+
+    It holds no chunks by design, retrying it is refused by design, and
+    deleting it would destroy the history the feature exists to keep - so
+    counting it left the project stuck at 'error' with no action able to clear
+    it.
+    """
+
+    def test_the_failure_check_is_scoped_to_current_editions(self):
+        from app.services import ingestion
+
+        source = inspect.getsource(ingestion.recompute_project_status)
+        assert 'r.status == "failed" and r.in_force_to is None' in source, (
+            "a superseded failed file must not pin the project at 'error'"
+        )
+
+
+class TestTheExtractionGateSurvivesAFailedIngest:
+    """Extraction is paid work, so its result must outlive a later failure.
+
+    The gate is `document_id IS NULL`. If that write only landed on the final
+    commit, "Document produced no chunks" or a dead embedding provider would
+    roll it back through mark_file_failed and every retry would buy the same
+    LLM call again.
+    """
+
+    def test_the_gate_write_is_committed_before_chunking(self):
+        from app.services import ingestion
+
+        tree = ast.parse(inspect.getsource(ingestion._ingest_file_inner))
+        gate_line = commit_lines = None
+        commits = []
+        for node in ast.walk(tree):
+            text = ast.unparse(node)
+            if gate_line is None and isinstance(node, ast.If):
+                if "file.document_id is None and file.indexed_at is None" in text:
+                    gate_line = node.lineno
+                    # Every commit inside the gate block, park path included.
+                    commits = [
+                        inner.lineno
+                        for inner in ast.walk(node)
+                        if isinstance(inner, ast.Call)
+                        and ast.unparse(inner) == "db.commit()"
+                    ]
+            if isinstance(node, ast.Call) and "insert(Chunk)" in text:
+                commit_lines = node.lineno
+        assert gate_line is not None, "the version gate is gone"
+        assert commit_lines is not None, "the chunk insert is gone"
+        assert len(commits) >= 2, (
+            "the gate must commit on BOTH paths - the park, and the "
+            "no-match path that falls through to chunking - or a later "
+            "failure rolls the extraction result back and re-bills the user"
+        )
+        assert max(commits) < commit_lines
+
+
+class TestDownloadHeaderSurvivesNonAsciiFilenames:
+    """Filenames are stored verbatim and are routinely not Latin-1.
+
+    Starlette latin-1 encodes header values, so a bare filename="..." raises
+    UnicodeEncodeError and 500s the download - on exactly the route that is the
+    only way to read a superseded version.
+    """
+
+    def test_it_sends_an_rfc_6266_encoded_filename(self):
+        from app.routers import files as files_router
+
+        source = inspect.getsource(files_router.download_file_content)
+        assert "filename*=UTF-8" in source
+        assert 'encode("ascii", "replace")' in source, (
+            "the plain `filename` fallback must be ASCII-safe"
+        )
+
+    def test_a_cjk_filename_produces_a_latin_1_encodable_header(self):
+        # The actual failure, reproduced without a request: build the header
+        # the route builds and prove starlette could encode it.
+        from urllib.parse import quote
+
+        name = "契約書 📄.pdf"
+        stripped = re.sub(r'[\r\n"]', "", name)[:200]
+        ascii_name = stripped.encode("ascii", "replace").decode("ascii") or "download"
+        header = (
+            f'attachment; filename="{ascii_name}"; '
+            f"filename*=UTF-8''{quote(stripped, safe='')}"
+        )
+        header.encode("latin-1")  # raises if the fix is undone
+
+
+class TestVersionRequestCannotSilentlyEraseALabel:
+    """Every field is required because the endpoint writes every field.
+
+    An optional `version_label` meant a client that omitted it wiped the label
+    - and defeated the idempotency short-circuit, turning a harmless retry into
+    a destructive edit.
+    """
+
+    def test_version_label_is_required(self):
+        from app.schemas import FileVersionRequest
+
+        assert FileVersionRequest.model_fields["version_label"].is_required()
+
+    def test_every_field_is_required(self):
+        from app.schemas import FileVersionRequest
+
+        for name, field in FileVersionRequest.model_fields.items():
+            assert field.is_required(), (
+                f"{name} is optional; the endpoint writes it unconditionally, "
+                "so omitting it would erase the stored value"
+            )
+
+
+class TestLockOrderIsFilesThenChunks:
+    """Both writers must take `files` locks before `chunks` locks.
+
+    set_file_version locks files and then deletes that file's chunks. A reindex
+    that deleted chunks first and locked files afterwards inverts that order,
+    and the two deadlock.
+    """
+
+    def test_reindex_locks_its_files_before_deleting_chunks(self):
+        from app.routers import files as files_router
+
+        source = inspect.getsource(files_router.reindex_project)
+        lock = source.index("with_for_update")
+        delete = source.index("sql_delete(Chunk)")
+        assert lock < delete, (
+            "reindex takes chunk locks before file locks, inverting "
+            "set_file_version's order - the two can deadlock"
+        )

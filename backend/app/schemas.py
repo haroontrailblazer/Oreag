@@ -180,7 +180,11 @@ class FileVersionRequest(BaseModel):
     document_id: uuid.UUID | None
     # The currently-in-force file this replaces. NULL = replace nothing.
     supersede_file_id: uuid.UUID | None
-    version_label: str | None = Field(default=None, max_length=200)
+    # Required-but-nullable like the rest: the endpoint WRITES every field it is
+    # given, so an omitted `version_label` would silently erase a label the user
+    # never touched - and would then also defeat the idempotency short-circuit,
+    # turning a harmless retry into a destructive edit.
+    version_label: str | None = Field(max_length=200)
     # Pydantic's `date` is strict ISO-8601, so 2019-02-30 is a 422 rather than
     # a silently wrong row. Required by the endpoint whenever a predecessor is
     # named, because in_force_to is the only thing keeping a superseded version

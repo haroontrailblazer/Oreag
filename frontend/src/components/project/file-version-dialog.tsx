@@ -76,14 +76,20 @@ export function FileVersionDialog({
 }) {
   const reviewing = file.status === "review"
 
-  const { siblings, current } = useMemo(() => {
+  const { editions, current } = useMemo(() => {
     const lineage = lineageOf(file)
-    const siblings = files
-      .filter((f) => lineageOf(f) === lineage && f.id !== file.id)
+    // The WHOLE lineage, this file included. `current` must be searched over
+    // all of it, not just the siblings: opening history from the in-force
+    // edition would otherwise find no current edition and offer to reinstate
+    // over nothing.
+    const editions = files
+      .filter((f) => lineageOf(f) === lineage)
       .sort(byRecency)
     return {
-      siblings,
-      current: siblings.find(
+      editions,
+      // The one edition in force, if any. `file` itself qualifies in history
+      // mode; in review mode it cannot, because its status IS "review".
+      current: editions.find(
         (f) => f.in_force_to === null && f.status !== "review"
       ),
     }
@@ -107,7 +113,29 @@ export function FileVersionDialog({
   const supersedes = isVersion && current ? current : null
   const dateValid = !supersedes || ISO_DATE.test(from.trim())
 
-  async function submit(target: FileRecord, predecessor: FileRecord | null) {
+  /**
+   * One version decision.
+   *
+   * `documentId` is passed explicitly rather than derived from `predecessor`:
+   * the two differ for the repair actions. Reinstating keeps the lineage with
+   * no predecessor (`documentId` set, `predecessor` null); detaching clears it
+   * (both null).
+   *
+   * `meta` is passed explicitly too, because history-mode actions act on an
+   * edition that is NOT the one the dialog was opened on - sending the form
+   * state would stamp this file's label and dates onto that one.
+   */
+  async function submit(
+    target: FileRecord,
+    predecessor: FileRecord | null,
+    documentId: string | null,
+    meta: {
+      version_label: string | null
+      in_force_from: string | null
+      legal_status: string | null
+    },
+    message: string
+  ) {
     setSaving(true)
     try {
       const updated = await api<FileRecord[]>(
@@ -115,27 +143,28 @@ export function FileVersionDialog({
         {
           method: "POST",
           body: JSON.stringify({
-            document_id: predecessor ? lineageOf(predecessor) : null,
+            document_id: documentId,
             supersede_file_id: predecessor?.id ?? null,
-            version_label: label.trim() || null,
-            in_force_from: from.trim() || null,
-            legal_status: status || null,
+            ...meta,
           }),
         }
       )
       onDone(updated)
       onOpenChange(false)
-      toast.success(
-        predecessor
-          ? `${predecessor.filename} is now a superseded version`
-          : "Saved as a separate document"
-      )
+      toast.success(message)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save the version")
     } finally {
       setSaving(false)
     }
   }
+
+  /** An edition's own metadata, for an action that must not rewrite it. */
+  const metaOf = (edition: FileRecord) => ({
+    version_label: edition.version_label,
+    in_force_from: edition.in_force_from,
+    legal_status: edition.legal_status,
+  })
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -258,7 +287,7 @@ export function FileVersionDialog({
           </div>
         ) : (
           <ul className="space-y-2">
-            {[file, ...siblings].sort(byRecency).map((edition) => (
+            {editions.map((edition) => (
               <li
                 key={edition.id}
                 className={`rounded-lg border p-3 text-sm ${
@@ -315,19 +344,60 @@ export function FileVersionDialog({
                   >
                     Text
                   </Button>
-                  {edition.in_force_to && current && (
+                  {/* Reinstating is offered only when the lineage has NO
+                      edition in force. The endpoint clears in_force_to on its
+                      target, so this needs no predecessor and no new date -
+                      the edition keeps its own. With a current edition present
+                      it would clash, and superseding forward instead would
+                      demand a date later than that edition's, silently
+                      rewriting this one's history. Detach the wrong edition
+                      first; the copy below says so. */}
+                  {edition.in_force_to && !current && (
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={saving}
-                      onClick={() => submit(edition, current)}
+                      onClick={() =>
+                        submit(
+                          edition,
+                          null,
+                          lineageOf(edition),
+                          metaOf(edition),
+                          `${edition.filename} is the current version again`
+                        )
+                      }
                     >
                       Make this the current version
+                    </Button>
+                  )}
+                  {editions.length > 1 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={saving}
+                      onClick={() =>
+                        submit(
+                          edition,
+                          null,
+                          null,
+                          metaOf(edition),
+                          `${edition.filename} is now its own document`
+                        )
+                      }
+                    >
+                      Not a version of this
                     </Button>
                   )}
                 </div>
               </li>
             ))}
+            {editions.length > 1 && (
+              <li className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                {current
+                  ? `${current.filename} is the version in force, so it is the only one answering questions. To bring an earlier one back, first use "Not a version of this" on ${current.filename} — then this list will offer to make one current again.`
+                  : "No version of this document is in force, so none of it is searchable. Make one current to index it again — its text is already stored, so this costs an embedding run and nothing else."}
+              </li>
+            )}
           </ul>
         )}
 
@@ -338,7 +408,21 @@ export function FileVersionDialog({
           {reviewing && (
             <Button
               disabled={saving || !dateValid}
-              onClick={() => submit(file, supersedes)}
+              onClick={() =>
+                submit(
+                  file,
+                  supersedes,
+                  supersedes ? lineageOf(supersedes) : null,
+                  {
+                    version_label: label.trim() || null,
+                    in_force_from: from.trim() || null,
+                    legal_status: status || null,
+                  },
+                  supersedes
+                    ? `${supersedes.filename} is now a superseded version`
+                    : "Saved as a separate document"
+                )
+              }
             >
               {supersedes ? "Confirm and replace" : "Index as its own document"}
             </Button>

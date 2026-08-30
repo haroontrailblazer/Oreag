@@ -357,7 +357,14 @@ export function FilesTab({
   }
 
   async function handleRetryFailed() {
-    const failed = files?.filter((file) => file.status === "failed") ?? []
+    // A superseded edition can also be 'failed', and the backend 409s a retry
+    // on one by design. Without this filter Promise.all rejects on the first
+    // such file and every other retry's result is discarded - the user is told
+    // "Retry failed" and the genuinely retryable files are left untouched.
+    const failed =
+      files?.filter(
+        (file) => file.status === "failed" && file.in_force_to === null
+      ) ?? []
     if (failed.length === 0) {
       toast.info("No failed files to retry")
       return

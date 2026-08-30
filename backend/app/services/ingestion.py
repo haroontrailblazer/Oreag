@@ -201,7 +201,12 @@ def recompute_project_status(db: Session, project: Project) -> None:
         project.status = "empty"
     elif statuses & {"pending", "processing"}:
         project.status = "indexing"
-    elif "failed" in statuses:
+    elif any(r.status == "failed" and r.in_force_to is None for r in rows):
+        # Superseded rows are excluded from the failure check. A retired edition
+        # that failed to index is not a problem with the project - it holds no
+        # chunks by design, retrying it is refused by design, and deleting it
+        # would destroy the history this feature exists to keep. Counting it
+        # would pin the project at 'error' with no action available to clear it.
         project.status = "error"
     elif not any(r.in_force_to is None and r.chunk_count > 0 for r in rows):
         # Files exist but NOTHING is searchable - every one is parked in review
@@ -719,6 +724,14 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
                 db.commit()
                 logger.info("File %s parked for version review", file_id)
                 return
+            # Committed HERE, before chunking, and not left to ride on the
+            # final commit. Extraction is a paid LLM call on the user's own
+            # key, and the gate that makes it exactly-once is `document_id IS
+            # NULL`. If this write only landed at the end, any later failure -
+            # "Document produced no chunks", a dead embedding provider - would
+            # roll it back through mark_file_failed, and every retry would buy
+            # the same extraction again.
+            db.commit()
 
         # per-file overrides fall back to the project defaults
         chunk_size = file.chunk_size or project.chunk_size

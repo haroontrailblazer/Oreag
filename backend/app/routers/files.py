@@ -2,6 +2,7 @@ import logging
 import re
 import uuid
 from typing import NamedTuple
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Response, UploadFile
 from fastapi import File as FastAPIFile
@@ -1014,13 +1015,22 @@ async def download_file_content(
     except Exception:
         logger.warning("Storage read failed for file %s", file_id, exc_info=True)
         raise HTTPException(502, "The stored file could not be read")
-    # Quotes and newlines stripped: filename is user-supplied and goes into a
-    # response header.
-    safe = re.sub(r'[\r\n"]', "", name)[:200]
+    # Filenames are user-supplied and stored verbatim, so they routinely carry
+    # CJK, Cyrillic or emoji. Starlette latin-1 encodes header values, so a bare
+    # `filename="..."` would raise UnicodeEncodeError and 500 the download.
+    # RFC 6266: an ASCII-only `filename` for old clients plus a percent-encoded
+    # `filename*` that every current browser prefers.
+    stripped = re.sub(r'[\r\n"]', "", name)[:200]
+    ascii_name = stripped.encode("ascii", "replace").decode("ascii") or "download"
+    quoted = quote(stripped, safe="")
     return Response(
         content=data,
         media_type=media,
-        headers={"Content-Disposition": f'attachment; filename="{safe}"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quoted}'
+            )
+        },
     )
 
 
@@ -1033,27 +1043,49 @@ def retry_file(
     file = db.get(File, file_id)
     if file is None or file.project_id != project.id:
         raise HTTPException(404, "File not found")
-    if file.status == "processing":
-        raise HTTPException(409, "File is already being processed")
-    if file.status == "review":
-        raise HTTPException(
-            409,
-            "This file is waiting for a version decision - confirm or reject it "
-            "in the Files tab before re-indexing.",
+    # The requeue is a set-based UPDATE re-stating every guard, for the same
+    # reason the other two requeue sites are (files.py, upload and reindex): the
+    # read above takes no row lock, so a confirm can supersede this file between
+    # the check and the flush - and a write keyed on `id` alone would then land
+    # on a superseded row and put a retired edition into the durable queue.
+    # Re-stating the predicate makes that interleave match zero rows instead.
+    updated = db.execute(
+        update(File)
+        .where(
+            File.id == file_id,
+            File.in_force_to.is_(None),
+            File.status.notin_(("processing", "review")),
         )
-    if file.in_force_to is not None:
+        .values(
+            status="pending",  # the queue workers pick it up from here
+            error=None,
+            conversion_error=None,
+            conversion_note=None,
+            attempts=0,  # a manual retry gets a fresh budget
+        )
+    ).rowcount
+    if not updated:
+        # Re-read to name the actual reason: the pre-lock state may be stale.
+        db.rollback()
+        file = db.get(File, file_id)
+        if file is None:
+            raise HTTPException(404, "File not found")
+        if file.status == "processing":
+            raise HTTPException(409, "File is already being processed")
+        if file.status == "review":
+            raise HTTPException(
+                409,
+                "This file is waiting for a version decision - confirm or reject "
+                "it in the Files tab before re-indexing.",
+            )
         raise HTTPException(
             409,
             "This is a superseded version. Re-indexing it would put two versions "
             "of the same document in the index; make it current instead.",
         )
-    file.status = "pending"  # the queue workers pick it up from here
-    file.error = None
-    file.conversion_error = None
-    file.conversion_note = None
-    file.attempts = 0  # a manual retry gets a fresh budget
     project.status = "indexing"
     db.commit()
+    db.refresh(file)
     return file
 
 
@@ -1161,7 +1193,17 @@ def reindex_project(
     project.chunk_size = effective_size
     project.chunk_overlap = effective_overlap
 
-    files = db.scalars(select(File).where(File.project_id == project.id)).all()
+    # Locked, and locked BEFORE any chunk is deleted below. set_file_version
+    # takes its `files` lock first and only then deletes that file's chunks; a
+    # reindex that deleted chunks first and locked files afterwards would invert
+    # that order and let the two deadlock. Ordering by id keeps concurrent
+    # reindexes on the same project deadlock-free with each other too.
+    files = db.scalars(
+        select(File)
+        .where(File.project_id == project.id)
+        .order_by(File.id)
+        .with_for_update()
+    ).all()
 
     # Matryoshka fast path: vectors already migrated in place, chunks still
     # valid - nothing to re-ingest.
