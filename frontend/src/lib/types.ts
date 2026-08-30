@@ -86,7 +86,10 @@ export interface FileRecord {
   size_bytes: number | null
   page_count: number | null
   chunk_count: number
-  status: "pending" | "processing" | "indexed" | "failed"
+  // "review" (migration 0034) means: converted and stored, but held back from
+  // chunking because it looks like a new version of a document already in the
+  // project. A person confirms what it replaces before it is indexed.
+  status: "pending" | "processing" | "indexed" | "failed" | "review"
   error: string | null
   conversion_error: string | null
   // Non-fatal caveat (e.g. audio used the free transcription fallback).

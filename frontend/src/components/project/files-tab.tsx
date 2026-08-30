@@ -6,6 +6,7 @@ import {
   ClockIcon as Clock3,
   FileTextIcon as FileText,
   CircleNotchIcon as Loader2,
+  QuestionIcon as HelpCircle,
   DotsThreeIcon as MoreHorizontal,
   ArrowCounterClockwiseIcon as RotateCcw,
   TrashIcon as Trash2,
@@ -53,6 +54,12 @@ function formatSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+type StatusConfig = {
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  className: string
+}
+
 const FILE_STATUS = {
   pending: {
     label: "Queued",
@@ -77,14 +84,7 @@ const FILE_STATUS = {
     className:
       "border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400",
   },
-} satisfies Record<
-  FileRecord["status"],
-  {
-    label: string
-    icon: React.ComponentType<{ className?: string }>
-    className: string
-  }
->
+} satisfies Partial<Record<FileRecord["status"], StatusConfig>>
 
 /* Skeleton text lines drawn inside each mini document card. */
 const CARD_LINES = [
@@ -164,8 +164,20 @@ function BundlingLoader() {
   )
 }
 
+// A backend that learns a new status before this bundle does must degrade to a
+// neutral badge, never throw during render. `satisfies` is compile-time only,
+// schemas.py types `status` as a bare `str`, and there is no error boundary
+// anywhere in this app - so an unguarded lookup here unmounts the whole
+// project page, not just the badge.
+const FILE_STATUS_UNKNOWN: StatusConfig = {
+  label: "Unknown",
+  icon: HelpCircle,
+  className: "border-border/70 bg-muted/50 text-muted-foreground",
+}
+
 function FileStatus({ status }: { status: FileRecord["status"] }) {
-  const config = FILE_STATUS[status]
+  const config: StatusConfig =
+    (FILE_STATUS as Record<string, StatusConfig>)[status] ?? FILE_STATUS_UNKNOWN
   const Icon = config.icon
 
   return (
@@ -513,7 +525,11 @@ export function FilesTab({
                     <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] leading-4 text-muted-foreground sm:text-xs">
                       {meta.split(" · ").map((item, index) => (
                         <span
-                          key={item}
+                          // Index-qualified: two segments can carry the same
+                          // text (a version label of "2019" beside an
+                          // in-force date of "2019"), and a bare `item` key
+                          // would collide.
+                          key={`${index}-${item}`}
                           className="inline-flex items-center gap-1.5 whitespace-nowrap"
                         >
                           {index > 0 && (
