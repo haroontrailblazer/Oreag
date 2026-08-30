@@ -182,6 +182,11 @@ model {
       routers = component 'Routers' 'backend/app/routers' {
         dashboardApi = component 'Dashboard API' '/api/* — Supabase JWT verified against JWKS, then an ownership check' {
           technology 'ES256 / RS256 via JWKS'
+          metadata {
+            version-decisions 'POST /files/{id}/version is the only way in or out of status=review, and the only owner-side surface that can retire live content. Both rows are locked in one id-ordered FOR UPDATE, everything lands in ONE commit, and it makes zero storage calls - so "the commit succeeded" and "the operation succeeded" are the same statement, and a replay is a no-op rather than a second supersession.'
+            version-download 'GET /files/{id}/content?format=source|markdown is the only way to read a superseded edition. Without it the blobs kept forever would be unreachable storage.'
+            no-public-confirm 'deliberately absent from /v1 and MCP: /openapi.json and /docs are unauthenticated, so a confirm endpoint there would be a publicly documented way to retire live law - and an API key is not the person the review gate exists to ask.'
+          }
         }
         publicApi = component 'Public API' '/v1/* — query · stream · retrieve · explore · memory · graph · ingest' {
           technology 'Bearer oreag_sk_ · SHA-256 lookup'
@@ -204,7 +209,7 @@ model {
             lease-heartbeat 'a worker still making progress pushes its own lease out as it goes, so a genuinely long job is not stolen mid-flight while a DEAD worker still releases its file. A transient error only skips that beat - it can never permanently kill the heartbeat.'
           }
         }
-        ingestion = component 'Ingestion' 'Convert, chunk, embed, write vectors. Idempotent: deletes prior chunks first, then commits per batch so a crash loses at most one batch.' {
+        ingestion = component 'Ingestion' 'Convert, chunk, embed, write vectors. Idempotent: deletes prior chunks first, then commits per batch so a crash loses at most one batch. Between conversion and chunking sits the document-version gate.' {
           #writepath
           technology 'RecursiveCharacterTextSplitter · 1000 chars / 200 overlap'
           metadata {
@@ -212,6 +217,8 @@ model {
             separators 'paragraph, then line, then word, then character - cuts at the largest natural boundary that fits'
             defaults 'chunk_size 1000, chunk_overlap 200; per-file overrides fall back to project settings'
             batching 'embed_batch_size(embedder): OpenAI/Gemini 100, Ollama/LM Studio 32, others 64'
+            version-gate 'migration 0034, per project. After the markdown is stored and stamped, an upload that looks like a new edition of a document already held is parked at status=review and NOT chunked, until a person confirms what it replaces. Runs at most once per file (document_id IS NULL AND indexed_at IS NULL), so re-conversion never re-opens a settled review.'
+            version-gate-failure 'fails OPEN: no key, dead provider, unparseable reply or an impossible date all degrade to indexing the file as its own document, which is the pre-0034 behaviour.'
           }
         }
         conversion = component 'Conversion' 'Any upload to Markdown, so chunking sees one uniform format. AI image captioning and a BYOK speech-to-text chain.' {
@@ -858,6 +865,23 @@ views {
       transcription -> modelProviders 'transcribes'
     }
 
+    ingestion -> files 'stores the converted Markdown and stamps the pipeline version'
+
+    opt 'project tracks document versions, and this file has never been indexed' {
+      ingestion -> db 'lists the editions currently in force'
+      ingestion -> registry 'asks the answer model: is this a new edition of one of them?'
+      registry -> modelProviders 'one call, filename + first heading + the opening'
+      ingestion -> db 'writes the proposal and COMMITS - extraction is paid work and must survive a later failure'
+      alt {
+        when 'the model matched an existing document' {
+          ingestion -> db 'status: review — parked BEFORE chunking, so the edition in force keeps answering'
+        }
+        else 'no match, or extraction unavailable' {
+          ingestion -> ingestion 'carries on as its own document - every failure path degrades to exactly this'
+        }
+      }
+    }
+
     ingestion -> ingestion 'chunks with RecursiveCharacterTextSplitter, 1000 / 200'
     ingestion -> resolver 'resolves the embedding key'
     resolver -> db 'decrypts the provider key, Fernet'
@@ -874,6 +898,46 @@ views {
     } catch 'any exception while converting or embedding' {
       ingestion -> db 'status: failed, chunks deleted, error surfaced in the Files tab'
     }
+  }
+
+  dynamic view documentVersionFlow {
+    title 'Flows / 1a · Superseding a document version'
+    description '''
+      Replacing a document used to mean deleting it, which cascaded its chunks
+      away AND removed both storage objects - so the previous text was gone.
+      Now only the edition IN FORCE is chunked and embedded. A superseded
+      edition keeps its row, its source blob, its converted Markdown and all
+      its metadata, and holds zero chunks: history stays downloadable and
+      re-indexable without re-upload, while search can only ever quote the text
+      in force.
+
+      Retrieval is not involved and does not change. A superseded edition has
+      no rows in `chunks`, and every chunk search starts FROM chunks - so there
+      is nothing to filter out, and the byte-pinned search SQL is untouched.
+      That is the whole reason this shape was chosen.
+    '''
+    variant sequence
+
+    developer -> ui 'opens the parked file from the Files tab'
+    ui -> dashboardApi 'POST /api/projects/{id}/files/{fid}/version'
+
+    dashboardApi -> db 'locks BOTH rows in one id-ordered SELECT ... FOR UPDATE'
+    dashboardApi -> dashboardApi 'replays identically? return 200 unchanged, before any write'
+    dashboardApi -> dashboardApi 'refuses a predecessor that is queued, already superseded, or dated after its successor'
+
+    dashboardApi -> db 'predecessor: in_force_to = the successor in_force_from, chunk_count = 0'
+    dashboardApi -> db 'predecessor: DELETE its chunks — the blobs are deliberately NOT touched'
+    dashboardApi -> db 'successor: takes the lineage, status back to pending'
+    dashboardApi -> contentVersion 'bumps: repealed text must not be served from a cached answer'
+    dashboardApi -> db 'ONE commit — no storage call, so a retry is always safe'
+    dashboardApi -> ui 'the whole project file list, seeded straight into the cache'
+
+    ingestQueue -> db 'claims the successor'
+    ingestQueue -> ingestion 'reuses the stored Markdown - conversion is never paid for twice'
+    ingestion -> db 'chunks and embeds the new edition'
+
+    developer -> ui 'later: downloads a superseded edition, or makes one current again'
+    ui -> dashboardApi 'GET /files/{id}/content — the only way to read retired text'
   }
 
   dynamic view queryFlow {
