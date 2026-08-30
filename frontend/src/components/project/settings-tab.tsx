@@ -110,6 +110,7 @@ export function SettingsTab({
     project.answer_disclaimer ?? ""
   )
   const [savingPolicy, setSavingPolicy] = useState(false)
+  const [versionTracking, setVersionTracking] = useState(project.version_tracking)
 
   // Re-sync the form when the PROJECT changes underneath it.
   //
@@ -172,6 +173,9 @@ export function SettingsTab({
       v === (synced.answer_disclaimer ?? "")
         ? project.answer_disclaimer ?? ""
         : v
+    )
+    setVersionTracking((v) =>
+      v === synced.version_tracking ? project.version_tracking : v
     )
   }
 
@@ -310,6 +314,7 @@ export function SettingsTab({
           min_strong: strong,
           answer_language: answerLanguage.trim(),
           answer_disclaimer: answerDisclaimer.trim(),
+          version_tracking: versionTracking,
         }),
       })
       toast.success("Answer policy saved")
@@ -747,6 +752,24 @@ export function SettingsTab({
             <p className="text-xs text-muted-foreground">
               Appended verbatim to every answer, e.g. an &ldquo;information, not
               legal advice&rdquo; notice.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                checked={versionTracking}
+                onChange={(e) => setVersionTracking(e.target.checked)}
+                className="mt-0.5 size-3.5 accent-foreground"
+              />
+              <span className="font-medium">Track document versions</span>
+            </label>
+            <p className="pl-6 text-xs text-muted-foreground">
+              When on, an upload that looks like a new edition of a document
+              already in this project waits for you to confirm what it replaces.
+              The version it replaces is kept and stays downloadable, but stops
+              being searchable — so answers only ever quote the text in force.
+              Off leaves uploads exactly as they are today.
             </p>
           </div>
           <Button onClick={handleSavePolicy} disabled={savingPolicy}>

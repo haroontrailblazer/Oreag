@@ -46,6 +46,7 @@ import {
 import { api, apiStream, fetcher } from "@/lib/api"
 import { providerOf, providerUsable } from "@/lib/models"
 import type {
+  FileRecord,
   ModelsResponse,
   Project,
   QueryResponse,
@@ -376,11 +377,24 @@ export function PlaygroundTab({ project }: { project: Project }) {
     }
     setUploading(true)
     try {
-      const created = await api<unknown[]>(`/api/projects/${project.id}/files`, {
+      const created = await api<FileRecord[]>(`/api/projects/${project.id}/files`, {
         method: "POST",
         body: form,
       })
-      toast.success("Upload complete. Indexing started.")
+      // Never toasted unconditionally: with version tracking on, an upload
+      // that looks like a new edition is HELD rather than indexed, and this is
+      // one of the two upload paths outside the Files tab - so "indexing
+      // started" would be the only thing the user is told, and it would be
+      // wrong.
+      const parked = created.filter((f) => f.status === "review").length
+      toast.success(
+        parked
+          ? `${parked} file${parked === 1 ? "" : "s"} need a version confirmed`
+          : "Upload complete. Indexing started.",
+        parked
+          ? { description: "Confirm what they replace in the Files tab." }
+          : undefined
+      )
       // Nothing here used to be revalidated at all, so a file uploaded from the
       // Playground never appeared in the Files tab or the sidebar - not while
       // indexing, not after it finished - until a full page reload. Seeding the

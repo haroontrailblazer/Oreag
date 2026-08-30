@@ -26,6 +26,11 @@ export interface Project {
   status: "empty" | "indexing" | "ready" | "error"
   // When true the public /v1 API + MCP are blocked (403) until resumed.
   suspended: boolean
+  // Document versions (migration 0034). When on, an upload that looks like a
+  // new edition of a document already here is held for review before it can
+  // replace it. Per project because the extractor's question is just as true
+  // of report_v2.pdf as of an amending Act.
+  version_tracking: boolean
   created_at: string
   updated_at: string
   file_count: number
@@ -94,6 +99,23 @@ export interface FileRecord {
   conversion_error: string | null
   // Non-fatal caveat (e.g. audio used the free transcription fallback).
   conversion_note: string | null
+  // Document versions (migration 0034). The lineage key is
+  // `document_id ?? id` - null means this file is its own document.
+  document_id: string | null
+  version_label: string | null
+  // ISO "YYYY-MM-DD". Render these RAW: `new Date("2019-04-01")` parses as UTC
+  // midnight, so toLocaleDateString() shows the previous day in any
+  // negative-offset timezone.
+  in_force_from: string | null
+  // Non-null = superseded: stored, downloadable, and holding no chunks.
+  in_force_to: string | null
+  legal_status:
+    | "in_force"
+    | "amended"
+    | "repealed"
+    | "draft"
+    | "unknown"
+    | null
   created_at: string
   indexed_at: string | null
 }

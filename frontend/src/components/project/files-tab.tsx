@@ -6,6 +6,7 @@ import {
   ClockIcon as Clock3,
   FileTextIcon as FileText,
   CircleNotchIcon as Loader2,
+  GitBranchIcon as GitBranch,
   QuestionIcon as HelpCircle,
   DotsThreeIcon as MoreHorizontal,
   ArrowCounterClockwiseIcon as RotateCcw,
@@ -16,6 +17,10 @@ import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { AddFilesDialog } from "@/components/project/add-files-dialog"
+import {
+  FileVersionDialog,
+  lineageOf,
+} from "@/components/project/file-version-dialog"
 import { BestPractices } from "@/components/ui/best-practices"
 import {
   ChunkingViz,
@@ -83,6 +88,15 @@ const FILE_STATUS = {
     icon: AlertCircle,
     className:
       "border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400",
+  },
+  // An ACTION label, not a state one: "Needs review" is already taken by
+  // `failed`, and two badges reading the same thing for opposite reasons is
+  // worse than a slightly longer label.
+  review: {
+    label: "Confirm version",
+    icon: GitBranch,
+    className:
+      "border-violet-500/20 bg-violet-500/10 text-violet-700 dark:text-violet-400",
   },
 } satisfies Partial<Record<FileRecord["status"], StatusConfig>>
 
@@ -213,6 +227,7 @@ export function FilesTab({
   const [highlightId, setHighlightId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<FileRecord | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [versionTarget, setVersionTarget] = useState<FileRecord | null>(null)
   const deleteDone = useRef(false)
 
   const { data: files, mutate } = useSWR<FileRecord[]>(
@@ -223,9 +238,24 @@ export function FilesTab({
         latest?.some((f) => f.status === "pending" || f.status === "processing")
           ? 3000
           : 0,
+      // 'review' is deliberately NOT in this predicate. A parked file is
+      // terminal until a human acts, so polling it would be a permanent 3s
+      // request loop - and both edges are already covered: a file is
+      // 'processing' when it parks (so the poll is running and stops on the
+      // next tick), and a confirm seeds 'pending' back into the cache, which
+      // re-evaluates this function and restarts the poll on its own.
       onSuccess: () => onChanged(),
     }
   )
+
+  const reviewCount = (files ?? []).filter((f) => f.status === "review").length
+  // Other editions of the document the delete dialog is aimed at. The lineage
+  // key is `document_id ?? id`, so a file with no lineage counts zero.
+  const deleteSiblings = deleteTarget
+    ? (files ?? []).filter(
+        (f) => f.id !== deleteTarget.id && lineageOf(f) === lineageOf(deleteTarget)
+      ).length
+    : 0
 
   // Toast a file's conversion caveat (e.g. "audio used the free transcription
   // endpoint - none of your keys support speech-to-text") the moment it
@@ -491,8 +521,37 @@ export function FilesTab({
         // min-height:auto and refuses to go below its content, which is
         // exactly how a list overflows instead of scrolling.
         <div className="min-h-0 overflow-y-auto bg-muted/20 p-2 sm:p-3">
+          {/* Above the list, not only on the row. With a 1000-file cap and a
+              back-catalogue import, a card twelve rows down is a hold queue
+              nobody sees - and a parked file is stored but NOT searchable. */}
+          {reviewCount > 0 && (
+            <div className="mb-2 flex items-center gap-3 rounded-xl border border-violet-500/20 bg-violet-500/5 px-3 py-2.5 text-sm sm:px-4">
+              <GitBranch className="size-4 shrink-0 text-violet-600 dark:text-violet-400" />
+              <p className="min-w-0 flex-1 text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {reviewCount} document{reviewCount === 1 ? "" : "s"} need
+                  {reviewCount === 1 ? "s" : ""} confirming
+                </span>{" "}
+                — stored, but not searchable until you confirm what they
+                replace.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={() =>
+                  setVersionTarget(
+                    (files ?? []).find((f) => f.status === "review") ?? null
+                  )
+                }
+              >
+                Review
+              </Button>
+            </div>
+          )}
           <ul className="flex flex-col gap-2">
             {(files ?? []).map((file) => {
+              const superseded = file.in_force_to !== null
               const meta = [
                 (file.source_extension ?? "")
                   .replace(".", "")
@@ -501,7 +560,13 @@ export function FilesTab({
                 file.page_count != null
                   ? `${file.page_count} page${file.page_count === 1 ? "" : "s"}`
                   : null,
-                `${file.chunk_count} chunk${file.chunk_count === 1 ? "" : "s"}`,
+                file.version_label,
+                // Raw ISO strings, never `new Date()`: "2019-04-01" parses as
+                // UTC midnight, so toLocaleDateString() renders the previous
+                // day in any negative-offset timezone.
+                superseded
+                  ? `${file.in_force_from ?? "?"} – ${file.in_force_to}`
+                  : `${file.chunk_count} chunk${file.chunk_count === 1 ? "" : "s"}`,
               ]
                 .filter(Boolean)
                 .join(" · ")
@@ -562,7 +627,23 @@ export function FilesTab({
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
-                    <FileStatus status={file.status} />
+                    {superseded && (
+                      <Badge variant="secondary" className="h-7">
+                        Superseded
+                      </Badge>
+                    )}
+                    {file.status === "review" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setVersionTarget(file)}
+                      >
+                        <GitBranch className="size-3.5" />
+                        Confirm version
+                      </Button>
+                    ) : (
+                      <FileStatus status={file.status} />
+                    )}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -575,14 +656,24 @@ export function FilesTab({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          disabled={file.status === "processing"}
-                          onSelect={() => handleRetry(file)}
-                        >
-                          <RotateCcw className="size-4" />
-                          {file.status === "failed"
-                            ? "Retry indexing"
-                            : "Re-index file"}
+                        {/* Hidden on a superseded version and on one awaiting a
+                            decision: the backend 409s both, because re-indexing
+                            either would put two editions of one document in the
+                            index at once. */}
+                        {!superseded && file.status !== "review" && (
+                          <DropdownMenuItem
+                            disabled={file.status === "processing"}
+                            onSelect={() => handleRetry(file)}
+                          >
+                            <RotateCcw className="size-4" />
+                            {file.status === "failed"
+                              ? "Retry indexing"
+                              : "Re-index file"}
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onSelect={() => setVersionTarget(file)}>
+                          <GitBranch className="size-4" />
+                          Version history
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -618,6 +709,25 @@ export function FilesTab({
                 </span>{" "}
                 and its indexed chunks will be permanently deleted from this
                 project. This can&apos;t be undone.
+                {deleteTarget && deleteSiblings > 0 && (
+                  <>
+                    {" "}
+                    {deleteTarget.in_force_to !== null ? (
+                      <>
+                        This is a superseded version — later versions are not
+                        affected.
+                      </>
+                    ) : (
+                      <>
+                        This is the current version of a document with{" "}
+                        {deleteSiblings} earlier version
+                        {deleteSiblings === 1 ? "" : "s"}. They stay in the
+                        project, but none of them will be searchable until you
+                        make one current.
+                      </>
+                    )}
+                  </>
+                )}
               </DialogDescription>
             )}
           </DialogHeader>
@@ -640,6 +750,26 @@ export function FilesTab({
           )}
         </DialogContent>
       </Dialog>
+
+      {versionTarget && (
+        <FileVersionDialog
+          project={project}
+          file={versionTarget}
+          files={files ?? []}
+          open
+          onOpenChange={(open) => {
+            if (!open) setVersionTarget(null)
+          }}
+          // The endpoint returns the whole project file list, so seed the cache
+          // with it instead of revalidating. refreshInterval is a function of
+          // the data, so SWR re-evaluates it against this and restarts the poll
+          // by itself once the confirmed file comes back as 'pending' - the
+          // same mechanism handleReindexAll relies on. onChanged() is NOT
+          // called directly: onSuccess above already wires it, and invalidating
+          // the files key from there is an infinite refetch loop.
+          onDone={(updated) => void mutate(updated, { revalidate: false })}
+        />
+      )}
     </Card>
   )
 }

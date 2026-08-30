@@ -29,7 +29,7 @@ import {
 import { cn } from "@/lib/utils"
 import { fetcher, uploadWithProgress } from "@/lib/api"
 import { dimensionOptions, providerUsable } from "@/lib/models"
-import type { ModelsResponse, Project } from "@/lib/types"
+import type { FileRecord, ModelsResponse, Project } from "@/lib/types"
 
 // No extension whitelist: the backend ingests any file it can extract text
 // from (rich formats via MarkItDown, everything else as plain text) and
@@ -142,16 +142,26 @@ export function AddFilesDialog({
     setProgress(0)
     setSubmitting(true)
     try {
-      await uploadWithProgress(`/api/projects/${project.id}/files`, form, {
-        onProgress: setProgress,
-        signal: controller.signal,
-      })
+      const created = await uploadWithProgress<FileRecord[]>(
+        `/api/projects/${project.id}/files`,
+        form,
+        { onProgress: setProgress, signal: controller.signal }
+      )
+      // With version tracking on, an upload that looks like a new edition is
+      // HELD rather than indexed. Reporting "indexing started" over that would
+      // send the user away from the one screen that can unblock it.
+      const parked = (created ?? []).filter((f) => f.status === "review").length
       toast.success(
-        embeddingChanged
-          ? "Upload complete - re-indexing the whole project"
-          : instantShrink
-            ? "Upload complete - vector size applied instantly, indexing new files"
-            : "Upload complete - indexing started"
+        parked
+          ? `${parked} file${parked === 1 ? "" : "s"} need a version confirmed`
+          : embeddingChanged
+            ? "Upload complete - re-indexing the whole project"
+            : instantShrink
+              ? "Upload complete - vector size applied instantly, indexing new files"
+              : "Upload complete - indexing started",
+        parked
+          ? { description: "Confirm what they replace in the Files tab." }
+          : undefined
       )
       setOpen(false)
       onUploaded()

@@ -177,6 +177,35 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export const fetcher = <T>(path: string) => api<T>(path)
 
 /**
+ * Download a binary response to the user's disk.
+ *
+ * `api()` cannot be reused: it unconditionally `res.json()`s the body. This is
+ * the only way to read a superseded document version, whose blobs are kept
+ * precisely so history stays reachable after it leaves the index.
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const supabase = createClient()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  const headers = new Headers()
+  if (session) headers.set("Authorization", `Bearer ${session.access_token}`)
+
+  const res = await fetch(`${getApiBase()}${path}`, { headers })
+  if (!res.ok) throw new ApiError(res.status, res.statusText)
+
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+/**
  * POST a JSON body and consume a Server-Sent Events stream, calling `onEvent`
  * with each parsed `data:` frame. Auth mirrors {@link api}. Resolves when the
  * stream ends; rejects (ApiError) on a non-2xx response, or an AbortError when

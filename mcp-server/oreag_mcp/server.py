@@ -81,7 +81,12 @@ def ask_docs(question: str) -> dict:
 def add_document(filename: str, content: str) -> list:
     """Upload a text document into the project so it is chunked, embedded, and
     searchable. Requires an API key with upload permission (read-only keys get a
-    403). Any text content is accepted regardless of the filename's extension."""
+    403). Any text content is accepted regardless of the filename's extension.
+
+    If the project tracks document versions, a document that looks like a new
+    version of one already there comes back with status "review" and is NOT
+    indexed until a person confirms the version in the dashboard. Do not wait
+    for it to become searchable - say that it needs confirming."""
     return _client().upload_document(filename, content)
 
 
