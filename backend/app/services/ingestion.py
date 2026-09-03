@@ -600,6 +600,47 @@ def find_duplicate(db: Session, project_id: uuid.UUID, digest: str):
     ).first()
 
 
+# Writing systems, as character ranges. Latin is deliberately absent: the test
+# below asks whether a NON-Latin script appears, because that is the signal
+# that survives OCR noise and transliterated filenames.
+_SCRIPTS = (
+    ("devanagari", re.compile(r"[ऀ-ॿ]")),
+    ("cjk",        re.compile(r"[぀-ヿ一-鿿]")),
+    ("arabic",     re.compile(r"[؀-ۿ]")),
+    ("cyrillic",   re.compile(r"[Ѐ-ӿ]")),
+    ("tamil",      re.compile(r"[஀-௿]")),
+    ("bengali",    re.compile(r"[ঀ-৿]")),
+    ("thai",       re.compile(r"[฀-๿]")),
+    ("hangul",     re.compile(r"[가-힯]")),
+    ("hebrew",     re.compile(r"[֐-׿]")),
+    ("greek",      re.compile(r"[Ͱ-Ͽ]")),
+)
+
+
+def _scripts(text: str) -> frozenset[str]:
+    """Which non-Latin writing systems appear in this text."""
+    return frozenset(name for name, pattern in _SCRIPTS if pattern.search(text))
+
+
+def _looks_like_a_translation(probe: str, candidate: str) -> bool:
+    """Are these two texts written in different scripts?
+
+    A deterministic translation detector, and the reason it exists is measured:
+    the extractor labelled a Hindi authoritative text and a Japanese
+    documentation page as `principal` and gave them RETIRING relations, which
+    would retire the authoritative English edition in favour of a rendering
+    that often disclaims authority. That is the worst outcome this feature can
+    produce, and no amount of prompt wording made it reliable.
+
+    Script, not language: Hindi against English, Japanese against English,
+    Arabic against English. It cannot separate French from English - same
+    alphabet - so this is a floor under the model's judgement, not a
+    replacement for it.
+    """
+    a, b = _scripts(probe), _scripts(candidate)
+    return bool(a ^ b)
+
+
 def _extracted_title(markdown: str) -> str | None:
     """The document's own first heading, or None.
 
@@ -804,6 +845,27 @@ def _propose_version(db: Session, file, project, markdown: str) -> VersionPropos
         # journal editorial, a proxy statement and a commencement notification.
         # It carries almost no information and must never override a relation.
         # `consolidated` does, so this trusts only that.
+        row_now = next(r for r in shortlist if r.id == matched)
+        # A relation the model did not name must NOT default to the retiring
+        # one. NULL on a STORED row means `supersedes` for backward
+        # compatibility with 0036, but a fresh extraction that declined to
+        # answer is an absence of judgement, and reading it as "retire that
+        # document" is the one interpretation that destroys something.
+        if kind is None:
+            logger.info(
+                "No relation named for file %s - defaulting to succeeds", file.id
+            )
+            kind = "succeeds"
+        # Different writing systems means a translation, whatever the model
+        # said. See _looks_like_a_translation.
+        if RELATIONS.get(kind, (True,))[0] and _looks_like_a_translation(
+            _probe_text(file.filename, markdown),
+            f"{row_now.filename} {row_now.extracted_title or ''}",
+        ):
+            logger.info(
+                "Script mismatch for file %s: %s -> translates", file.id, kind
+            )
+            kind = "translates"
         if role == "consolidated" and kind == "amends":
             logger.info(
                 "Rewriting relation for consolidated file %s: amends -> restates",

@@ -1750,3 +1750,75 @@ class TestTheRoleOverrideStaysNarrow:
         from app.services.ingestion import _VERSION_SYSTEM_PROMPT
 
         assert "never amends" in _VERSION_SYSTEM_PROMPT
+
+
+class TestDeterministicGuardsUnderTheModel:
+    """Two floors under the extractor's judgement, both measured.
+
+    Per-class checking found the two worst remaining outcomes were structural
+    rather than a matter of prompt wording: a translation given a RETIRING
+    relation (which retires the authoritative edition in favour of a rendering
+    that often disclaims authority), and a match with no relation named at all
+    falling through to `supersedes`. Neither is a judgement call, so neither is
+    left to the model.
+    """
+
+    def test_a_script_mismatch_is_read_as_a_translation(self):
+        from app.services.ingestion import _looks_like_a_translation
+
+        assert _looks_like_a_translation("कंपनी अधिनियम, 2013", "The Companies Act, 2013")
+        assert _looks_like_a_translation(
+            "What's New In Python 3.13 ドキュメント", "What's New In Python 3.13"
+        )
+        assert _looks_like_a_translation("Договор", "Agreement")
+
+    def test_the_same_script_is_not_a_translation(self):
+        from app.services.ingestion import _looks_like_a_translation
+
+        assert not _looks_like_a_translation(
+            "Companies Act 2013 consolidated", "Companies Act 2013 bare act"
+        )
+        # French against English shares an alphabet, so this is a FLOOR under
+        # the model, not a replacement for it. Documented rather than pretended.
+        assert not _looks_like_a_translation(
+            "Lignes directrices OMS paludisme", "WHO guidelines for malaria"
+        )
+
+    def test_the_guard_only_fires_on_a_retiring_relation(self):
+        # A translation already labelled `translates` needs no rewriting, and
+        # `supplements` on a non-Latin annex is a legitimate answer.
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion._propose_version)
+        i = src.index("_looks_like_a_translation(")
+        assert "RELATIONS.get(kind, (True,))[0] and _looks_like_a_translation" in src[
+            max(0, i - 200) : i + 60
+        ]
+
+    def test_an_unnamed_relation_defaults_to_a_non_retiring_one(self):
+        from app.schemas import RELATIONS
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion._propose_version)
+        assert 'kind = "succeeds"' in src, (
+            "a fresh extraction that named no relation must not fall through "
+            "to the one interpretation that destroys something"
+        )
+        assert not RELATIONS["succeeds"][0]
+
+    def test_stored_nulls_still_read_as_supersedes(self):
+        # The two defaults are separate on purpose: NULL on a row written
+        # before 0037 genuinely meant supersedes, and rewriting history would
+        # be worse than either default.
+        from app.schemas import DEFAULT_RELATION
+
+        assert DEFAULT_RELATION == "supersedes"
+
+    def test_every_script_pattern_is_a_real_range(self):
+        import re as _re
+
+        from app.services.ingestion import _SCRIPTS
+
+        assert len(_SCRIPTS) >= 8
+        for name, pattern in _SCRIPTS:
+            assert isinstance(pattern, _re.Pattern), name
