@@ -862,7 +862,11 @@ def delete_file(
     # enforced that: one menu click deleted the row, its chunks and both storage
     # objects, permanently, with no soft delete and no backup anywhere in this
     # repository. Retiring history is now a deliberate act, not a slip.
-    if file.in_force_to is not None and not purge:
+    if file.in_force_to is not None and not purge and project.version_tracking:
+        # Scoped to projects that are actually tracking versions. Turning the
+        # toggle off is a statement that this project does not keep editions,
+        # and a guard that outlives the feature it protects is just an obstacle
+        # in the way of ordinary housekeeping.
         raise HTTPException(
             409,
             "This is a superseded version - the only remaining copy of what "

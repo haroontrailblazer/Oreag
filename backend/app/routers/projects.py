@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,7 @@ from ..models import File, Project, QueryLog
 from ..providers.registry import resolve_embedding_dimensions, validate_llm
 from ..schemas import ProjectCreate, ProjectOut, ProjectUpdate
 from ..services import storage
+from ..services.ingestion import backfill_extracted_titles
 from .deps import ensure_valid_provider_key, get_owned_project
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -149,6 +150,7 @@ def get_project(
 @router.patch("/{project_id}", response_model=ProjectOut)
 def update_project(
     body: ProjectUpdate,
+    background_tasks: BackgroundTasks,
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
 ):
@@ -192,7 +194,19 @@ def update_project(
     # every requeue guard keys on files.in_force_to, never on this flag, so
     # already-superseded editions stay superseded.
     if body.version_tracking is not None:
+        # Switching it ON has to work with the documents already here. They are
+        # valid match candidates immediately - the candidate query never looked
+        # at document_id - but they were ingested before extracted_title
+        # existed, and the extraction gate only fires on a file's FIRST index,
+        # so nothing would ever give them one. Without a title the shortlist
+        # can score only their filename, which is the weakest case there is.
+        #
+        # Backfilled in the background, from markdown each file already has:
+        # one storage read and one regex per file, no LLM and no re-embedding.
+        turning_on = body.version_tracking and not project.version_tracking
         project.version_tracking = body.version_tracking
+        if turning_on:
+            background_tasks.add_task(backfill_extracted_titles, project.id)
     _set_key_override(project, "embedding", body.embedding_api_key)
     _set_key_override(project, "llm", body.llm_api_key)
     db.commit()

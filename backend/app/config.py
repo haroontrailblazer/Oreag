@@ -213,7 +213,14 @@ class Settings(BaseSettings):
     # otherwise a file could be held for a confirmation there is no screen to
     # give. Turning it off never un-supersedes anything; it only stops new
     # uploads being parked.
-    version_extraction_enabled: bool = False
+    # Defaults ON. This is a KILL SWITCH, not an opt-in: an operator flips it
+    # off fleet-wide during an incident. Defaulting it off made it a second
+    # gate the user cannot see, so a project owner ticked "Track document
+    # versions", saw it save, and nothing happened - the exact
+    # silently-ineffective setting the per-project flag was designed to avoid.
+    # projects.version_tracking is the control, and it still defaults false, so
+    # no existing project changes behaviour.
+    version_extraction_enabled: bool = True
     # Which model judges "is this a new edition of that?". Empty means "use the
     # project's answer model", which is what 0034 did and is measurably the
     # wrong default: the answer model is chosen for question-answering, price

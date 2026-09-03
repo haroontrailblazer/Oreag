@@ -1136,9 +1136,17 @@ class TestProjectDescriptionEdit:
             pass
 
     def _update(self, project, **fields):
+        from fastapi import BackgroundTasks
+
         from app.routers.projects import update_project
 
-        return update_project(ProjectUpdate(**fields), project, self._DB())
+        # BackgroundTasks is a real parameter now: switching version_tracking
+        # ON schedules the extracted-title backfill, so the toggle works with
+        # the documents a project already holds rather than only with uploads
+        # that arrive after it.
+        return update_project(
+            ProjectUpdate(**fields), BackgroundTasks(), project, self._DB()
+        )
 
     def _project(self, description="Original text"):
         # status/suspended/timestamps are server-side column defaults, so an

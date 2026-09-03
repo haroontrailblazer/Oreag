@@ -249,6 +249,12 @@ export function FilesTab({
   )
 
   const reviewCount = (files ?? []).filter((f) => f.status === "review").length
+  // Does this project hold any lineage at all? A project that tracked versions
+  // and then turned the toggle off still has editions, and stranding them
+  // behind a hidden menu would be worse than showing the entry.
+  const hasEditions = (files ?? []).some(
+    (f) => f.document_id !== null || f.in_force_to !== null
+  )
   // Other editions of the document the delete dialog is aimed at. The lineage
   // key is `document_id ?? id`, so a file with no lineage counts zero.
   const deleteSiblings = deleteTarget
@@ -308,7 +314,12 @@ export function FilesTab({
       // without it, because that row is the only remaining copy of what the
       // document used to say. The dialog has already said so in as many words,
       // so reaching here IS the deliberate act the flag stands for.
-      const purge = deleteTarget.in_force_to !== null ? "?purge=true" : ""
+      // Only meaningful while the project is tracking versions - the backend
+      // drops the guard otherwise, and sending it anyway would be noise.
+      const purge =
+        deleteTarget.in_force_to !== null && project.version_tracking
+          ? "?purge=true"
+          : ""
       await api(
         `/api/projects/${project.id}/files/${deleteTarget.id}${purge}`,
         { method: "DELETE" }
@@ -684,10 +695,18 @@ export function FilesTab({
                               : "Re-index file"}
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem onSelect={() => setVersionTarget(file)}>
-                          <GitBranch className="size-4" />
-                          Version history
-                        </DropdownMenuItem>
+                        {/* Only where versioning is in use. With the toggle
+                            off there are no editions to show, and the entry is
+                            a dead end that implies a feature the project does
+                            not have. A project that HAS editions from an
+                            earlier run keeps the entry, so history stays
+                            reachable rather than being stranded. */}
+                        {(project.version_tracking || hasEditions) && (
+                          <DropdownMenuItem onSelect={() => setVersionTarget(file)}>
+                            <GitBranch className="size-4" />
+                            Version history
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           variant="destructive"

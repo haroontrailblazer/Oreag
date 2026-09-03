@@ -478,6 +478,65 @@ def _tokens(text: str) -> set[str]:
     }
 
 
+def backfill_extracted_titles(project_id: uuid.UUID, limit: int = 1000) -> int:
+    """Give the files a project ALREADY holds a title the shortlist can see.
+
+    Turning version tracking on mid-project has to work with what is there, and
+    what is there was ingested before extracted_title existed: `document_id IS
+    NULL AND indexed_at IS NULL` gates extraction to a file's FIRST index, so an
+    already-indexed file is never re-examined and would keep a null title
+    forever.
+
+    Those files are already valid match candidates - the candidate query filters
+    on in_force_to and status, not on document_id - but stage one can only score
+    `filename + version_label + extracted_title`, so a corpus of
+    Companies_Act.pdf and scan_0001.pdf offers almost nothing to match against.
+    Measured over a realistic corpus that was the dominant reason a true
+    predecessor never reached the model at all.
+
+    Cheap by construction: reads the markdown blob each file already has and
+    runs one regex. No LLM call, no embedding, no re-conversion, nothing
+    written but the title. Runs in the background off the PATCH that flips the
+    toggle, and is safe to run again - it only touches rows whose title is
+    still null.
+    """
+    db = SessionLocal()
+    filled = 0
+    try:
+        rows = db.scalars(
+            select(File).where(
+                File.project_id == project_id,
+                File.extracted_title.is_(None),
+                File.markdown_storage_path.isnot(None),
+                File.in_force_to.is_(None),
+            ).limit(limit)
+        ).all()
+        for file in rows:
+            try:
+                markdown = storage.download(file.markdown_storage_path)
+            except Exception:
+                # A missing blob is not worth failing the sweep over - the file
+                # simply keeps matching on its filename alone, as it did before.
+                logger.info("No markdown for %s during title backfill", file.id)
+                continue
+            title = _extracted_title(markdown.decode("utf-8", "replace"))
+            if title:
+                file.extracted_title = title
+                filled += 1
+        if filled:
+            db.commit()
+        logger.info(
+            "Backfilled %d/%d extracted titles for project %s",
+            filled, len(rows), project_id,
+        )
+    except Exception:
+        logger.warning("Title backfill failed for %s", project_id, exc_info=True)
+        db.rollback()
+    finally:
+        db.close()
+    return filled
+
+
 def find_duplicate(db: Session, project_id: uuid.UUID, digest: str):
     """A live file in this project holding byte-identical content, or None.
 
