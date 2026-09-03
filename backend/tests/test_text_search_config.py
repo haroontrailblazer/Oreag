@@ -148,6 +148,33 @@ class TestUnspacedScriptNormalisationAgrees:
         cls = _char_classes(_latest_tsv_migration())[0]
         assert "AC00" not in cls.upper(), "Hangul must stay out of the split"
 
+    def test_the_unspaced_abugidas_are_included(self):
+        """Lao, Khmer and Burmese, added by 0038.
+
+        0033 covered Chinese, Japanese and Thai and stopped one code point
+        short of Lao. For these three the lexical half was dead in exactly the
+        way it was for CJK before 0033: measured against the live database, a
+        Khmer phrase of five words produced ONE token and a search for a word
+        inside it returned nothing.
+        """
+        cls = _char_classes(_latest_tsv_migration())[0].upper()
+        for name, start in (("Lao", "0E80"), ("Myanmar", "1000"), ("Khmer", "1780")):
+            assert start in cls, f"{name} is missing from the split"
+
+    def test_tibetan_is_not_included(self):
+        """It looks like it belongs, and measurement says otherwise.
+
+        Tibetan delimits SYLLABLES with a tsheg (U+0F0B), which the default
+        parser already treats as punctuation - so a Tibetan phrase tokenises
+        into four syllable tokens today, finds the word searched for, and
+        rejects the same letters in a different order. Adding it would replace
+        four meaningful tokens with nine letters and start matching scrambled
+        text: breaking working search rather than fixing broken search, the
+        same regression test_hangul_is_not_included guards against.
+        """
+        cls = _char_classes(_latest_tsv_migration())[0].upper()
+        assert "0F00" not in cls, "Tibetan already segments on its tsheg"
+
     def test_the_migration_statements_are_ascii(self):
         """The executable SQL must not depend on file encoding.
 

@@ -71,7 +71,7 @@ SEMANTIC_SQL = text(
 # character class, verified byte-identical against the live database.
 _UNSPACED_SPLIT = (
     r"regexp_replace({col}, "
-    r"E'([\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\u0E00-\u0E7F])', "
+    r"E'([\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\u0E00-\u0E7F\u0E80-\u0EFF\u1000-\u109F\u1780-\u17FF])', "
     r"' \1 ', 'g')"
 )
 _TSV_QUERY = "websearch_to_tsquery('english', " + _UNSPACED_SPLIT.format(col=":question") + ")"
