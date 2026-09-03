@@ -69,6 +69,37 @@ function byRecency(a: FileRecord, b: FileRecord): number {
 }
 
 /**
+ * Newest first, walking `supersedes_file_id` back from the current edition.
+ *
+ * Dates are the fallback, not the source of truth: `in_force_from` is
+ * user-supplied and nullable, so a lineage of editions uploaded before the
+ * chain existed - or whose effective date the extractor could not read - had
+ * no defined order at all. Anything the chain does not reach (pre-0036
+ * editions, a link whose predecessor was deleted) is appended in date order,
+ * so an older corpus degrades to exactly its previous behaviour.
+ */
+function inChainOrder(editions: FileRecord[]): FileRecord[] {
+  const byId = new Map(editions.map((f) => [f.id, f]))
+  const current = editions.find(
+    (f) => f.in_force_to === null && f.status !== "review"
+  )
+  const chain: FileRecord[] = []
+  const seen = new Set<string>()
+  let cursor = current
+  // `seen` is the loop guard. The database forbids an edition superseding
+  // itself, but not a longer cycle across a repaired lineage.
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id)
+    chain.push(cursor)
+    cursor = cursor.supersedes_file_id
+      ? byId.get(cursor.supersedes_file_id)
+      : undefined
+  }
+  const rest = editions.filter((f) => !seen.has(f.id)).sort(byRecency)
+  return [...chain, ...rest]
+}
+
+/**
  * Confirm what an uploaded file replaces, or browse and repair a lineage.
  *
  * Everything is derived from the file list the Files tab has already fetched -
@@ -98,9 +129,9 @@ export function FileVersionDialog({
     // all of it, not just the siblings: opening history from the in-force
     // edition would otherwise find no current edition and offer to reinstate
     // over nothing.
-    const editions = files
-      .filter((f) => lineageOf(f) === lineage)
-      .sort(byRecency)
+    const editions = inChainOrder(
+      files.filter((f) => lineageOf(f) === lineage)
+    )
     return {
       editions,
       // The one edition in force, if any. `file` itself qualifies in history

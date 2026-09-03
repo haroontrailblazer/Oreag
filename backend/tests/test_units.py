@@ -2690,6 +2690,12 @@ class TestNoUndefinedHelpers:
         "app.services.retrieval",
         "app.services.ingestion",
         "app.routers.memory",
+        # Added after a near-miss: two runtime-only references were added to
+        # rag_v1 with no import, and `import app.main` still succeeded because
+        # neither is touched at module load. Only a call would have raised, in
+        # production, on the public upload path.
+        "app.routers.rag_v1",
+        "app.services.document_events",
     ]
 
     @staticmethod

@@ -32,7 +32,11 @@ from ..services.content_version import bump_content_version
 from ..services.usage import record_usage
 from ..providers.base import TokenUsage
 from ..services.conversion import content_type_for, is_ingestable, source_extension
-from ..services.ingestion import NON_SUPERSEDING_ROLES, recompute_project_status
+from ..services.ingestion import (
+    NON_SUPERSEDING_ROLES,
+    find_duplicate,
+    recompute_project_status,
+)
 from ..services.memory import reembed_project_memories
 from .deps import ensure_valid_provider_key, get_owned_project
 
@@ -453,6 +457,10 @@ def plan_supersession(target, predecessor, lineage, body) -> SupersessionPlan:
         # conversion_note is NOT cleared: it describes how the MARKDOWN was
         # produced and the re-index REUSES that markdown, so the caveat is
         # still true. Same reasoning as the upload requeue.
+    # The edge, written at the only moment it is knowable. Cleared when there
+    # is no predecessor so a reinstated or detached edition does not keep
+    # claiming to have replaced something it no longer follows.
+    fields["supersedes_file_id"] = predecessor.id if predecessor is not None else None
     ops = [VersionOp(target.id, fields, delete_chunks=False)]
     if predecessor is not None:
         ops.append(VersionOp(
@@ -720,7 +728,26 @@ async def upload_files(
         )
 
     created: list[File] = []
+    duplicates: list[str] = []
     for filename, data, extension, content_type in validated:
+        digest = hashlib.sha256(data).hexdigest()
+        existing = find_duplicate(db, project.id, digest)
+        if existing is not None:
+            # Byte-identical to something already here. Returning the row that
+            # already holds this content is what a re-upload actually means,
+            # and it avoids paying to embed the same text twice - or, with
+            # version tracking on, offering a document as a new edition of an
+            # identical copy of itself.
+            duplicates.append(filename)
+            document_events.record(
+                db, project.id, "uploaded",
+                file_id=existing.id, document_id=existing.document_id,
+                actor_id=project.owner_id,
+                filename=filename, duplicate_of=existing.filename,
+                content_sha256=digest, skipped=True,
+            )
+            created.append(existing)
+            continue
         file_id = uuid.uuid4()
         path = f"{project.owner_id}/{project.id}/{file_id}{extension}"
         # Sync storage PUT off the event loop - this handler is async.
@@ -737,7 +764,7 @@ async def upload_files(
             # markdown the pipeline made of it. Answers "do I already hold this
             # file" now, and "is the stored object still what was recorded"
             # whenever an integrity check is wanted later.
-            content_sha256=hashlib.sha256(data).hexdigest(),
+            content_sha256=digest,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             size_bytes=len(data),
@@ -969,8 +996,31 @@ def set_file_version(
                 "it to finish, then supersede it.",
             )
         if predecessor.in_force_to is not None:
+            # Two revisions uploaded together both park against the ORIGINAL,
+            # because the candidate query excludes rows in review and so they
+            # are invisible to each other. Confirming the first supersedes it;
+            # the second then names a predecessor that is already retired. Say
+            # WHICH edition is current now, so the caller can re-aim rather
+            # than being told only that it was wrong.
+            live = next(
+                (
+                    f.id
+                    for f in _project_files(db, project)
+                    if f.in_force_to is None
+                    and f.status != "review"
+                    and _lineage(f) == _lineage(predecessor)
+                ),
+                None,
+            )
             raise HTTPException(
-                422, "That version is already superseded - replace the one in force"
+                422,
+                {
+                    "message": (
+                        "That version is already superseded - replace the one "
+                        "in force."
+                    ),
+                    "current_file_id": str(live) if live else None,
+                },
             )
         if body.instrument_role in NON_SUPERSEDING_ROLES:
             # Enforced here and not only in the extractor, because this endpoint

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import math
@@ -477,6 +478,30 @@ def _tokens(text: str) -> set[str]:
     }
 
 
+def find_duplicate(db: Session, project_id: uuid.UUID, digest: str):
+    """A live file in this project holding byte-identical content, or None.
+
+    0035 recorded content_sha256 and never consulted it, so re-uploading an
+    unchanged document created a second row, paid to embed the same text again,
+    and - with version tracking on - offered it as a NEW EDITION of the
+    document it is byte-identical to. Retiring a document in favour of an
+    identical copy of itself is the emptiest possible supersession.
+
+    Superseded rows are excluded: an old edition may legitimately share bytes
+    with something being uploaded now (a reinstatement, a re-upload of history),
+    and matching against retired content would block that.
+    """
+    if not digest:
+        return None
+    return db.scalars(
+        select(File).where(
+            File.project_id == project_id,
+            File.content_sha256 == digest,
+            File.in_force_to.is_(None),
+        ).limit(1)
+    ).first()
+
+
 def _extracted_title(markdown: str) -> str | None:
     """The document's own first heading, or None.
 
@@ -531,8 +556,20 @@ def _shortlist(candidates, probe: str, limit: int = _VERSION_CANDIDATE_LIMIT):
             return 0.0
         return len(probe_tokens & cand) / min(len(probe_tokens), len(cand))
 
-    # Filename breaks ties so the shortlist is deterministic across runs.
-    return sorted(candidates, key=lambda r: (-score(r), r.filename))[:limit]
+    # Ties break on RECENCY, then filename. Alphabetical order alone is a
+    # coin toss that correlates with nothing: in a corpus of parts named
+    # Reg_A_part1..part4 every candidate scores identically, and the shortlist
+    # then keeps whichever names sort first rather than whichever is plausibly
+    # the predecessor. Filename remains the final key so the result stays
+    # deterministic across runs.
+    return sorted(
+        candidates,
+        key=lambda r: (
+            -score(r),
+            -(r.in_force_from.toordinal() if r.in_force_from else 0),
+            r.filename,
+        ),
+    )[:limit]
 
 
 def _parse_version_json(reply: str, shortlist):
@@ -772,6 +809,13 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
             # Stamp AFTER a successful write, so a crash between the two never
             # leaves a row claiming markdown that was never stored.
             file.conversion_version = CONVERSION_VERSION
+            # The text that will actually be chunked. content_sha256 pins the
+            # upload and never changes; this changes whenever the conversion
+            # pipeline does, which is the only trace that an edition's
+            # searchable text was rewritten underneath it.
+            file.markdown_sha256 = hashlib.sha256(
+                converted.markdown.encode("utf-8")
+            ).hexdigest()
 
         # -- document version gate (migration 0034) -----------------------
         #

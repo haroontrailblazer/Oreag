@@ -169,6 +169,10 @@ class FileOut(BaseModel):
     content_sha256: str | None = None
     extracted_title: str | None = None
     instrument_role: str | None = None
+    # 0036. supersedes_file_id lets a client walk the lineage in real order
+    # instead of sorting on a legal date that may be null.
+    supersedes_file_id: uuid.UUID | None = None
+    markdown_sha256: str | None = None
     created_at: datetime
     indexed_at: datetime | None
 

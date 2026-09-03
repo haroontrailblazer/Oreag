@@ -272,10 +272,13 @@ class _Row(NamedTuple):
     # 0035: the shortlist scores this too, so a held file whose filename says
     # nothing is still reachable. A stub without it models an impossible row.
     extracted_title: str | None = None
+    # 0036: ties break on recency before filename, so a stub without this
+    # models a row _shortlist cannot sort.
+    in_force_from: date | None = None
 
 
-def _row(filename, label=None, title=None):
-    return _Row(uuid.uuid4(), filename, label, title)
+def _row(filename, label=None, title=None, from_date=None):
+    return _Row(uuid.uuid4(), filename, label, title, from_date)
 
 
 class TestVersionShortlist:
@@ -1182,13 +1185,23 @@ class TestBothUploadPathsHash:
             rag_v1.public_upload_files
         )
 
-    def test_both_paths_use_the_same_expression(self):
+    def test_both_paths_compute_the_same_digest(self):
         from app.routers import files as files_router
         from app.routers import rag_v1
 
-        expr = "content_sha256=hashlib.sha256(data).hexdigest()"
+        expr = "digest = hashlib.sha256(data).hexdigest()"
         assert expr in inspect.getsource(files_router.upload_files)
         assert expr in inspect.getsource(rag_v1.public_upload_files)
+
+    def test_both_paths_consult_it_before_creating_a_row(self):
+        # 0035 recorded the hash and never used it, so an identical re-upload
+        # created a second row and paid to embed the same text again.
+        from app.routers import files as files_router
+        from app.routers import rag_v1
+
+        for fn in (files_router.upload_files, rag_v1.public_upload_files):
+            src = inspect.getsource(fn)
+            assert "find_duplicate(db, project.id, digest)" in src, fn.__name__
 
 
 class TestTheToggleDoesNotLie:
@@ -1284,3 +1297,129 @@ class TestTheTrailRecordsEffectsNotOnlyDecisions:
                 used.add(m.group(1))
         assert used, "the scan found no record() call sites"
         assert used <= EVENTS, f"events not in the CHECK: {used - EVENTS}"
+
+
+# --------------------------------------------------------------------------
+# Migration 0036 - the version chain, and using the hash 0035 only recorded.
+# --------------------------------------------------------------------------
+
+MIGRATION_0036 = MIGRATIONS / "0036_version_chain.sql"
+
+
+class TestMigration0036Shape:
+    def setup_method(self):
+        self.sql = MIGRATION_0036.read_text(encoding="utf-8")
+        self.lower = self.sql.lower()
+
+    def test_no_percent_sign(self):
+        assert "%" not in self.sql
+
+    def test_adds_the_chain_and_the_derived_hash(self):
+        added = set(re.findall(r"add column if not exists\s+(\w+)", self.lower))
+        assert {"supersedes_file_id", "markdown_sha256"} <= added
+
+    def test_the_pointer_is_not_a_foreign_key(self):
+        # Third time in this schema, same reason: a chain must survive the
+        # deletion of a link. SET NULL severs history; CASCADE deletes it.
+        assert "references public.files" not in self.lower
+
+    def test_an_edition_cannot_supersede_itself(self):
+        assert "files_supersedes_not_self" in self.lower
+        assert "supersedes_file_id <> id" in self.lower
+
+    def test_it_is_indexed_for_walking_the_chain(self):
+        assert "files_supersedes_idx" in self.lower
+
+
+class TestTheChainIsWritten:
+    """0034 gave a lineage no order: `document_id` is a flat grouping key and
+    order came from `in_force_from`, a nullable user-supplied legal date."""
+
+    def test_supersession_records_what_it_replaced(self):
+        target = _Target(uuid.uuid4(), "review", 0)
+        pred = _Target(uuid.uuid4(), "indexed", 40)
+        plan = _plan(target, pred, lineage=pred.id)
+        assert plan.ops[0].fields["supersedes_file_id"] == pred.id
+
+    def test_a_rejection_clears_the_pointer(self):
+        # A detached or reinstated edition must not keep claiming to have
+        # replaced something it no longer follows.
+        target = _Target(uuid.uuid4(), "review", 0)
+        assert _plan(target, None).ops[0].fields["supersedes_file_id"] is None
+
+    def test_the_markdown_hash_is_stamped_beside_the_conversion_version(self):
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion._ingest_file_inner)
+        assert "file.markdown_sha256 = hashlib.sha256(" in src
+        assert src.index("file.conversion_version = CONVERSION_VERSION") < src.index(
+            "file.markdown_sha256"
+        )
+
+    def test_both_hashes_are_on_the_wire(self):
+        from app.schemas import FileOut
+
+        for name in ("content_sha256", "markdown_sha256", "supersedes_file_id"):
+            assert name in FileOut.model_fields
+
+
+class TestIdenticalReuploadsAreNotNewEditions:
+    """Retiring a document in favour of a byte-identical copy of itself is the
+    emptiest possible supersession, and it was reachable: 0035 recorded
+    content_sha256 and nothing consulted it."""
+
+    def test_the_helper_excludes_superseded_rows(self):
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion.find_duplicate)
+        assert "File.in_force_to.is_(None)" in src, (
+            "an old edition may legitimately share bytes with a reinstatement"
+        )
+        assert "File.project_id == project_id" in src
+
+    def test_an_empty_digest_never_matches(self):
+        from app.services.ingestion import find_duplicate
+
+        assert find_duplicate(None, uuid.uuid4(), "") is None
+
+    def test_a_duplicate_is_recorded_rather_than_indexed_again(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.upload_files)
+        assert "duplicate_of=existing.filename" in src
+        assert "created.append(existing)" in src
+
+
+class TestAStaleProposalNamesItsReplacement:
+    """Two revisions uploaded together both park against the ORIGINAL, because
+    the candidate query excludes rows in review and they are invisible to each
+    other. The second confirm has to say WHICH edition is current now."""
+
+    def test_the_422_carries_the_current_file_id(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert "current_file_id" in src
+
+
+class TestShortlistTiesBreakOnSomethingMeaningful:
+    def test_recency_beats_alphabetical_order(self):
+        from datetime import date as _date
+
+        from app.services.ingestion import _shortlist
+
+        # Identical scores; only the dates differ. Alphabetical order alone is
+        # a coin toss that correlates with nothing.
+        older = _row("Reg_A_part1.pdf", None, None, _date(2019, 1, 1))
+        newer = _row("Reg_Z_part1.pdf", None, None, _date(2024, 1, 1))
+        filler = [_row(f"Other_{i}.pdf") for i in range(20)]
+        top = _shortlist(filler + [older, newer], "Reg part1 revision", limit=1)
+        assert top == [newer]
+
+    def test_it_is_still_deterministic(self):
+        from app.services.ingestion import _shortlist
+
+        c = [_row(f"Doc {i}.pdf") for i in range(30)]
+        a = _shortlist(c, "Companies Act 2013", limit=12)
+        b = _shortlist(c, "Companies Act 2013", limit=12)
+        assert [r.id for r in a] == [r.id for r in b]

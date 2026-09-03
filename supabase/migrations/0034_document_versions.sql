@@ -52,10 +52,12 @@
 --
 -- ROLLBACK REMEDY. This migration is never rolled back. If the BACKEND is
 -- rolled back while superseded versions exist, the old requeue paths do not
--- know about them and the next model switch re-indexes retired law. Repair:
---   delete from public.chunks c using public.files f
---    where c.file_id = f.id and f.in_force_to is not null;
---   update public.files set chunk_count = 0 where in_force_to is not null;
+-- know about them and the next model switch re-indexes retired law. The repair
+-- is a runnable script, not a sketch in this comment:
+--   scripts/sql/repair_superseded_editions.sql
+-- It also handles two things the sketch here did not: retired editions left
+-- sitting in the queue, and the cache signature, which must roll or both
+-- answer layers keep serving what was just removed.
 --
 -- SAFETY: additive and nullable. Every existing row reads NULL on all five,
 -- which is precisely today's behaviour - one file, its own document, in force.

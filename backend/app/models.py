@@ -162,6 +162,13 @@ class File(Base):
     content_sha256: Mapped[str | None] = mapped_column(Text)
     extracted_title: Mapped[str | None] = mapped_column(Text)
     instrument_role: Mapped[str | None] = mapped_column(Text)
+    # The version chain (migration 0036). supersedes_file_id is the edge 0034
+    # lacked: it gives a lineage an order that does not depend on the nullable,
+    # user-supplied in_force_from. markdown_sha256 identifies the text actually
+    # chunked, where content_sha256 identifies the upload - a conversion change
+    # rewrites the former in place and leaves the latter untouched.
+    supersedes_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    markdown_sha256: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

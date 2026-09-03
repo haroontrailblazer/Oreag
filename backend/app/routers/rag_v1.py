@@ -27,8 +27,9 @@ from ..schemas import (
     SourceChunk,
 )
 from ..sse import sse_response
-from ..services import explore, retrieval, storage
+from ..services import document_events, explore, retrieval, storage
 from ..services.conversion import content_type_for, is_ingestable, source_extension
+from ..services.ingestion import find_duplicate
 from ..services.query import run_query, run_query_stream
 from ..services.rate_limit import enforce_rate_limit
 from ..services import judges, tracing
@@ -365,8 +366,23 @@ async def public_upload_files(
         raise HTTPException(429, "Upload rate limit exceeded - try again shortly.")
 
     created: list[File] = []
-    payloads: list[bytes] = []
+    # (row, bytes) pairs rather than two parallel lists: a duplicate is added
+    # to `created` (the caller gets the row that already holds its content) but
+    # has nothing to upload, and two lists zipped together would silently
+    # misalign every file after the first skip.
+    to_upload: list[tuple[File, bytes]] = []
     for filename, data, extension, content_type in validated:
+        digest = hashlib.sha256(data).hexdigest()
+        existing = find_duplicate(db, project.id, digest)
+        if existing is not None:
+            document_events.record(
+                db, project.id, "uploaded",
+                file_id=existing.id, document_id=existing.document_id,
+                filename=filename, duplicate_of=existing.filename,
+                content_sha256=digest, skipped=True,
+            )
+            created.append(existing)
+            continue
         file_id = uuid.uuid4()
         record = File(
             id=file_id,
@@ -380,11 +396,16 @@ async def public_upload_files(
             # only one of the two upload paths made the guarantee depend on
             # which door a file came through - and integrations that ingest via
             # /v1 or MCP are exactly the ones most likely to need it later.
-            content_sha256=hashlib.sha256(data).hexdigest(),
+            content_sha256=digest,
         )
         db.add(record)
+        document_events.record(
+            db, project.id, "uploaded",
+            file_id=record.id, filename=filename,
+            size_bytes=len(data), content_sha256=digest,
+        )
         created.append(record)
-        payloads.append(data)
+        to_upload.append((record, data))
     project.status = "indexing"
     db.commit()  # releases the advisory lock
 
@@ -392,7 +413,7 @@ async def public_upload_files(
     # through multi-second uploads would serialize every uploader). A failed
     # PUT marks just that file failed - visible in the Files tab - instead of
     # silently leaking objects like the old inverse ordering did.
-    for record, data in zip(created, payloads):
+    for record, data in to_upload:
         try:
             # supabase-py's storage call is synchronous: run it in the
             # threadpool so a multi-second 50MB PUT doesn't freeze the event
