@@ -348,7 +348,7 @@ class TestVersionProposalParsing:
 
     def test_clean_json(self):
         shortlist = [_row("a.pdf"), _row("b.pdf")]
-        matched, label, from_date, status, _role = self._parse(
+        matched, label, from_date, status, _role, _kind = self._parse(
             '{"match": 2, "version_label": "Act 18", '
             '"in_force_from": "2013-08-29", "legal_status": "in_force"}',
             shortlist,
@@ -388,7 +388,7 @@ class TestVersionProposalParsing:
 
     def test_junk_degrades_to_nothing_at_all(self):
         for reply in ("", "sorry, I cannot help with that", "[]", "null", "{"):
-            assert self._parse(reply) == (None, None, None, None, None), reply
+            assert self._parse(reply) == (None, None, None, None, None, None), reply
 
 
 class TestLineageKey:
@@ -796,10 +796,17 @@ class TestVersionRequestCannotSilentlyEraseALabel:
 
         assert FileVersionRequest.model_fields["version_label"].is_required()
 
-    def test_every_field_is_required(self):
+    def test_every_field_the_endpoint_overwrites_is_required(self):
         from app.schemas import FileVersionRequest
 
+        # relation_kind is the deliberate exception: it was added by 0037 and
+        # NULL is read as 'supersedes', the only relation that existed before,
+        # so a client written against 0036 keeps working unchanged. Every other
+        # field is written unconditionally, so omitting one would erase it.
         for name, field in FileVersionRequest.model_fields.items():
+            if name == "relation_kind":
+                assert not field.is_required()
+                continue
             assert field.is_required(), (
                 f"{name} is optional; the endpoint writes it unconditionally, "
                 "so omitting it would erase the stored value"
@@ -912,14 +919,34 @@ class TestNonSupersedingRoles:
         assert "principal" not in NON_SUPERSEDING_ROLES
         assert "consolidated" not in NON_SUPERSEDING_ROLES
 
-    def test_the_extractor_refuses_rather_than_matching(self):
+    def test_a_referring_document_cannot_claim_a_retiring_relation(self):
+        """0037 replaced refusal with correction.
+
+        Before it there was only one relation - supersedes - so the sole way to
+        stop an erratum retiring the article it corrects was to throw the match
+        away. Now every referring role has a relation that keeps the
+        predecessor answering, so the link is rewritten rather than discarded:
+        strictly more information, and the same protection.
+        """
         from app.services import ingestion
 
         src = inspect.getsource(ingestion._propose_version)
         assert "NON_SUPERSEDING_ROLES" in src, (
             "a correction or translation can still retire its subject"
         )
-        assert "refused=" in src, "a refusal must be reported, not silent"
+        for role, kind in (
+            ("amending", "amends"), ("correction", "corrects"),
+            ("translation", "translates"), ("supplement", "supplements"),
+        ):
+            assert f'"{role}": "{kind}"' in src, f"{role} has no safe relation"
+
+    def test_the_endpoint_only_blocks_a_retiring_relation(self):
+        # The same rule at the boundary: an amendment MAY name the statute it
+        # amends, it just may not retire it.
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert "_retires and body.instrument_role in NON_SUPERSEDING_ROLES" in src
 
     def test_the_endpoint_enforces_it_too(self):
         # The UI is not the security boundary: this endpoint accepts a
@@ -1511,3 +1538,162 @@ class TestEnablingMidProjectWorksWithWhatIsThere:
         src = inspect.getsource(ingestion.backfill_extracted_titles)
         assert "except Exception:" in src
         assert "db.rollback()" in src
+
+
+# --------------------------------------------------------------------------
+# Migration 0037 - one relation was never enough.
+# --------------------------------------------------------------------------
+
+MIGRATION_0037 = MIGRATIONS / "0037_document_relations.sql"
+
+
+class TestMigration0037Shape:
+    def setup_method(self):
+        self.sql = MIGRATION_0037.read_text(encoding="utf-8")
+        self.lower = self.sql.lower()
+
+    def test_no_percent_sign(self):
+        assert "%" not in self.sql
+
+    def test_it_admits_exactly_the_eight_kinds(self):
+        from app.schemas import RELATION_KINDS
+
+        for kind in RELATION_KINDS:
+            assert f"'{kind}'" in self.sql, f"CHECK does not admit {kind!r}"
+        assert len(RELATION_KINDS) == 8
+
+    def test_a_relation_needs_a_target(self):
+        assert "files_relation_needs_target" in self.lower
+
+    def test_legal_status_gains_retracted(self):
+        # A retracted paper that simply vanished would leave the corpus looking
+        # as though it had never held it.
+        assert "'retracted'" in self.sql
+
+
+class TestTheRelationTableIsTheWholeMechanism:
+    """Every "does not fit" class had the same cause: one edge that always
+    retired the predecessor. A relation kind decides two booleans, and because
+    "answers questions" and "has chunks" are the same thing here, that is the
+    entire implementation - retrieval needs no predicate."""
+
+    def test_retrieval_is_still_untouched(self):
+        from app.services import explore, retrieval
+
+        for module in (retrieval, explore):
+            src = inspect.getsource(module)
+            assert "relation_kind" not in src, (
+                f"{module.__name__} references relation_kind - the whole design "
+                "is that it never has to"
+            )
+
+    def test_the_four_referring_relations_leave_the_predecessor_answering(self):
+        from app.schemas import RELATIONS
+
+        for kind in ("amends", "corrects", "translates", "supplements", "succeeds"):
+            retires, _answers, _mark = RELATIONS[kind]
+            assert not retires, f"{kind} must not retire what it points at"
+
+    def test_diff_text_and_notices_do_not_answer(self):
+        # An amending instrument quoted as if it were the rule, or an erratum
+        # answering in place of the article, are the two worst outcomes
+        # measured over the corpus.
+        from app.schemas import RELATIONS
+
+        for kind in ("amends", "corrects", "retracts"):
+            assert not RELATIONS[kind][1], f"{kind} must not be searchable"
+
+    def test_retraction_stops_the_paper_and_marks_it(self):
+        from app.schemas import RELATIONS
+
+        retires, answers, mark = RELATIONS["retracts"]
+        assert retires and not answers and mark == "retracted"
+
+    def test_an_amendment_marks_what_it_amends(self):
+        from app.schemas import RELATIONS
+
+        assert RELATIONS["amends"][2] == "amended"
+
+    def test_null_is_read_as_the_pre_0037_relation(self):
+        from app.schemas import DEFAULT_RELATION, RELATIONS
+
+        assert DEFAULT_RELATION == "supersedes"
+        assert RELATIONS[DEFAULT_RELATION] == (True, True, None)
+
+
+class TestThePlannerAppliesTheTable:
+    def _plan_kind(self, kind):
+        pred = _Target(uuid.uuid4(), "indexed", 40)
+        target = _Target(uuid.uuid4(), "review", 0)
+        body = _Body("L", date(2024, 1, 1), "in_force", "principal")
+        body = body._replace() if hasattr(body, "_replace") else body
+        from app.routers.files import plan_supersession
+
+        class B(NamedTuple):
+            version_label: str | None
+            in_force_from: date | None
+            legal_status: str | None
+            instrument_role: str | None
+            relation_kind: str | None
+
+        plan = plan_supersession(
+            target, pred, pred.id,
+            B("L", date(2024, 1, 1), "in_force", "principal", kind),
+        )
+        pred_op = next((o for o in plan.ops if o.file_id == pred.id), None)
+        return plan, pred_op
+
+    def test_a_retiring_relation_drops_the_predecessors_chunks(self):
+        for kind in ("supersedes", "restates", "retracts"):
+            _plan, pred_op = self._plan_kind(kind)
+            assert pred_op is not None and pred_op.delete_chunks, kind
+            assert pred_op.fields["chunk_count"] == 0, kind
+
+    def test_a_referring_relation_leaves_them_alone(self):
+        for kind in ("amends", "corrects", "translates", "supplements", "succeeds"):
+            _plan, pred_op = self._plan_kind(kind)
+            if pred_op is not None:
+                assert not pred_op.delete_chunks, kind
+                assert "chunk_count" not in pred_op.fields, kind
+                assert "in_force_to" not in pred_op.fields, kind
+
+    def test_a_non_answering_document_is_never_queued(self):
+        for kind in ("amends", "corrects", "retracts"):
+            plan, _ = self._plan_kind(kind)
+            assert not plan.requeued, kind
+            assert plan.ops[0].delete_chunks, kind
+
+    def test_an_answering_document_is_queued(self):
+        for kind in ("supersedes", "restates", "translates", "supplements", "succeeds"):
+            plan, _ = self._plan_kind(kind)
+            assert plan.requeued, kind
+            assert not plan.ops[0].delete_chunks, kind
+
+    def test_the_relation_is_recorded_on_the_row(self):
+        plan, _ = self._plan_kind("succeeds")
+        assert plan.ops[0].fields["relation_kind"] == "succeeds"
+
+
+class TestTheEndpointGuardsOnlyBiteRetiringRelations:
+    """An amendment MAY name the statute it amends. It just may not retire it,
+    and it needs no effective date to do so."""
+
+    def test_the_date_is_only_required_when_retiring(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert "if _retires and body.in_force_from is None:" in src
+
+    def test_an_already_superseded_predecessor_only_blocks_retirement(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert "predecessor.in_force_to is not None and _retires" in src
+
+    def test_the_clash_check_only_applies_to_retiring_relations(self):
+        # A translation or the next filing in a series joins the lineage
+        # alongside the current edition; only a replacement competes with it.
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert "_retires_target" in src

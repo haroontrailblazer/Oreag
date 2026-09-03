@@ -127,6 +127,18 @@ export interface FileRecord {
   // 0036: the edition this one replaced. Gives a lineage a real order that
   // does not depend on in_force_from, which is nullable and user-supplied.
   supersedes_file_id: string | null
+  // 0037: what this document DOES to the one supersedes_file_id names. Decides
+  // whether that document keeps answering questions.
+  relation_kind:
+    | "supersedes"
+    | "restates"
+    | "amends"
+    | "corrects"
+    | "retracts"
+    | "translates"
+    | "supplements"
+    | "succeeds"
+    | null
   markdown_sha256: string | null
   instrument_role:
     | "principal"

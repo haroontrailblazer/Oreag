@@ -169,6 +169,12 @@ class File(Base):
     # rewrites the former in place and leaves the latter untouched.
     supersedes_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     markdown_sha256: Mapped[str | None] = mapped_column(Text)
+    # What this document DOES to the one supersedes_file_id names (0037):
+    # supersedes, restates, amends, corrects, retracts, translates,
+    # supplements, succeeds. Decides whether the predecessor keeps its chunks
+    # and whether this document gets any - which is the whole of it, because
+    # "answers questions" and "has chunks" are the same thing here.
+    relation_kind: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

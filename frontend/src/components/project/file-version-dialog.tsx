@@ -47,6 +47,22 @@ const INSTRUMENT_ROLES = [
   { value: "unknown", label: "Not sure" },
 ] as const
 
+// What this document does to the one it replaces. The second line is the
+// consequence, because that is the part a reviewer is actually deciding: does
+// the document they matched keep answering questions or not.
+const RELATIONS = [
+  { value: "supersedes", label: "Replaces it", effect: "The earlier one stops answering questions." },
+  { value: "restates", label: "Restates it in full", effect: "The earlier one stops answering questions." },
+  { value: "succeeds", label: "Comes after it, both still valid", effect: "Both keep answering — a yearly series, or a version whose predecessor is still supported." },
+  { value: "amends", label: "Amends it", effect: "The earlier one keeps answering and is marked amended. This document is stored but not searchable, so its diff text cannot be quoted as if it were the rule." },
+  { value: "corrects", label: "Corrects it", effect: "The earlier one keeps answering. The notice is stored but not searchable." },
+  { value: "retracts", label: "Retracts it", effect: "The earlier one stops answering and is marked retracted. It stays downloadable rather than disappearing." },
+  { value: "translates", label: "Translates it", effect: "Both keep answering. The original is not retired." },
+  { value: "supplements", label: "Is part of it", effect: "Both keep answering." },
+] as const
+
+const RETIRING = new Set(["supersedes", "restates", "retracts"])
+
 const LEGAL_STATUSES = [
   { value: "in_force", label: "In force" },
   { value: "amended", label: "Amended" },
@@ -161,11 +177,17 @@ export function FileVersionDialog({
     () => file.legal_status ?? "in_force"
   )
   const [role, setRole] = useState<string>(() => file.instrument_role ?? "unknown")
+  const [relation, setRelation] = useState<string>(
+    () => file.relation_kind ?? "supersedes"
+  )
   const [saving, setSaving] = useState(false)
 
   const supersedes = isVersion === true && current ? current : null
-  const dateValid = !supersedes || ISO_DATE.test(from.trim())
-  const roleBlocks = supersedes !== null && NON_SUPERSEDING.has(role)
+  const retires = supersedes !== null && RETIRING.has(relation)
+  // Only a retiring relation needs a date: it becomes the predecessor's
+  // in_force_to. An amendment or a translation retires nothing.
+  const dateValid = !retires || ISO_DATE.test(from.trim())
+  const roleBlocks = retires && NON_SUPERSEDING.has(role)
   const canSubmit = isVersion !== null && dateValid && !roleBlocks
 
   /**
@@ -189,6 +211,7 @@ export function FileVersionDialog({
       in_force_from: string | null
       legal_status: string | null
       instrument_role: string | null
+      relation_kind: string | null
     },
     message: string
   ) {
@@ -221,6 +244,7 @@ export function FileVersionDialog({
     in_force_from: edition.in_force_from,
     legal_status: edition.legal_status,
     instrument_role: edition.instrument_role,
+    relation_kind: edition.relation_kind,
   })
 
   return (
@@ -265,8 +289,8 @@ export function FileVersionDialog({
                         A new version of {current.filename}
                       </span>
                       <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-                        That version is kept and stays downloadable, but stops
-                        being searchable.
+                        You choose what this does to it next &mdash; replacing
+                        it is one option, not the only one.
                       </span>
                     </span>
                   </button>
@@ -308,7 +332,7 @@ export function FileVersionDialog({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="in-force-from">
-                  In force from{supersedes ? " *" : ""}
+                  In force from{retires ? " *" : ""}
                 </Label>
                 {/* A plain text input, not type="date": the app owns no date
                     primitive, the extractor prefills this in the common case,
@@ -341,6 +365,32 @@ export function FileVersionDialog({
               </Select>
             </div>
 
+            {isVersion === true && current && (
+              <div className="space-y-1.5">
+                <Label htmlFor="relation-kind">
+                  What does it do to that version?
+                </Label>
+                <Select value={relation} onValueChange={setRelation}>
+                  <SelectTrigger id="relation-kind">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RELATIONS.map((r) => (
+                      <SelectItem key={r.value} value={r.value}>
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* The consequence, not the definition: what a reviewer is
+                    actually deciding is whether the document they matched
+                    keeps answering questions. */}
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {RELATIONS.find((r) => r.value === relation)?.effect}
+                </p>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="instrument-role">What kind of document is this?</Label>
               <Select value={role} onValueChange={setRole}>
@@ -357,23 +407,23 @@ export function FileVersionDialog({
               </Select>
               {roleBlocks && (
                 <p className="text-xs text-amber-700 dark:text-amber-400">
-                  A document that {role === "amending" ? "amends" : role === "correction" ? "corrects" : role === "translation" ? "translates" : "is part of"}{" "}
-                  another one refers to it rather than replacing it. Keeping it
-                  as a separate document leaves{" "}
-                  <span className="font-medium">{current?.filename}</span>{" "}
-                  searchable, which is almost always what you want.
+                  A document of this kind refers to another rather than
+                  replacing it, so it cannot retire{" "}
+                  <span className="font-medium">{current?.filename}</span>.
+                  Choose a relation above that leaves it answering &mdash;
+                  amends, corrects or is part of.
                 </p>
               )}
             </div>
 
             {isVersion === null && (
               <p className="text-xs text-muted-foreground">
-                Choose one above. Nothing is pre-selected because confirming a
-                replacement retires the document it replaces.
+                Choose one above. Nothing is pre-selected because some of
+                these choices retire the document they point at.
               </p>
             )}
 
-            {supersedes && (
+            {retires && (
               <div className="space-y-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-muted-foreground">
                 <p>
                   While the new version is indexing, this document is briefly
@@ -596,6 +646,7 @@ export function FileVersionDialog({
                     in_force_from: from.trim() || null,
                     legal_status: status || null,
                     instrument_role: role || null,
+                    relation_kind: supersedes ? relation : null,
                   },
                   supersedes
                     ? `${supersedes.filename} is now a superseded version`

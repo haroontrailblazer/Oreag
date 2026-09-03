@@ -18,7 +18,13 @@ from ..config import settings
 from ..db import SessionLocal
 from ..models import Chunk, File, Project
 from ..providers.base import usage_from_openai
-from ..schemas import INSTRUMENT_ROLES, LEGAL_STATUSES
+from ..schemas import (
+    DEFAULT_RELATION,
+    INSTRUMENT_ROLES,
+    LEGAL_STATUSES,
+    RELATION_KINDS,
+    RELATIONS,
+)
 from . import embedding_usage
 from .usage import record_usage
 from ..providers import registry, resolver
@@ -418,7 +424,9 @@ _VERSION_SYSTEM_PROMPT = (
     '"in_force_from": <"YYYY-MM-DD" or null>, '
     '"legal_status": "in_force"|"amended"|"repealed"|"draft"|"unknown", '
     '"instrument_role": "principal"|"consolidated"|"amending"|"correction"'
-    '|"translation"|"supplement"|"unknown"}\n'
+    '|"translation"|"supplement"|"unknown", '
+    '"relation_kind": "supersedes"|"restates"|"amends"|"corrects"|"retracts"'
+    '|"translates"|"supplements"|"succeeds"|null}\n'
     "\n"
     "instrument_role describes what KIND of document the NEW one is. The "
     "decisive question is whether it CONTAINS the thing it relates to, or "
@@ -443,13 +451,35 @@ _VERSION_SYSTEM_PROMPT = (
     "document amending: an Amendment Act that reproduces the whole amended "
     "statute is consolidated. Judge from the document body, not the title.\n"
     "\n"
-    "Set match ONLY when the new document is a later version, reprint or "
-    "consolidation of that same instrument - same jurisdiction, same title, "
-    "same subject - so that a reader should now read the new one INSTEAD of "
-    "the old one. A document that merely cites, discusses, corrects, "
-    "translates, summarises or supplements another is NOT a match, and neither "
-    "is a different chapter, schedule or part of it, nor the next document in "
-    "an annual series. When you are not sure, use null.\n"
+    "Set match when the new document is ABOUT one of the listed documents - a "
+    "later version of it, an amendment to it, a correction or retraction of "
+    "it, a translation of it, a part of it, or the next one in the same "
+    "series. Use null when it is simply a different document, and when you are "
+    "not sure.\n"
+    "\n"
+    "relation_kind says what the new document DOES to the one you matched. It "
+    "decides whether that document keeps answering questions, so choose it "
+    "carefully:\n"
+    "  supersedes  - replaces it; a reader should now read this INSTEAD. A "
+    "consolidated reprint, a re-enacting statute, a new edition of a standard, "
+    "the journal version of a preprint.\n"
+    "  restates    - replaces it by setting out the whole thing afresh: an "
+    "amended-and-restated agreement, a full revision.\n"
+    "  amends      - changes it by instruction without reproducing it. The "
+    "document you matched is still the operative text.\n"
+    "  corrects    - is a notice about it: erratum, corrigendum, Department of "
+    "Error.\n"
+    "  retracts    - withdraws it: a retraction notice.\n"
+    "  translates  - is the same edition of it in another language.\n"
+    "  supplements - is a part of it: appendix, annex, supplementary "
+    "material.\n"
+    "  succeeds    - is the next one along while the earlier remains valid: "
+    "the following year in an annual series, a CFR or standard edition "
+    "published yearly, an API version whose predecessor is still supported, an "
+    "amendment layered onto a contract that stays in force.\n"
+    "Prefer succeeds over supersedes whenever the earlier document is "
+    "plausibly still in use. Use supersedes only when the earlier one is "
+    "genuinely no longer the thing to read.\n"
     "\n"
     "version_label is how this edition names itself, for example 'Act 18 of "
     "2013', 'Second Amendment 2019', 'Reprint No. 4', 'v2', '4th edition'. "
@@ -465,6 +495,10 @@ class VersionProposal(NamedTuple):
     in_force_from: date | None
     legal_status: str | None
     instrument_role: str | None = None
+    # What the new document does to the one it matched. None when nothing
+    # matched; read as 'supersedes' when a relation exists but the model did
+    # not name one, which is the pre-0037 behaviour.
+    relation_kind: str | None = None
     # Why no match was proposed, when the model wanted one. Surfaced to the
     # reviewer so a refusal reads as a decision rather than as the extractor
     # having found nothing.
@@ -646,7 +680,7 @@ def _parse_version_json(reply: str, shortlist):
         except Exception:
             parsed = None
     if not isinstance(parsed, dict):
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
     matched = None
     index = parsed.get("match")
@@ -675,7 +709,10 @@ def _parse_version_json(reply: str, shortlist):
 
     role = parsed.get("instrument_role")
     role = role if role in INSTRUMENT_ROLES else None
-    return matched, label, from_date, status, role
+
+    kind = parsed.get("relation_kind")
+    kind = kind if kind in RELATION_KINDS else None
+    return matched, label, from_date, status, role, kind
 
 
 def _propose_version(db: Session, file, project, markdown: str) -> VersionProposal:
@@ -740,34 +777,42 @@ def _propose_version(db: Session, file, project, markdown: str) -> VersionPropos
         # new metering code, no new usage endpoint label, and the tokens land on
         # the existing file_ingest row priced by the chat table.
         embedding_usage.record_llm(usage)
-        matched, label, from_date, status, role = _parse_version_json(reply, shortlist)
+        matched, label, from_date, status, role, kind = _parse_version_json(
+            reply, shortlist
+        )
     except Exception:
         logger.info(
             "Version extraction unavailable for file %s", file.id, exc_info=True
         )
         return standalone
-    if matched is not None and role in NON_SUPERSEDING_ROLES:
-        # The model identified a related document AND told us this one only
-        # refers to it. Refuse the supersession and index it standalone: a
-        # correction notice that retires the article it corrects, or a
-        # translation that retires the authoritative text, is the worst
-        # outcome this feature can produce, and it is worse than a missed
-        # link. The reason is carried so the reviewer sees a decision rather
-        # than an absence.
-        row = next(r for r in shortlist if r.id == matched)
-        logger.info(
-            "Refusing supersession by %s file %s (would have replaced %s)",
-            role, file.id, row.filename,
-        )
-        return VersionProposal(
-            file.id, label, from_date, status, role,
-            refused=f"{role}:{row.filename}",
-        )
+    if matched is not None:
+        # A document whose ROLE says it refers to another cannot claim a
+        # RETIRING relation, whatever the model picked. Before 0037 the only
+        # relation was "supersedes", so the guard had to refuse the match
+        # outright; now there is a correct relation for each of these, and the
+        # link is kept instead of thrown away.
+        if role in NON_SUPERSEDING_ROLES and RELATIONS.get(
+            kind or DEFAULT_RELATION, (True,)
+        )[0]:
+            corrected = {
+                "amending": "amends",
+                "correction": "corrects",
+                "translation": "translates",
+                "supplement": "supplements",
+            }[role]
+            logger.info(
+                "Rewriting relation for %s file %s: %s -> %s",
+                role, file.id, kind or DEFAULT_RELATION, corrected,
+            )
+            kind = corrected
     if matched is None:
         # No lineage, but keep whatever the model did read off the document.
         return VersionProposal(file.id, label, from_date, status, role)
     row = next(r for r in shortlist if r.id == matched)
-    return VersionProposal(row.document_id or row.id, label, from_date, status, role)
+    return VersionProposal(
+        row.document_id or row.id, label, from_date, status, role,
+        relation_kind=kind or DEFAULT_RELATION,
+    )
 
 
 def _ingest_file_inner(file_id: uuid.UUID) -> None:
@@ -901,6 +946,7 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
             file.in_force_from = proposal.in_force_from
             file.legal_status = proposal.legal_status
             file.instrument_role = proposal.instrument_role
+            file.relation_kind = proposal.relation_kind
             # The title the shortlist will match future uploads against. Taken
             # from the document's own first heading, so a predecessor named
             # scan_0001.pdf stops being invisible to stage one - the single

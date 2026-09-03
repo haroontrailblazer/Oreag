@@ -173,6 +173,8 @@ class FileOut(BaseModel):
     # instead of sorting on a legal date that may be null.
     supersedes_file_id: uuid.UUID | None = None
     markdown_sha256: str | None = None
+    # 0037. How this document relates to the one supersedes_file_id names.
+    relation_kind: str | None = None
     created_at: datetime
     indexed_at: datetime | None
 
@@ -191,6 +193,50 @@ INSTRUMENT_ROLES = (
     "supplement",
     "unknown",
 )
+
+
+# What a document DOES to the one it points at (migration 0037). Two booleans
+# and nothing else: whether the predecessor keeps its chunks, and whether this
+# document gets any. Because "should this answer questions" is already
+# expressed as "does it have chunks", that is the entire mechanism - retrieval
+# needs no predicate and its byte-pinned SQL stays untouched.
+#
+#   (retires_predecessor, self_answers, marks_predecessor)
+RELATIONS: dict[str, tuple[bool, bool, str | None]] = {
+    # Replaces it. The canonical case: a consolidated reprint, a re-enacting
+    # statute, a new edition of a standard, a journal version of a preprint.
+    "supersedes":  (True,  True,  None),
+    # Replaces it by restating the whole thing. Recorded distinctly because a
+    # restatement carries obligations an ordinary revision does not, and the
+    # two were indistinguishable.
+    "restates":    (True,  True,  None),
+    # Changes it by instruction. The predecessor is still the operative text
+    # and must keep answering; the diff text must NOT, or answers quote
+    # fragments that read like law and are not.
+    "amends":      (False, False, "amended"),
+    # A notice ABOUT it - erratum, corrigendum, Department of Error. The
+    # article it corrects stays; the notice itself is not an answer to
+    # anything.
+    "corrects":    (False, False, None),
+    # Withdraws it. The retracted work stops answering AND is marked, because a
+    # retracted paper that simply vanished would leave the corpus looking as
+    # though it had never held it.
+    "retracts":    (True,  False, "retracted"),
+    # The same edition in another language. Both stay: retiring the
+    # authoritative text in favour of a rendering that often disclaims
+    # authority is never right.
+    "translates":  (False, True,  None),
+    # A part of it - appendix, annex, supplementary material. Both stay.
+    "supplements": (False, True,  None),
+    # The next one along, where the earlier is still valid: an annual filing
+    # series, a CFR year, an API v2 whose v1 is still supported, a contract
+    # amendment layered on an MSA that remains in force.
+    "succeeds":    (False, True,  None),
+}
+RELATION_KINDS = tuple(RELATIONS)
+
+# NULL means the only relation that existed before 0037.
+DEFAULT_RELATION = "supersedes"
 
 
 class FileVersionRequest(BaseModel):
@@ -225,6 +271,9 @@ class FileVersionRequest(BaseModel):
     # every other field because the endpoint writes it unconditionally, and
     # load-bearing: a role in NON_SUPERSEDING_ROLES cannot name a predecessor.
     instrument_role: Literal[INSTRUMENT_ROLES] | None  # type: ignore[valid-type]
+    # What this document does to the one it names. NULL is read as
+    # 'supersedes', so a client written against 0036 keeps working unchanged.
+    relation_kind: Literal[RELATION_KINDS] | None = None  # type: ignore[valid-type]
 
 
 class DocumentEventOut(BaseModel):

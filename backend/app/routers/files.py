@@ -21,6 +21,8 @@ from ..db import get_db
 from ..models import Chunk, File, Project
 from ..providers import registry
 from ..schemas import (
+    DEFAULT_RELATION,
+    RELATIONS,
     DocumentEventOut,
     FileOut,
     FileVersionRequest,
@@ -441,11 +443,21 @@ def plan_supersession(target, predecessor, lineage, body) -> SupersessionPlan:
         "instrument_role": body.instrument_role,
         "in_force_to": None,  # this row is the current one
     }
+    kind = (getattr(body, "relation_kind", None) or DEFAULT_RELATION) if predecessor else None
+    retires, self_answers, mark = RELATIONS.get(kind, RELATIONS[DEFAULT_RELATION])
+    if predecessor is None:
+        # No relation: an ordinary document, which answers.
+        retires, self_answers, mark = False, True, None
+
     # Queue it: a confirmed review file, or a historical version being brought
     # back into force. An already-indexed, already-current file having only its
     # metadata corrected is left alone - re-embedding it would be a bill for
-    # nothing.
-    requeued = target.chunk_count == 0 or target.status != "indexed"
+    # nothing. A document that does not ANSWER is never queued: an amending
+    # instrument, an erratum or a retraction notice must be stored and
+    # downloadable without its text competing with the document it is about.
+    requeued = self_answers and (
+        target.chunk_count == 0 or target.status != "indexed"
+    )
     if requeued:
         fields.update(
             status="pending",
@@ -461,26 +473,41 @@ def plan_supersession(target, predecessor, lineage, body) -> SupersessionPlan:
     # is no predecessor so a reinstated or detached edition does not keep
     # claiming to have replaced something it no longer follows.
     fields["supersedes_file_id"] = predecessor.id if predecessor is not None else None
-    ops = [VersionOp(target.id, fields, delete_chunks=False)]
+    fields["relation_kind"] = kind
+    if not self_answers:
+        # The whole mechanism, and the reason retrieval needs no predicate:
+        # "does not answer" IS "holds no chunks". The file keeps its row, both
+        # blobs and all its metadata, exactly as a superseded edition does.
+        fields["status"] = "indexed"
+        fields["chunk_count"] = 0
+    ops = [VersionOp(target.id, fields, delete_chunks=not self_answers)]
     if predecessor is not None:
-        ops.append(VersionOp(
-            predecessor.id,
-            {
+        pred_fields: dict = {}
+        if mark is not None:
+            # An amended statute is still the operative text and must say so; a
+            # retracted paper must be marked rather than quietly disappear.
+            pred_fields["legal_status"] = mark
+        if retires:
+            pred_fields.update(
                 # Half-open: the successor's start date IS the predecessor's end
                 # date, so one date serves both rows and they cannot disagree.
                 # No date arithmetic anywhere.
-                "in_force_to": body.in_force_from,
+                in_force_to=body.in_force_from,
                 # MUST be zeroed in the same transaction as the delete.
                 # retrieval._PROJECT_CHUNKS_SQL sums files.chunk_count to feed
                 # the ANN gate; a superseded row keeping its old count inflates
                 # both the absolute vector_ann_min_chunks check and the
                 # owned/total share, opening the HNSW path for a project whose
                 # real chunk count is below both.
-                "chunk_count": 0,
-                "lease_expires_at": None,
-            },
-            delete_chunks=True,
-        ))
+                chunk_count=0,
+                lease_expires_at=None,
+            )
+        if pred_fields or retires:
+            # delete_chunks ONLY when the relation retires it. An amendment, an
+            # erratum, a translation, a supplement and the next filing in a
+            # series all leave the document they point at answering exactly as
+            # before - which is the entire point of 0037.
+            ops.append(VersionOp(predecessor.id, pred_fields, delete_chunks=retires))
     return SupersessionPlan(ops, requeued)
 
 
@@ -999,7 +1026,7 @@ def set_file_version(
                 "The version being replaced is queued for indexing - wait for "
                 "it to finish, then supersede it.",
             )
-        if predecessor.in_force_to is not None:
+        if predecessor.in_force_to is not None and _retires:
             # Two revisions uploaded together both park against the ORIGINAL,
             # because the candidate query excludes rows in review and so they
             # are invisible to each other. Confirming the first supersedes it;
@@ -1026,7 +1053,9 @@ def set_file_version(
                     "current_file_id": str(live) if live else None,
                 },
             )
-        if body.instrument_role in NON_SUPERSEDING_ROLES:
+        _kind = body.relation_kind or DEFAULT_RELATION
+        _retires = RELATIONS.get(_kind, RELATIONS[DEFAULT_RELATION])[0]
+        if _retires and body.instrument_role in NON_SUPERSEDING_ROLES:
             # Enforced here and not only in the extractor, because this endpoint
             # accepts a hand-made request and the UI is not the security
             # boundary. A correction, translation, amendment or supplement
@@ -1038,16 +1067,22 @@ def set_file_version(
                 "document rather than replacing it, so it cannot supersede one. "
                 "Record it as a separate document, or change its type.",
             )
-        if body.in_force_from is None:
-            # in_force_to is the ONLY thing keeping a superseded version out of
-            # the index, so it must never be null on a supersession - and it is
-            # DERIVED, never fabricated, so a missing date is a 422 rather than
-            # date.today(). One invented end date corrupts the whole timeline.
+        if _retires and body.in_force_from is None:
+            # Only a RETIRING relation needs it: in_force_to is what keeps a
+            # superseded version out of the index, and it is DERIVED from this
+            # date, never fabricated. An amendment or a translation retires
+            # nothing, so demanding a date there would block the correct
+            # answer for want of a field that does no work.
+            #
+            # One invented end date corrupts the whole timeline, so a missing
+            # date on a supersession is a 422 rather than date.today().
             raise HTTPException(
                 422, "in_force_from is required when superseding a version"
             )
         if (
-            predecessor.in_force_from is not None
+            _retires
+            and body.in_force_from is not None
+            and predecessor.in_force_from is not None
             and body.in_force_from < predecessor.in_force_from
         ):
             # Turns a CHECK violation (a 500) into a 422.
@@ -1062,6 +1097,11 @@ def set_file_version(
     else:
         lineage = body.document_id or target.id
 
+    _retires_target = (
+        RELATIONS.get(body.relation_kind or DEFAULT_RELATION, RELATIONS[DEFAULT_RELATION])[0]
+        if predecessor is not None
+        else True
+    )
     # At most one current version per lineage. There is no unique constraint on
     # `files` (there is none of any kind) and the key is a coalesce, so this is
     # the invariant's only keeper.
@@ -1092,7 +1132,11 @@ def set_file_version(
         (
             f
             for f in siblings
-            if f.id != target.id
+            # Only a RETIRING relation makes this document the current edition,
+            # so only then can it clash with an existing one. A translation or
+            # the next filing in a series joins the lineage alongside.
+            if _retires_target
+            and f.id != target.id
             and (predecessor is None or f.id != predecessor.id)
             and f.in_force_to is None
             and f.status != "review"
@@ -1130,12 +1174,14 @@ def set_file_version(
     # built on repealed law is the exact harm this feature exists to prevent.
     if predecessor is not None:
         document_events.record(
-            db, project.id, "superseded",
+            db, project.id,
+            "superseded" if _retires else "version_confirmed",
             file_id=predecessor.id, document_id=lineage,
             actor_id=project.owner_id,
             filename=predecessor.filename,
             superseded_by=target.id,
-            in_force_to=body.in_force_from,
+            relation_kind=_kind,
+            in_force_to=body.in_force_from if _retires else None,
         )
     document_events.record(
         db, project.id,
