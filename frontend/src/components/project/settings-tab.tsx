@@ -578,6 +578,128 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Scales className="size-4 text-muted-foreground" />
+            Answer policy
+          </CardTitle>
+          <CardDescription>
+            Set the evidence bar for an answer, then control how every response
+            is presented.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid min-w-0 gap-6 lg:grid-cols-2 lg:gap-0">
+            <section className="min-w-0 space-y-4 lg:pr-6">
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium">Grounding</h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Decide how much matching evidence the project needs before it
+                  answers.
+                </p>
+              </div>
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <div className="min-w-0 space-y-2">
+                  <Label htmlFor="settings-minsim">Minimum similarity</Label>
+                  <Input
+                    id="settings-minsim"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={minSimilarity}
+                    onChange={(e) => setMinSimilarity(e.target.value)}
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Match score from 0 to 1. Lower-scoring chunks are ignored;
+                    0.2 is the permissive default.
+                  </p>
+                </div>
+                <div className="min-w-0 space-y-2">
+                  <Label htmlFor="settings-minstrong">Required sources</Label>
+                  <Input
+                    id="settings-minstrong"
+                    type="number"
+                    min={0}
+                    max={20}
+                    step={1}
+                    value={minStrong}
+                    onChange={(e) => setMinStrong(e.target.value)}
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Ask for clarification when fewer sources qualify. Set 0 to
+                    always answer.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section className="min-w-0 space-y-4 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium">Answer format</h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Keep the question&apos;s language or apply a consistent language
+                  and notice to every response.
+                </p>
+              </div>
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <div className="min-w-0 space-y-2">
+                  <Label htmlFor="settings-lang">Answer language</Label>
+                  <Input
+                    id="settings-lang"
+                    placeholder="Match the question"
+                    value={answerLanguage}
+                    onChange={(e) => setAnswerLanguage(e.target.value)}
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Leave blank to mirror each question&apos;s language.
+                  </p>
+                </div>
+                <div className="min-w-0 space-y-2">
+                  <Label htmlFor="settings-disclaimer">Standing notice</Label>
+                  <Textarea
+                    id="settings-disclaimer"
+                    rows={2}
+                    placeholder="No notice"
+                    value={answerDisclaimer}
+                    onChange={(e) => setAnswerDisclaimer(e.target.value)}
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Appended verbatim to every answer when provided.
+                  </p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-4 border-t pt-5 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-1.5">
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={versionTracking}
+                  onChange={(e) => setVersionTracking(e.target.checked)}
+                  className="size-3.5 shrink-0 accent-foreground"
+                />
+                <span className="font-medium">Track document versions</span>
+              </label>
+              <p className="max-w-3xl pl-6 text-xs leading-relaxed text-muted-foreground">
+                Hold likely new editions for confirmation. Replaced versions
+                remain downloadable but stop contributing to answers.
+              </p>
+            </div>
+            <Button
+              className="shrink-0 sm:min-w-28"
+              onClick={handleSavePolicy}
+              disabled={savingPolicy}
+            >
+              {savingPolicy ? <Spin /> : "Save policy"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Two cards per row from lg+; stretch so each row's cards share a height.
           grid-cols-1 is load-bearing on mobile: without a template the implicit
           auto track sizes to the widest card's min-content (long model labels),
@@ -674,106 +796,6 @@ export function SettingsTab({
           </div>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? <Spin /> : "Save"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Scales className="size-4 text-muted-foreground" />
-            Answer policy
-          </CardTitle>
-          <CardDescription>
-            How sure retrieval must be before this project answers at all, and
-            how the answer is framed. Raise the threshold for a corpus where a
-            wrong answer is expensive.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="settings-minsim">Grounding threshold</Label>
-              <Input
-                id="settings-minsim"
-                type="number"
-                min={0}
-                max={1}
-                step={0.05}
-                value={minSimilarity}
-                onChange={(e) => setMinSimilarity(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                A chunk must match this closely (0-1) to count as evidence.
-                Anything below it is dropped from the answer entirely. 0.2 is
-                the default and is deliberately permissive.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="settings-minstrong">Sources required</Label>
-              <Input
-                id="settings-minstrong"
-                type="number"
-                min={0}
-                max={20}
-                step={1}
-                value={minStrong}
-                onChange={(e) => setMinStrong(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                How many must clear the threshold before answering. Below this
-                the project asks a clarifying question instead of guessing. 0
-                means never refuse.
-              </p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="settings-lang">Answer language</Label>
-            <Input
-              id="settings-lang"
-              placeholder="Leave blank to match the question"
-              value={answerLanguage}
-              onChange={(e) => setAnswerLanguage(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Blank mirrors whatever language each question is asked in, even
-              when the documents are in another. Name a language to force it.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="settings-disclaimer">Standing notice</Label>
-            <Textarea
-              id="settings-disclaimer"
-              rows={2}
-              placeholder="Leave blank for none"
-              value={answerDisclaimer}
-              onChange={(e) => setAnswerDisclaimer(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Appended verbatim to every answer, e.g. an &ldquo;information, not
-              legal advice&rdquo; notice.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
-              <input
-                type="checkbox"
-                checked={versionTracking}
-                onChange={(e) => setVersionTracking(e.target.checked)}
-                className="mt-0.5 size-3.5 accent-foreground"
-              />
-              <span className="font-medium">Track document versions</span>
-            </label>
-            <p className="pl-6 text-xs text-muted-foreground">
-              When on, an upload that looks like a new edition of a document
-              already in this project waits for you to confirm what it replaces.
-              The version it replaces is kept and stays downloadable, but stops
-              being searchable — so answers only ever quote the text in force.
-              Off leaves uploads exactly as they are today.
-            </p>
-          </div>
-          <Button onClick={handleSavePolicy} disabled={savingPolicy}>
-            {savingPolicy ? <Spin /> : "Save policy"}
           </Button>
         </CardContent>
       </Card>
