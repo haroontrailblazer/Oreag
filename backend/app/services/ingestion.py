@@ -262,6 +262,11 @@ def mark_file_failed(db: Session, file_id: uuid.UUID, message: str) -> None:
             return
         file.status = "failed"
         file.error = message[:500]
+        document_events.record_safely(
+            db, file.project_id, "ingest_failed",
+            file_id=file.id, document_id=file.document_id,
+            filename=file.filename, error=message[:300],
+        )
         file.conversion_error = message[:500]
         file.conversion_note = None  # a failed file's caveat would only confuse
         # A failed ingest may have committed some chunk batches before dying -
@@ -944,6 +949,15 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
         file.status = "indexed"
         file.chunk_count = len(chunks)
         file.indexed_at = datetime.now(timezone.utc)
+        # The moment this edition's text became answerable. Without it the
+        # trail records decisions but not their effect, and cannot say what
+        # was searchable on a given date.
+        document_events.record_safely(
+            db, project.id, "indexed",
+            file_id=file.id, document_id=file.document_id,
+            filename=file.filename, chunk_count=len(chunks),
+            content_sha256=file.content_sha256,
+        )
         recompute_project_status(db, project)
         # One atomic invalidation when the file's content becomes searchable -
         # cached answers keep serving the OLD content until this lands.

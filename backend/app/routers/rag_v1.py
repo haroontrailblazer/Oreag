@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import time
 import uuid
@@ -375,6 +376,11 @@ async def public_upload_files(
             content_type=content_type,
             source_extension=extension,
             size_bytes=len(data),
+            # Same digest, same moment, as the dashboard route. Computing it on
+            # only one of the two upload paths made the guarantee depend on
+            # which door a file came through - and integrations that ingest via
+            # /v1 or MCP are exactly the ones most likely to need it later.
+            content_sha256=hashlib.sha256(data).hexdigest(),
         )
         db.add(record)
         created.append(record)

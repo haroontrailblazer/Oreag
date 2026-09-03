@@ -679,8 +679,9 @@ export function SettingsTab({
                 <input
                   type="checkbox"
                   checked={versionTracking}
+                  disabled={!project.version_extraction_available}
                   onChange={(e) => setVersionTracking(e.target.checked)}
-                  className="size-3.5 shrink-0 accent-foreground"
+                  className="size-3.5 shrink-0 accent-foreground disabled:opacity-50"
                 />
                 <span className="font-medium">Track document versions</span>
               </label>
@@ -688,6 +689,14 @@ export function SettingsTab({
                 Hold likely new editions for confirmation. Replaced versions
                 remain downloadable but stop contributing to answers.
               </p>
+              {!project.version_extraction_available && (
+                <p className="max-w-3xl pl-6 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                  Not available on this deployment. Both this switch and a
+                  fleet-wide setting must be on, so turning it on here would
+                  save and then do nothing &mdash; it is disabled rather than
+                  silently ineffective.
+                </p>
+              )}
             </div>
             <Button
               className="shrink-0 sm:min-w-28"

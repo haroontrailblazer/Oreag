@@ -31,6 +31,10 @@ export interface Project {
   // replace it. Per project because the extractor's question is just as true
   // of report_v2.pdf as of an amending Act.
   version_tracking: boolean
+  // Whether the DEPLOYMENT allows extraction at all. Both must be on for
+  // anything to happen, so a project toggle that saves while this is false is
+  // a setting that silently does nothing.
+  version_extraction_available: boolean
   created_at: string
   updated_at: string
   file_count: number

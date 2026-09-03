@@ -1136,3 +1136,151 @@ class TestExtractionModelCanBePinned:
         src = inspect.getsource(ingestion._propose_version)
         assert "settings.version_extraction_provider or project.llm_provider" in src
         assert "settings.version_extraction_model or project.llm_model" in src
+
+
+# --------------------------------------------------------------------------
+# Defects found by an adversarial audit run against the 0035 code itself.
+# --------------------------------------------------------------------------
+
+
+class TestTheAuditTrailIsReadable:
+    """An audit trail nothing can read is not an audit trail.
+
+    0035 shipped document_events, the append-only trigger, the RLS policy, the
+    history() reader AND the DocumentEventOut wire shape - and no endpoint. The
+    log was write-only.
+    """
+
+    def test_there_is_an_events_endpoint(self):
+        from app.routers import files as files_router
+
+        assert hasattr(files_router, "list_document_events")
+
+    def test_it_reads_through_the_scoped_helper(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.list_document_events)
+        assert "document_events.history(" in src
+        assert "project.id" in src
+
+    def test_the_route_is_registered_and_owner_scoped(self):
+        from app.routers.files import router
+
+        paths = {r.path for r in router.routes}
+        assert any(p.endswith("/events") for p in paths), paths
+
+
+class TestBothUploadPathsHash:
+    """content_sha256 covered only the dashboard route, so the guarantee
+    depended on which door a file came through - and integrations using /v1 or
+    MCP are the ones most likely to need it later."""
+
+    def test_the_public_route_hashes_too(self):
+        from app.routers import rag_v1
+
+        assert "hashlib.sha256(data).hexdigest()" in inspect.getsource(
+            rag_v1.public_upload_files
+        )
+
+    def test_both_paths_use_the_same_expression(self):
+        from app.routers import files as files_router
+        from app.routers import rag_v1
+
+        expr = "content_sha256=hashlib.sha256(data).hexdigest()"
+        assert expr in inspect.getsource(files_router.upload_files)
+        assert expr in inspect.getsource(rag_v1.public_upload_files)
+
+
+class TestTheToggleDoesNotLie:
+    """Extraction needs BOTH switches. A project toggle that saves cheerfully
+    while the fleet flag is off is a setting that silently does nothing."""
+
+    def test_the_project_response_reports_the_deployment_flag(self):
+        from app.schemas import ProjectOut
+
+        assert "version_extraction_available" in ProjectOut.model_fields
+
+    def test_it_is_stamped_from_settings(self):
+        from app.routers import projects as projects_router
+
+        assert "settings.version_extraction_enabled" in inspect.getsource(
+            projects_router
+        )
+
+
+class TestConcurrentConfirmsCannotForkALineage:
+    """Locking only the two rows named in the request let a second confirm
+    naming a DIFFERENT predecessor in the same lineage take a disjoint set of
+    locks and commit, leaving two current editions."""
+
+    def test_the_whole_lineage_is_locked(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert src.count("with_for_update") >= 2, (
+            "the lineage lock is missing; two confirms on one lineage can both "
+            "commit and leave two current editions"
+        )
+        assert "func.coalesce(File.document_id, File.id) == lineage" in src
+
+    def test_both_locks_are_id_ordered(self):
+        # Two id-ordered statements cannot deadlock against each other.
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert src.count("order_by(File.id)") >= 2
+
+
+class TestLockOrderIsFilesThenChunksEverywhere:
+    """set_file_version locks files then deletes chunks. Any path that does the
+    reverse inverts the order and the two deadlock."""
+
+    def test_the_upload_requeue_locks_files_first(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.upload_files)
+        assert "with_for_update" in src
+        assert src.index("with_for_update") < src.index("sql_delete(Chunk)")
+
+    def test_reindex_still_locks_files_first(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.reindex_project)
+        assert src.index("with_for_update") < src.index("sql_delete(Chunk)")
+
+
+class TestTheTrailRecordsEffectsNotOnlyDecisions:
+    """'uploaded', 'indexed' and 'ingest_failed' were admitted by the CHECK and
+    never written, so the log could not say what was searchable on a date."""
+
+    def test_upload_is_recorded(self):
+        from app.routers import files as files_router
+
+        assert '"uploaded"' in inspect.getsource(files_router.upload_files)
+
+    def test_indexing_is_recorded(self):
+        from app.services import ingestion
+
+        assert '"indexed"' in inspect.getsource(ingestion._ingest_file_inner)
+
+    def test_failure_is_recorded(self):
+        from app.services import ingestion
+
+        assert '"ingest_failed"' in inspect.getsource(ingestion.mark_file_failed)
+
+    def test_every_recorded_event_is_one_the_check_admits(self):
+        # A typo here would be an IntegrityError that rolls back the user's
+        # operation, so the Python set and the SQL CHECK must not drift.
+        import re as _re
+
+        from app.routers import files as files_router
+        from app.services import ingestion
+        from app.services.document_events import EVENTS
+
+        used = set()
+        for mod in (files_router, ingestion):
+            src = inspect.getsource(mod)
+            for m in _re.finditer(r'record(?:_safely)?\(\s*db,\s*[^,]+,\s*"(\w+)"', src):
+                used.add(m.group(1))
+        assert used, "the scan found no record() call sites"
+        assert used <= EVENTS, f"events not in the CHECK: {used - EVENTS}"

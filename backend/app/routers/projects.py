@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import crypto
+from ..config import settings
 from ..auth.jwt import get_current_user
 from ..db import get_db
 from ..models import File, Project, QueryLog
@@ -76,6 +77,8 @@ def _counts(
 
 def _to_out(project: Project, counts: dict) -> ProjectOut:
     out = ProjectOut.model_validate(project)
+    # Deployment-level, not per project, so it is stamped on rather than mapped.
+    out.version_extraction_available = settings.version_extraction_enabled
     out.file_count, out.chunk_count, out.query_count = counts.get(
         project.id, (0, 0, 0)
     )

@@ -122,6 +122,12 @@ class ProjectOut(BaseModel):
     # Defaulted so a rolling deploy against a database without 0034 reports
     # "off" rather than 500ing the whole settings screen.
     version_tracking: bool = False
+    # Whether the DEPLOYMENT allows extraction at all. Both switches must be on
+    # for anything to happen, so a project toggle that saves cheerfully while
+    # the fleet flag is off is a setting that silently does nothing - the user
+    # uploads revisions for months and never sees a review. Reported so the UI
+    # can say so instead of lying.
+    version_extraction_available: bool = False
     created_at: datetime
     updated_at: datetime
     file_count: int = 0

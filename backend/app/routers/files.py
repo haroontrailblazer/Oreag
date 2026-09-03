@@ -20,7 +20,12 @@ from ..config import settings
 from ..db import get_db
 from ..models import Chunk, File, Project
 from ..providers import registry
-from ..schemas import FileOut, FileVersionRequest, ReindexRequest
+from ..schemas import (
+    DocumentEventOut,
+    FileOut,
+    FileVersionRequest,
+    ReindexRequest,
+)
 from ..services import storage
 from ..services import document_events
 from ..services.content_version import bump_content_version
@@ -738,12 +743,29 @@ async def upload_files(
             size_bytes=len(data),
         )
         db.add(record)
+        document_events.record(
+            db, project.id, "uploaded",
+            file_id=record.id, actor_id=project.owner_id,
+            filename=filename, size_bytes=len(data),
+            content_sha256=record.content_sha256,
+        )
         created.append(record)
 
     # a new embedding model means every existing file (and every memory) must
     # be re-embedded - the old vectors live in an incompatible space
     if reindex_existing:
         new_ids = {record.id for record in created}
+        # Files BEFORE chunks. set_file_version locks its files rows and then
+        # deletes that file's chunks; a path that deleted chunks first and
+        # touched files afterwards inverts that order, and Postgres resolves
+        # the cycle by aborting one transaction with an unexplained 500. The
+        # same ordering fix reindex_project already carries.
+        db.scalars(
+            select(File.id)
+            .where(File.project_id == project.id)
+            .order_by(File.id)
+            .with_for_update()
+        ).all()
         db.execute(sql_delete(Chunk).where(Chunk.project_id == project.id))
         clear_memory_vectors(db, project.id)
         bump_content_version(db, project.id)
@@ -988,8 +1010,23 @@ def set_file_version(
 
     # At most one current version per lineage. There is no unique constraint on
     # `files` (there is none of any kind) and the key is a coalesce, so this is
-    # the invariant's only keeper. Scanned over the project's file list, which
-    # is capped at 1000 rows.
+    # the invariant's only keeper.
+    #
+    # LOCKED, and locked over the whole LINEAGE rather than the two rows named
+    # in the request. Locking only those two let a second confirm naming a
+    # DIFFERENT predecessor in the same lineage take a disjoint set of locks,
+    # see a stale sibling list, and commit - leaving two current editions and
+    # two rows queued for indexing. Ordered by id, like the first lock, so the
+    # two statements can never deadlock against each other.
+    db.scalars(
+        select(File.id)
+        .where(
+            File.project_id == project.id,
+            func.coalesce(File.document_id, File.id) == lineage,
+        )
+        .order_by(File.id)
+        .with_for_update()
+    ).all()
     siblings = _project_files(db, project)
     if (
         body.document_id is not None
@@ -1064,6 +1101,28 @@ def set_file_version(
     recompute_project_status(db, project)
     db.commit()
     return _project_files(db, project)
+
+
+@router.get("/events", response_model=list[DocumentEventOut])
+def list_document_events(
+    document_id: uuid.UUID | None = None,
+    limit: int = 200,
+    project: Project = Depends(get_owned_project),
+    db: Session = Depends(get_db),
+):
+    """Who did what to this project's documents, and when.
+
+    An audit trail nothing can read is not an audit trail. 0035 records every
+    version decision and blocks UPDATE on the record at the database level;
+    this is the only way to see it.
+
+    Scoped by project by `get_owned_project` and again inside `history()`,
+    because `document_id` carries no foreign key - the database will not stop a
+    caller naming a lineage from somewhere else.
+    """
+    return document_events.history(
+        db, project.id, document_id=document_id, limit=max(1, min(limit, 500))
+    )
 
 
 @router.get("/files/{file_id}/content")
