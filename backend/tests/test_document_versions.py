@@ -1423,3 +1423,91 @@ class TestShortlistTiesBreakOnSomethingMeaningful:
         a = _shortlist(c, "Companies Act 2013", limit=12)
         b = _shortlist(c, "Companies Act 2013", limit=12)
         assert [r.id for r in a] == [r.id for r in b]
+
+
+class TestTheToggleIsUsable:
+    """Direct user feedback: the control could not be switched on at all.
+
+    version_extraction_enabled was introduced as a fleet-wide KILL SWITCH and
+    defaulted off, which made it a second gate the owner cannot see, blocking
+    the per-project one they can. A project owner ticked the box, saw it save,
+    and nothing happened - the exact silently-ineffective setting the
+    per-project flag existed to avoid.
+    """
+
+    def test_the_kill_switch_defaults_on(self):
+        from app.config import settings
+
+        assert settings.version_extraction_enabled is True, (
+            "this is an incident kill switch, not an opt-in; defaulting it off "
+            "blocks the per-project toggle with a flag the owner cannot see"
+        )
+
+    def test_the_per_project_control_still_defaults_off(self):
+        # The safety property that matters: no existing project changes
+        # behaviour, and nothing can park without an explicit opt-in.
+        sql = (MIGRATIONS / "0034_document_versions.sql").read_text(encoding="utf-8")
+        assert "version_tracking boolean not null default false" in sql.lower()
+
+
+class TestVersioningDisappearsWhenNotTracking:
+    """Turning the toggle off is a statement that this project does not keep
+    editions. A guard or a menu entry that outlives the feature is an obstacle
+    to ordinary housekeeping."""
+
+    def test_the_delete_guard_is_scoped_to_tracking_projects(self):
+        from app.routers import files as files_router
+
+        assert "and project.version_tracking" in inspect.getsource(
+            files_router.delete_file
+        )
+
+    def test_it_still_guards_while_tracking_is_on(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.delete_file)
+        assert "file.in_force_to is not None and not purge" in src
+
+
+class TestEnablingMidProjectWorksWithWhatIsThere:
+    """The toggle has to start from the state the project is already in.
+
+    Existing files were always valid candidates - the candidate query filters
+    on in_force_to and status, never on document_id - but they were ingested
+    before extracted_title existed, and the gate fires only on a file's FIRST
+    index, so nothing would ever give them one. Without a title the shortlist
+    can score only their filename, the weakest case there is.
+    """
+
+    def test_switching_on_schedules_the_backfill(self):
+        from app.routers import projects as projects_router
+
+        src = inspect.getsource(projects_router.update_project)
+        assert "backfill_extracted_titles" in src
+        assert "not project.version_tracking" in src, (
+            "must fire on the false->true edge only, not on every save"
+        )
+
+    def test_the_backfill_costs_nothing_but_a_read(self):
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion.backfill_extracted_titles)
+        for expensive in ("get_embedder", "convert_to_markdown", "generate_with_usage"):
+            assert expensive not in src, f"backfill must not {expensive}"
+        assert "storage.download" in src
+
+    def test_it_only_touches_rows_that_need_it(self):
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion.backfill_extracted_titles)
+        assert "File.extracted_title.is_(None)" in src
+        assert "File.in_force_to.is_(None)" in src
+
+    def test_it_never_raises_into_the_request(self):
+        # It runs as a BackgroundTask off a PATCH; an exception escaping would
+        # surface as a 500 on a save that already succeeded.
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion.backfill_extracted_titles)
+        assert "except Exception:" in src
+        assert "db.rollback()" in src

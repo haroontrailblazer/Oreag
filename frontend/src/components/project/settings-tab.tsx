@@ -43,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api, fetcher } from "@/lib/api"
 import {
@@ -675,26 +676,30 @@ export function SettingsTab({
 
           <div className="mt-6 flex flex-col gap-4 border-t pt-5 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-1.5">
-              <label className="flex cursor-pointer items-center gap-2.5 text-sm">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2.5">
+                <Switch
+                  id="version-tracking"
                   checked={versionTracking}
                   disabled={!project.version_extraction_available}
-                  onChange={(e) => setVersionTracking(e.target.checked)}
-                  className="size-3.5 shrink-0 accent-foreground disabled:opacity-50"
+                  onCheckedChange={setVersionTracking}
                 />
-                <span className="font-medium">Track document versions</span>
-              </label>
-              <p className="max-w-3xl pl-6 text-xs leading-relaxed text-muted-foreground">
+                <Label
+                  htmlFor="version-tracking"
+                  className="cursor-pointer text-sm font-medium"
+                >
+                  Track document versions
+                </Label>
+              </div>
+              <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
                 Hold likely new editions for confirmation. Replaced versions
-                remain downloadable but stop contributing to answers.
+                remain downloadable but stop contributing to answers. Switching
+                it on also reads the titles of documents already here, so they
+                can be recognised as earlier editions.
               </p>
               {!project.version_extraction_available && (
-                <p className="max-w-3xl pl-6 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
-                  Not available on this deployment. Both this switch and a
-                  fleet-wide setting must be on, so turning it on here would
-                  save and then do nothing &mdash; it is disabled rather than
-                  silently ineffective.
+                <p className="max-w-3xl text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                  Turned off for this deployment. Ask an administrator to
+                  enable document version extraction.
                 </p>
               )}
             </div>
