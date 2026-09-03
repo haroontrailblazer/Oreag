@@ -1697,3 +1697,56 @@ class TestTheEndpointGuardsOnlyBiteRetiringRelations:
 
         src = inspect.getsource(files_router.set_file_version)
         assert "_retires_target" in src
+
+
+class TestTheRoleOverrideStaysNarrow:
+    """`principal` is the model's default label and must never override a relation.
+
+    A wider version of this override - firing whenever the role was `principal`
+    - made the corpus worse in BOTH directions (67 correct and 23 harmful,
+    against 71 and 10 without it). The reason was measurable: over 105
+    documents the model applied `principal` to a translation, a meta-analysis,
+    a journal editorial, a proxy statement and a commencement notification. It
+    carries almost no information.
+
+    `consolidated` is a positive claim that the document sets out the whole of
+    what it matched, which `amends` directly contradicts, so that ONE pairing
+    is overridden and nothing else. The narrow rule measured as a wash (72/11
+    against 71/10, inside run-to-run variance) and is kept for consistency
+    rather than for a gain: the two labels cannot both be true.
+    """
+
+    def _src(self):
+        from app.services import ingestion
+
+        return inspect.getsource(ingestion._propose_version)
+
+    def test_only_consolidated_plus_amends_is_overridden(self):
+        assert 'role == "consolidated" and kind == "amends"' in self._src()
+
+    def test_principal_never_overrides_a_relation(self):
+        src = self._src()
+        assert 'role in ("principal", "consolidated")' not in src, (
+            "this is the wider rule that measured worse in both directions"
+        )
+        assert 'role == "principal"' not in src
+
+    def test_the_override_lands_on_restates_not_supersedes(self):
+        # "Amended and restated" is literally a restatement, and restates
+        # retires - so the correct outcome is reached by the honest name.
+        src = self._src()
+        i = src.index('role == "consolidated" and kind == "amends"')
+        assert 'kind = "restates"' in src[i : i + 400]
+
+    def test_referring_roles_are_still_forced_to_safe_relations(self):
+        src = self._src()
+        for role, kind in (
+            ("amending", "amends"), ("correction", "corrects"),
+            ("translation", "translates"), ("supplement", "supplements"),
+        ):
+            assert f'"{role}": "{kind}"' in src
+
+    def test_the_prompt_states_the_contains_test_for_relations(self):
+        from app.services.ingestion import _VERSION_SYSTEM_PROMPT
+
+        assert "never amends" in _VERSION_SYSTEM_PROMPT

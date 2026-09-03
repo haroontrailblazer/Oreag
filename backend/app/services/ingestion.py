@@ -480,6 +480,11 @@ _VERSION_SYSTEM_PROMPT = (
     "Prefer succeeds over supersedes whenever the earlier document is "
     "plausibly still in use. Use supersedes only when the earlier one is "
     "genuinely no longer the thing to read.\n"
+    "The same test decides amends: does the new document CONTAIN what it "
+    "matched, or only talk about it? If it sets out the whole thing - however "
+    "its title reads - it is supersedes, restates or succeeds, never amends. "
+    "An Act or an agreement titled 'Amendment' that reproduces the entire "
+    "amended text restates it.\n"
     "\n"
     "version_label is how this edition names itself, for example 'Act 18 of "
     "2013', 'Second Amendment 2019', 'Reprint No. 4', 'v2', '4th edition'. "
@@ -786,6 +791,25 @@ def _propose_version(db: Session, file, project, markdown: str) -> VersionPropos
         )
         return standalone
     if matched is not None:
+        # ONE narrow contradiction is worth overriding: `consolidated` is a
+        # positive claim that this document sets out the whole of what it
+        # matched, and `amends` claims the opposite. An Act or agreement titled
+        # "Amendment" that reproduces the entire amended text restates it, and
+        # the model reaches for `amends` on the title alone.
+        #
+        # Narrow ON PURPOSE, and measured. A wider version of this rule -
+        # overriding whenever the role was `principal` - made things worse in
+        # both directions, because `principal` turns out to be the model's
+        # default label: it applied it to a translation, a meta-analysis, a
+        # journal editorial, a proxy statement and a commencement notification.
+        # It carries almost no information and must never override a relation.
+        # `consolidated` does, so this trusts only that.
+        if role == "consolidated" and kind == "amends":
+            logger.info(
+                "Rewriting relation for consolidated file %s: amends -> restates",
+                file.id,
+            )
+            kind = "restates"
         # A document whose ROLE says it refers to another cannot claim a
         # RETIRING relation, whatever the model picked. Before 0037 the only
         # relation was "supersedes", so the guard had to refuse the match
