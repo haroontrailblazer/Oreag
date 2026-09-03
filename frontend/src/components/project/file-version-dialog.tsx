@@ -2,6 +2,7 @@
 
 import {
   DownloadSimpleIcon as Download,
+  FileTextIcon as FileText,
   GitBranchIcon as GitBranch,
 } from "@phosphor-icons/react/dist/ssr"
 import { useMemo, useState } from "react"
@@ -168,62 +169,77 @@ export function FileVersionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {reviewing ? "Confirm version" : "Version history"}
-          </DialogTitle>
-          <DialogDescription>
-            {reviewing
-              ? `${file.filename} looks like a new version of a document already in this project. Nothing changes until you confirm.`
-              : `Editions of this document held in ${project.name}.`}
-          </DialogDescription>
+      <DialogContent className="max-h-[calc(100vh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="border-b bg-linear-to-b from-muted/50 to-background px-5 py-5 pr-12 sm:px-6 sm:py-6 sm:pr-14">
+          <div className="flex min-w-0 items-start gap-3 text-left">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background shadow-xs">
+              <GitBranch className="size-5 text-muted-foreground" />
+            </div>
+            <div className="min-w-0 space-y-1.5">
+              <DialogTitle>
+                {reviewing ? "Confirm version" : "Version history"}
+              </DialogTitle>
+              <DialogDescription className="[overflow-wrap:anywhere] leading-relaxed">
+                {reviewing
+                  ? `${file.filename} looks like a new version of a document already in this project. Nothing changes until you confirm.`
+                  : `Review every edition of this document in ${project.name}.`}
+              </DialogDescription>
+            </div>
+          </div>
         </DialogHeader>
 
-        {reviewing ? (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              {current && (
+        <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
+          {reviewing ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                {current && (
+                  <button
+                    type="button"
+                    onClick={() => setIsVersion(true)}
+                    aria-pressed={isVersion}
+                    className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-3.5 text-left text-sm transition-colors ${
+                      isVersion
+                        ? "border-foreground/30 bg-muted/60 shadow-xs"
+                        : "border-border hover:bg-muted/30"
+                    }`}
+                  >
+                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-background">
+                      <GitBranch className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block font-medium [overflow-wrap:anywhere]">
+                        A new version of {current.filename}
+                      </span>
+                      <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                        That version is kept and stays downloadable, but stops
+                        being searchable.
+                      </span>
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setIsVersion(true)}
-                  aria-pressed={isVersion}
-                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left text-sm transition-colors ${
-                    isVersion
-                      ? "border-foreground/40 bg-muted/60"
+                  onClick={() => setIsVersion(false)}
+                  aria-pressed={!isVersion}
+                  className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-3.5 text-left text-sm transition-colors ${
+                    !isVersion
+                      ? "border-foreground/30 bg-muted/60 shadow-xs"
                       : "border-border hover:bg-muted/30"
                   }`}
                 >
-                  <GitBranch className="mt-0.5 size-4 shrink-0" />
-                  <span>
-                    <span className="font-medium">
-                      A new version of {current.filename}
+                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-background">
+                    <FileText className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-medium">
+                      A separate document
                     </span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      That version is kept and stays downloadable, but stops
-                      being searchable.
+                    <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                      Index it on its own. Nothing else is affected.
                     </span>
                   </span>
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setIsVersion(false)}
-                aria-pressed={!isVersion}
-                className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left text-sm transition-colors ${
-                  !isVersion
-                    ? "border-foreground/40 bg-muted/60"
-                    : "border-border hover:bg-muted/30"
-                }`}
-              >
-                <span>
-                  <span className="font-medium">A separate document</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Index it on its own. Nothing else is affected.
-                  </span>
-                </span>
-              </button>
-            </div>
+              </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -284,124 +300,194 @@ export function FileVersionDialog({
                 </p>
               </div>
             )}
-          </div>
-        ) : (
-          <ul className="space-y-2">
-            {editions.map((edition) => (
-              <li
-                key={edition.id}
-                className={`rounded-lg border p-3 text-sm ${
-                  edition.in_force_to ? "opacity-70" : ""
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">
-                      {edition.filename}
-                    </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {[
-                        edition.version_label,
-                        `${edition.in_force_from ?? "?"} – ${
-                          edition.in_force_to ?? "current"
-                        }`,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex min-w-0 items-center justify-between gap-3 rounded-xl border bg-muted/30 px-4 py-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background shadow-xs">
+                    <FileText className="size-4 text-muted-foreground" />
                   </div>
-                  {edition.in_force_to ? (
-                    <Badge variant="secondary">Superseded</Badge>
-                  ) : (
-                    <Badge className="border-transparent bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
-                      In force
-                    </Badge>
-                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {editions.length} edition{editions.length === 1 ? "" : "s"}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      Newest edition first
+                    </p>
+                  </div>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      downloadFile(
-                        `/api/projects/${project.id}/files/${edition.id}/content`,
-                        edition.filename
-                      ).catch(() => toast.error("Could not download the file"))
-                    }
-                  >
-                    <Download className="size-3.5" />
-                    Original
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      downloadFile(
-                        `/api/projects/${project.id}/files/${edition.id}/content?format=markdown`,
-                        `${edition.filename}.md`
-                      ).catch(() => toast.error("Could not download the text"))
-                    }
-                  >
-                    Text
-                  </Button>
-                  {/* Reinstating is offered only when the lineage has NO
-                      edition in force. The endpoint clears in_force_to on its
-                      target, so this needs no predecessor and no new date -
-                      the edition keeps its own. With a current edition present
-                      it would clash, and superseding forward instead would
-                      demand a date later than that edition's, silently
-                      rewriting this one's history. Detach the wrong edition
-                      first; the copy below says so. */}
-                  {edition.in_force_to && !current && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={saving}
-                      onClick={() =>
-                        submit(
-                          edition,
-                          null,
-                          lineageOf(edition),
-                          metaOf(edition),
-                          `${edition.filename} is the current version again`
-                        )
-                      }
-                    >
-                      Make this the current version
-                    </Button>
-                  )}
-                  {editions.length > 1 && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={saving}
-                      onClick={() =>
-                        submit(
-                          edition,
-                          null,
-                          null,
-                          metaOf(edition),
-                          `${edition.filename} is now its own document`
-                        )
-                      }
-                    >
-                      Not a version of this
-                    </Button>
-                  )}
-                </div>
-              </li>
-            ))}
-            {editions.length > 1 && (
-              <li className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                {current
-                  ? `${current.filename} is the version in force, so it is the only one answering questions. To bring an earlier one back, first use "Not a version of this" on ${current.filename} — then this list will offer to make one current again.`
-                  : "No version of this document is in force, so none of it is searchable. Make one current to index it again — its text is already stored, so this costs an embedding run and nothing else."}
-              </li>
-            )}
-          </ul>
-        )}
+                {current && (
+                  <span className="hidden max-w-[50%] truncate text-xs text-muted-foreground sm:block">
+                    Current: {current.version_label || current.filename}
+                  </span>
+                )}
+              </div>
 
-        <DialogFooter>
+              <ol>
+                {editions.map((edition, index) => {
+                  const superseded = Boolean(edition.in_force_to)
+                  const legalStatus = LEGAL_STATUSES.find(
+                    (item) => item.value === edition.legal_status
+                  )?.label
+
+                  return (
+                    <li
+                      key={edition.id}
+                      className="relative grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] gap-3 pb-4 last:pb-0"
+                    >
+                      {index < editions.length - 1 && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute top-5 bottom-0 left-[0.59375rem] w-px bg-border"
+                        />
+                      )}
+                      <span
+                        aria-hidden="true"
+                        className={`relative z-10 mt-4 size-5 rounded-full border-4 border-background ring-1 ${
+                          superseded
+                            ? "bg-muted-foreground/40 ring-border"
+                            : "bg-emerald-500 ring-emerald-500/30"
+                        }`}
+                      />
+
+                      <article
+                        className={`min-w-0 overflow-hidden rounded-xl border bg-card p-4 shadow-xs ${
+                          superseded ? "text-foreground/80" : "border-emerald-500/25"
+                        }`}
+                      >
+                        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p
+                              className="font-medium leading-snug [overflow-wrap:anywhere]"
+                              title={edition.filename}
+                            >
+                              {edition.filename}
+                            </p>
+                            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                              {edition.version_label && (
+                                <span className="max-w-full rounded-md bg-muted px-2 py-1 font-medium text-foreground/80 [overflow-wrap:anywhere]">
+                                  {edition.version_label}
+                                </span>
+                              )}
+                              <span className="[overflow-wrap:anywhere]">
+                                {edition.in_force_from ?? "Start date unknown"}
+                                {" – "}
+                                {edition.in_force_to ?? "Present"}
+                              </span>
+                              {legalStatus && (
+                                <span>Legal status: {legalStatus}</span>
+                              )}
+                            </div>
+                          </div>
+                          {superseded ? (
+                            <Badge variant="secondary" className="w-fit shrink-0">
+                              Superseded
+                            </Badge>
+                          ) : (
+                            <Badge className="w-fit shrink-0 border-transparent bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                              Current
+                            </Badge>
+                          )}
+                        </div>
+
+                        <div className="mt-4 flex flex-col gap-2 border-t pt-3 sm:flex-row sm:flex-wrap">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full sm:w-auto"
+                            onClick={() =>
+                              downloadFile(
+                                `/api/projects/${project.id}/files/${edition.id}/content`,
+                                edition.filename
+                              ).catch(() =>
+                                toast.error("Could not download the file")
+                              )
+                            }
+                          >
+                            <Download className="size-3.5" />
+                            Original
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full sm:w-auto"
+                            onClick={() =>
+                              downloadFile(
+                                `/api/projects/${project.id}/files/${edition.id}/content?format=markdown`,
+                                `${edition.filename}.md`
+                              ).catch(() =>
+                                toast.error("Could not download the text")
+                              )
+                            }
+                          >
+                            Text
+                          </Button>
+                          {/* Reinstating is offered only when the lineage has NO
+                              edition in force. The endpoint clears in_force_to on its
+                              target, so this needs no predecessor and no new date -
+                              the edition keeps its own. With a current edition present
+                              it would clash, and superseding forward instead would
+                              demand a date later than that edition's, silently
+                              rewriting this one's history. Detach the wrong edition
+                              first; the copy below says so. */}
+                          {superseded && !current && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-auto min-h-8 w-full whitespace-normal sm:w-auto"
+                              disabled={saving}
+                              onClick={() =>
+                                submit(
+                                  edition,
+                                  null,
+                                  lineageOf(edition),
+                                  metaOf(edition),
+                                  `${edition.filename} is the current version again`
+                                )
+                              }
+                            >
+                              Make this the current version
+                            </Button>
+                          )}
+                          {editions.length > 1 && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-auto min-h-8 w-full whitespace-normal sm:ml-auto sm:w-auto"
+                              disabled={saving}
+                              onClick={() =>
+                                submit(
+                                  edition,
+                                  null,
+                                  null,
+                                  metaOf(edition),
+                                  `${edition.filename} is now its own document`
+                                )
+                              }
+                            >
+                              Not a version of this
+                            </Button>
+                          )}
+                        </div>
+                      </article>
+                    </li>
+                  )
+                })}
+              </ol>
+
+              {editions.length > 1 && (
+                <div className="rounded-xl border border-dashed bg-muted/20 p-3.5 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                  {current
+                    ? `${current.filename} is the version in force, so it is the only one answering questions. To bring an earlier one back, first use "Not a version of this" on ${current.filename} — then this list will offer to make one current again.`
+                    : "No version of this document is in force, so none of it is searchable. Make one current to index it again — its text is already stored, so this costs an embedding run and nothing else."}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="border-t bg-muted/20 px-4 py-4 sm:px-6">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {reviewing ? "Cancel" : "Close"}
           </Button>
