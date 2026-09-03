@@ -434,7 +434,7 @@ model {
           #byok
           technology 'Whisper · Gemini native · whisper-large-v3 · Voxtral · Saarika'
           metadata {
-            order 'OpenAI, Gemini, Groq, Mistral, Sarvam - reordered so the project provider is tried first'
+            provider-order 'OpenAI, Gemini, Groq, Mistral, Sarvam - reordered so the project provider is tried first'
           }
         }
       }
