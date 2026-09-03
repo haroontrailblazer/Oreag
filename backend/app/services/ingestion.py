@@ -17,7 +17,7 @@ from ..config import settings
 from ..db import SessionLocal
 from ..models import Chunk, File, Project
 from ..providers.base import usage_from_openai
-from ..schemas import LEGAL_STATUSES
+from ..schemas import INSTRUMENT_ROLES, LEGAL_STATUSES
 from . import embedding_usage
 from .usage import record_usage
 from ..providers import registry, resolver
@@ -27,6 +27,7 @@ from ..providers.registry import (
     prefix_normalize,
 )
 from . import storage
+from . import document_events
 from .content_version import bump_content_version
 from .conversion import (
     AUDIO_EXTENSIONS,
@@ -394,22 +395,61 @@ _VERSION_STOPWORDS = frozenset({
     "order", "part", "chapter", "schedule",
 })
 
+# Roles whose whole purpose is to refer to ANOTHER document rather than to
+# replace it. Measured over 105 realistic documents, letting these supersede
+# was the single largest source of destructive proposals: a correction notice
+# retiring the article it corrects, a translation retiring the authoritative
+# language edition, an amending Act retiring the principal instrument and
+# leaving the index holding only diff text. `unknown` and NULL are absent on
+# purpose - a corpus with no role information behaves exactly as before.
+NON_SUPERSEDING_ROLES = frozenset({"amending", "correction", "translation", "supplement"})
+
 _VERSION_SYSTEM_PROMPT = (
-    "You identify legal and regulatory documents. You are given the opening of "
-    "a new document and a numbered list of documents already held. Reply with "
-    "ONE JSON object and nothing else:\n"
+    "You identify legal, regulatory, scientific and technical documents. You "
+    "are given the opening of a new document and a numbered list of documents "
+    "already held. Reply with ONE JSON object and nothing else:\n"
     '{"match": <list number, or null>, "version_label": <string or null>, '
     '"in_force_from": <"YYYY-MM-DD" or null>, '
-    '"legal_status": "in_force"|"amended"|"repealed"|"draft"|"unknown"}\n'
-    "Set match ONLY when the new document is a later version, amendment, "
-    "reprint or consolidation of that same instrument - same jurisdiction, "
-    "same title, same subject. A different instrument that merely cites it is "
-    "NOT a match, and neither is a different chapter, schedule or part of it. "
-    "When you are not sure, use null.\n"
+    '"legal_status": "in_force"|"amended"|"repealed"|"draft"|"unknown", '
+    '"instrument_role": "principal"|"consolidated"|"amending"|"correction"'
+    '|"translation"|"supplement"|"unknown"}\n'
+    "\n"
+    "instrument_role describes what KIND of document the NEW one is. The "
+    "decisive question is whether it CONTAINS the thing it relates to, or "
+    "only talks about it:\n"
+    "  principal    - a standalone document, complete in itself\n"
+    "  consolidated - the COMPLETE text of something, restated. An instrument "
+    "as amended up to a date; a later edition, revision or reprint; a journal "
+    "version of a preprint; a final report replacing an interim one; an "
+    "amended-and-restated agreement. Use this whenever the document "
+    "reproduces the whole thing in its new form, however it is titled.\n"
+    "  amending     - contains ONLY instructions to change another document "
+    "('in section 135, for the words X substitute Y') and does NOT reproduce "
+    "the full text of what it changes\n"
+    "  correction   - a short notice ABOUT another document: erratum, "
+    "corrigendum, Department of Error, retraction notice\n"
+    "  translation  - the same edition of a document in another language\n"
+    "  supplement   - material accompanying another document: appendix, "
+    "supplementary material, annex published separately\n"
+    "If the document contains the complete text of the thing it relates to it "
+    "is principal or consolidated - NEVER amending, correction or supplement. "
+    "A title containing the word 'amendment' does not by itself make a "
+    "document amending: an Amendment Act that reproduces the whole amended "
+    "statute is consolidated. Judge from the document body, not the title.\n"
+    "\n"
+    "Set match ONLY when the new document is a later version, reprint or "
+    "consolidation of that same instrument - same jurisdiction, same title, "
+    "same subject - so that a reader should now read the new one INSTEAD of "
+    "the old one. A document that merely cites, discusses, corrects, "
+    "translates, summarises or supplements another is NOT a match, and neither "
+    "is a different chapter, schedule or part of it, nor the next document in "
+    "an annual series. When you are not sure, use null.\n"
+    "\n"
     "version_label is how this edition names itself, for example 'Act 18 of "
-    "2013', 'Second Amendment 2019', 'Reprint No. 4'. in_force_from is the "
-    "date this edition takes effect, not the date it was printed, gazetted or "
-    "assented to. Use null for anything the document does not state."
+    "2013', 'Second Amendment 2019', 'Reprint No. 4', 'v2', '4th edition'. "
+    "in_force_from is the date this edition takes effect, not the date it was "
+    "printed, gazetted or assented to. Use null for anything the document does "
+    "not state."
 )
 
 
@@ -418,6 +458,11 @@ class VersionProposal(NamedTuple):
     version_label: str | None
     in_force_from: date | None
     legal_status: str | None
+    instrument_role: str | None = None
+    # Why no match was proposed, when the model wanted one. Surfaced to the
+    # reviewer so a refusal reads as a decision rather than as the extractor
+    # having found nothing.
+    refused: str | None = None
 
 
 def _tokens(text: str) -> set[str]:
@@ -425,6 +470,20 @@ def _tokens(text: str) -> set[str]:
         w for w in _WORD_RE.findall(text.lower())
         if len(w) > 1 and w not in _VERSION_STOPWORDS
     }
+
+
+def _extracted_title(markdown: str) -> str | None:
+    """The document's own first heading, or None.
+
+    Persisted on the row so that the NEXT upload's shortlist can score against
+    it. Stage one can only see `filename + version_label` of a held document,
+    so a file stored as scan_0001.pdf or Document (7).pdf contributes almost no
+    tokens and is unreachable however obviously its text identifies it. Over a
+    realistic corpus that was the dominant reason a true predecessor never
+    reached the model at all.
+    """
+    heading = _HEADING_RE.search(markdown[:4000])
+    return heading.group(1).strip()[:300] if heading else None
 
 
 def _probe_text(filename: str, markdown: str) -> str:
@@ -460,7 +519,9 @@ def _shortlist(candidates, probe: str, limit: int = _VERSION_CANDIDATE_LIMIT):
         return sorted(candidates, key=lambda r: r.filename)[:limit]
 
     def score(row) -> float:
-        cand = _tokens(f"{row.filename} {row.version_label or ''}")
+        cand = _tokens(
+            f"{row.filename} {row.version_label or ''} {row.extracted_title or ''}"
+        )
         if not cand:
             return 0.0
         return len(probe_tokens & cand) / min(len(probe_tokens), len(cand))
@@ -484,7 +545,7 @@ def _parse_version_json(reply: str, shortlist):
         except Exception:
             parsed = None
     if not isinstance(parsed, dict):
-        return None, None, None, None
+        return None, None, None, None, None
 
     matched = None
     index = parsed.get("match")
@@ -510,7 +571,10 @@ def _parse_version_json(reply: str, shortlist):
 
     status = parsed.get("legal_status")
     status = status if status in LEGAL_STATUSES else None
-    return matched, label, from_date, status
+
+    role = parsed.get("instrument_role")
+    role = role if role in INSTRUMENT_ROLES else None
+    return matched, label, from_date, status, role
 
 
 def _propose_version(db: Session, file, project, markdown: str) -> VersionProposal:
@@ -535,7 +599,7 @@ def _propose_version(db: Session, file, project, markdown: str) -> VersionPropos
         candidates = db.execute(
             select(
                 File.id, File.document_id, File.filename,
-                File.version_label, File.in_force_from,
+                File.version_label, File.in_force_from, File.extracted_title,
             ).where(
                 File.project_id == file.project_id,
                 File.id != file.id,
@@ -549,9 +613,15 @@ def _propose_version(db: Session, file, project, markdown: str) -> VersionPropos
         if not candidates:
             return standalone  # nothing to match against - NO LLM call
         shortlist = _shortlist(candidates, _probe_text(file.filename, markdown))
+        # A PINNED model when the deployment names one, the project's answer
+        # model otherwise. The answer model is chosen for question-answering,
+        # price or latency; letting that incidental choice decide how often the
+        # product proposes destroying content is how the same corpus produced
+        # 28 false matches on one model and 0 on another. The key is still the
+        # project's own - only the judgement is standardised.
         llm = registry.get_llm(
-            project.llm_provider,
-            project.llm_model,
+            settings.version_extraction_provider or project.llm_provider,
+            settings.version_extraction_model or project.llm_model,
             resolver.resolve_llm_key(db, project),
         )
         listing = "\n".join(
@@ -569,17 +639,34 @@ def _propose_version(db: Session, file, project, markdown: str) -> VersionPropos
         # new metering code, no new usage endpoint label, and the tokens land on
         # the existing file_ingest row priced by the chat table.
         embedding_usage.record_llm(usage)
-        matched, label, from_date, status = _parse_version_json(reply, shortlist)
+        matched, label, from_date, status, role = _parse_version_json(reply, shortlist)
     except Exception:
         logger.info(
             "Version extraction unavailable for file %s", file.id, exc_info=True
         )
         return standalone
+    if matched is not None and role in NON_SUPERSEDING_ROLES:
+        # The model identified a related document AND told us this one only
+        # refers to it. Refuse the supersession and index it standalone: a
+        # correction notice that retires the article it corrects, or a
+        # translation that retires the authoritative text, is the worst
+        # outcome this feature can produce, and it is worse than a missed
+        # link. The reason is carried so the reviewer sees a decision rather
+        # than an absence.
+        row = next(r for r in shortlist if r.id == matched)
+        logger.info(
+            "Refusing supersession by %s file %s (would have replaced %s)",
+            role, file.id, row.filename,
+        )
+        return VersionProposal(
+            file.id, label, from_date, status, role,
+            refused=f"{role}:{row.filename}",
+        )
     if matched is None:
         # No lineage, but keep whatever the model did read off the document.
-        return VersionProposal(file.id, label, from_date, status)
+        return VersionProposal(file.id, label, from_date, status, role)
     row = next(r for r in shortlist if r.id == matched)
-    return VersionProposal(row.document_id or row.id, label, from_date, status)
+    return VersionProposal(row.document_id or row.id, label, from_date, status, role)
 
 
 def _ingest_file_inner(file_id: uuid.UUID) -> None:
@@ -705,6 +792,22 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
             file.version_label = proposal.version_label
             file.in_force_from = proposal.in_force_from
             file.legal_status = proposal.legal_status
+            file.instrument_role = proposal.instrument_role
+            # The title the shortlist will match future uploads against. Taken
+            # from the document's own first heading, so a predecessor named
+            # scan_0001.pdf stops being invisible to stage one - the single
+            # largest cause of a true predecessor never reaching the model.
+            file.extracted_title = _extracted_title(converted.markdown)
+            document_events.record_safely(
+                db, project.id, "version_proposed",
+                file_id=file.id, document_id=proposal.document_id,
+                filename=file.filename,
+                matched=proposal.document_id != file.id,
+                instrument_role=proposal.instrument_role,
+                version_label=proposal.version_label,
+                in_force_from=proposal.in_force_from,
+                refused=proposal.refused,
+            )
             if proposal.document_id != file.id:
                 # Suspected new edition of something already held. Stop before
                 # chunking: the predecessor keeps its chunks and stays
@@ -715,6 +818,11 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
                 # False on its next beat, ending the heartbeat thread.
                 file.status = "review"
                 file.lease_expires_at = None
+                document_events.record_safely(
+                    db, project.id, "parked_for_review",
+                    file_id=file.id, document_id=proposal.document_id,
+                    filename=file.filename,
+                )
                 # MUST run: the 'indexing' set at the top of this function is
                 # never unwound by the normal exit below, so a project whose
                 # last file parks would report 'indexing' forever.

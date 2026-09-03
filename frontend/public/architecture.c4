@@ -400,6 +400,17 @@ model {
           }
         }
         contentVersion = component 'Content Version' 'Monotonic counter bumped on every chunk or memory write. It IS the cache signature, so invalidation is a single integer compare rather than two COUNT(*) probes.'
+        documentEvents = component 'Document Events' 'Append-only record of every decision taken about a document edition: who, when, what. The audit dimension migration 0034 lacked - files has no updated_at, so a supersession recorded a legal date the user typed and nothing about when the decision was taken or by whom.' {
+          #writepath
+          technology 'document_events · UPDATE blocked by trigger · RLS select-only'
+          metadata {
+            contract 'record() joins the caller transaction and does NOT commit, so a rolled-back supersession cannot leave a record claiming it happened and a committed one cannot go missing. Identical to contentVersion, for the same reason.'
+            worker-variant 'record_safely() swallows everything, for the ingest worker only: an exception escaping _ingest_file_inner aborts every queued ingest behind it, so a missing observation event beats a stalled queue. Decisions use record(), observations use record_safely().'
+            no-foreign-keys 'file_id and document_id are plain uuids. An audit record must outlive its subject - the most important event about a file is usually its deletion, and a FK would either cascade that record away or block the delete.'
+            append-only 'UPDATE is refused by a database trigger, so a recorded fact cannot be rewritten by an application bug. DELETE stays possible on purpose: account erasure has to remain possible, and lawful erasure beats an audit trail that cannot be erased. Tamper-EVIDENCE against bugs, not against a database administrator - that needs a hash chain.'
+            ordering 'Also what finally gives a lineage a defined order. 0034 derived order from in_force_from, a nullable user-supplied legal date, so a lineage of undated pre-feature editions had no order at all.'
+          }
+        }
         maintenance = worker 'Maintenance Sweep' 'Prunes query_logs, usage_events and expired semantic-cache rows' {
           #background
           technology 'daemon thread · every 6 h · retention 90 d'
@@ -603,6 +614,9 @@ model {
   usage -[internal]-> embeddingUsage 'reads the request embedding tally when writing the row'
   judges -[internal]-> tracing 'attaches groundedness and relevance scores to the trace'
   contentVersion -[persist]-> db 'projects.content_version'
+  dashboardApi -[internal]-> documentEvents 'records every version decision, in the same transaction'
+  ingestion -[internal]-> documentEvents 'records what the extractor proposed and why'
+  documentEvents -[persist]-> db 'document_events, append-only'
   maintenance -[persist]-> db 'prunes logs, usage and expired cache rows'
   publicApi -[persist]-> db 'query_logs with the cache layer that served it'
   dashboardApi -[persist]-> db 'query_logs · projects · keys'

@@ -116,6 +116,19 @@ export interface FileRecord {
     | "draft"
     | "unknown"
     | null
+  // Provenance (migration 0035). instrument_role says what KIND of document
+  // this is; the four "refers to another document" roles cannot supersede.
+  content_sha256: string | null
+  extracted_title: string | null
+  instrument_role:
+    | "principal"
+    | "consolidated"
+    | "amending"
+    | "correction"
+    | "translation"
+    | "supplement"
+    | "unknown"
+    | null
   created_at: string
   indexed_at: string | null
 }

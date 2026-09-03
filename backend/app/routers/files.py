@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 import uuid
@@ -8,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Re
 from fastapi import File as FastAPIFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import delete as sql_delete
+from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy import text as sql_text
 from sqlalchemy import update
@@ -20,11 +22,12 @@ from ..models import Chunk, File, Project
 from ..providers import registry
 from ..schemas import FileOut, FileVersionRequest, ReindexRequest
 from ..services import storage
+from ..services import document_events
 from ..services.content_version import bump_content_version
 from ..services.usage import record_usage
 from ..providers.base import TokenUsage
 from ..services.conversion import content_type_for, is_ingestable, source_extension
-from ..services.ingestion import recompute_project_status
+from ..services.ingestion import NON_SUPERSEDING_ROLES, recompute_project_status
 from ..services.memory import reembed_project_memories
 from .deps import ensure_valid_provider_key, get_owned_project
 
@@ -426,6 +429,7 @@ def plan_supersession(target, predecessor, lineage, body) -> SupersessionPlan:
         "version_label": body.version_label,
         "in_force_from": body.in_force_from,
         "legal_status": body.legal_status,
+        "instrument_role": body.instrument_role,
         "in_force_to": None,  # this row is the current one
     }
     # Queue it: a confirmed review file, or a historical version being brought
@@ -695,6 +699,21 @@ async def upload_files(
             )
         )
 
+    # The 1000-file cap was enforced only on /v1, so the dashboard route could
+    # walk a project straight past a limit retrieval.py relies on as a fact when
+    # it sums files.chunk_count to size the ANN gate. Every retained edition
+    # consumes a slot, which makes the asymmetry matter far more after 0034.
+    held = db.scalar(
+        select(func.count()).select_from(File).where(File.project_id == project.id)
+    ) or 0
+    if held + len(validated) > settings.max_files_per_project:
+        raise HTTPException(
+            413,
+            f"This project holds {held} files and the limit is "
+            f"{settings.max_files_per_project}. Delete files, or superseded "
+            "editions you no longer need, before uploading more.",
+        )
+
     created: list[File] = []
     for filename, data, extension, content_type in validated:
         file_id = uuid.uuid4()
@@ -708,6 +727,12 @@ async def upload_files(
             storage_path=path,
             content_type=content_type,
             source_extension=extension,
+            # Taken from the bytes the user handed over, BEFORE anything is
+            # derived from them - so it identifies the upload itself, not the
+            # markdown the pipeline made of it. Answers "do I already hold this
+            # file" now, and "is the stored object still what was recorded"
+            # whenever an integrity check is wanted later.
+            content_sha256=hashlib.sha256(data).hexdigest(),
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             size_bytes=len(data),
@@ -775,15 +800,41 @@ async def upload_files(
 @router.delete("/files/{file_id}", status_code=204)
 def delete_file(
     file_id: uuid.UUID,
+    purge: bool = False,
     project: Project = Depends(get_owned_project),
     db: Session = Depends(get_db),
 ):
     file = db.get(File, file_id)
     if file is None or file.project_id != project.id:
         raise HTTPException(404, "File not found")
+    # A superseded edition is the ONLY copy of what this document used to say.
+    # The whole current-only design rests on "its blobs are kept, so re-indexing
+    # it later costs an embedding run and nothing else" - and until now nothing
+    # enforced that: one menu click deleted the row, its chunks and both storage
+    # objects, permanently, with no soft delete and no backup anywhere in this
+    # repository. Retiring history is now a deliberate act, not a slip.
+    if file.in_force_to is not None and not purge:
+        raise HTTPException(
+            409,
+            "This is a superseded version - the only remaining copy of what "
+            "this document used to say. Deleting it is permanent. Re-send with "
+            "purge=true if that is what you intend.",
+        )
     paths = [file.storage_path]
     if file.markdown_storage_path:
         paths.append(file.markdown_storage_path)
+    # Recorded before the row is removed, in the same transaction: the most
+    # important event about a file is usually its deletion, and document_events
+    # holds no foreign key precisely so this record outlives its subject.
+    document_events.record(
+        db, project.id, "deleted",
+        file_id=file.id, document_id=file.document_id,
+        actor_id=project.owner_id,
+        filename=file.filename,
+        was_superseded=file.in_force_to is not None,
+        content_sha256=file.content_sha256,
+        purge=purge,
+    )
     db.delete(file)  # cascades to its chunks
     bump_content_version(db, project.id)
     recompute_project_status(db, project)
@@ -899,6 +950,18 @@ def set_file_version(
             raise HTTPException(
                 422, "That version is already superseded - replace the one in force"
             )
+        if body.instrument_role in NON_SUPERSEDING_ROLES:
+            # Enforced here and not only in the extractor, because this endpoint
+            # accepts a hand-made request and the UI is not the security
+            # boundary. A correction, translation, amendment or supplement
+            # refers to another document; letting one RETIRE its subject is the
+            # most destructive thing this feature can do.
+            raise HTTPException(
+                422,
+                f"A document marked '{body.instrument_role}' refers to another "
+                "document rather than replacing it, so it cannot supersede one. "
+                "Record it as a separate document, or change its type.",
+            )
         if body.in_force_from is None:
             # in_force_to is the ONLY thing keeping a superseded version out of
             # the index, so it must never be null on a supersession - and it is
@@ -954,6 +1017,9 @@ def set_file_version(
         )
 
     # -- 3. WRITES. One transaction, one commit, ZERO storage calls -------
+    # Read BEFORE plan_supersession clears it, so the event below can tell a
+    # reinstatement from a plain rejection.
+    was_superseded = target.in_force_to is not None
     plan = plan_supersession(target, predecessor, lineage, body)
     for op in plan.ops:
         row = by_id[op.file_id]
@@ -971,6 +1037,29 @@ def set_file_version(
     # memory.py: pin/unpin reorders content that still exists, whereas a
     # supersession REMOVES text from the corpus, and re-serving a cached answer
     # built on repealed law is the exact harm this feature exists to prevent.
+    if predecessor is not None:
+        document_events.record(
+            db, project.id, "superseded",
+            file_id=predecessor.id, document_id=lineage,
+            actor_id=project.owner_id,
+            filename=predecessor.filename,
+            superseded_by=target.id,
+            in_force_to=body.in_force_from,
+        )
+    document_events.record(
+        db, project.id,
+        "version_confirmed" if predecessor is not None
+        else ("reinstated" if was_superseded else
+              ("detached" if body.document_id is None else "version_rejected")),
+        file_id=target.id, document_id=lineage,
+        actor_id=project.owner_id,
+        filename=target.filename,
+        version_label=body.version_label,
+        in_force_from=body.in_force_from,
+        legal_status=body.legal_status,
+        instrument_role=body.instrument_role,
+        requeued=plan.requeued,
+    )
     bump_content_version(db, project.id)
     recompute_project_status(db, project)
     db.commit()

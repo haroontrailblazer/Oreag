@@ -156,11 +156,31 @@ class FileOut(BaseModel):
     in_force_from: date | None = None
     in_force_to: date | None = None
     legal_status: str | None = None
+    # Provenance (0035). content_sha256 lets a client tell "I already have this
+    # file" without downloading it; extracted_title is what the shortlist
+    # actually matches on; instrument_role says whether this edition is even
+    # ALLOWED to supersede something.
+    content_sha256: str | None = None
+    extracted_title: str | None = None
+    instrument_role: str | None = None
     created_at: datetime
     indexed_at: datetime | None
 
 
 LEGAL_STATUSES = ("in_force", "amended", "repealed", "draft", "unknown")
+
+# What KIND of document an edition is (migration 0035). The last four refer to
+# another document rather than replacing it, and are refused as supersessions -
+# see ingestion.NON_SUPERSEDING_ROLES. Mirrors the CHECK constraint in 0035.
+INSTRUMENT_ROLES = (
+    "principal",
+    "consolidated",
+    "amending",
+    "correction",
+    "translation",
+    "supplement",
+    "unknown",
+)
 
 
 class FileVersionRequest(BaseModel):
@@ -191,6 +211,29 @@ class FileVersionRequest(BaseModel):
     # out of the index and it must never be invented.
     in_force_from: date | None
     legal_status: Literal[LEGAL_STATUSES] | None  # type: ignore[valid-type]
+    # The reviewer's judgement of what kind of document this is. Required like
+    # every other field because the endpoint writes it unconditionally, and
+    # load-bearing: a role in NON_SUPERSEDING_ROLES cannot name a predecessor.
+    instrument_role: Literal[INSTRUMENT_ROLES] | None  # type: ignore[valid-type]
+
+
+class DocumentEventOut(BaseModel):
+    """One recorded decision about a document edition (migration 0035).
+
+    Read-only and append-only at the database level; there is no create or
+    update shape because events are written by the operations they describe,
+    never by a client.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    file_id: uuid.UUID | None
+    document_id: uuid.UUID | None
+    event: str
+    actor_id: uuid.UUID | None
+    occurred_at: datetime
+    detail: dict
 
 
 class ApiKeyOut(BaseModel):

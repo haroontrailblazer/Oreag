@@ -304,9 +304,15 @@ export function FilesTab({
     deleteDone.current = false
     setDeleting(true)
     try {
-      await api(`/api/projects/${project.id}/files/${deleteTarget.id}`, {
-        method: "DELETE",
-      })
+      // purge is required for a superseded edition: the backend refuses one
+      // without it, because that row is the only remaining copy of what the
+      // document used to say. The dialog has already said so in as many words,
+      // so reaching here IS the deliberate act the flag stands for.
+      const purge = deleteTarget.in_force_to !== null ? "?purge=true" : ""
+      await api(
+        `/api/projects/${project.id}/files/${deleteTarget.id}${purge}`,
+        { method: "DELETE" }
+      )
       // Don't close yet - let the loader finish its current animation cycle.
       deleteDone.current = true
     } catch (err) {
@@ -721,8 +727,9 @@ export function FilesTab({
                     {" "}
                     {deleteTarget.in_force_to !== null ? (
                       <>
-                        This is a superseded version — later versions are not
-                        affected.
+                        This is a superseded version, and the only remaining
+                        copy of what this document used to say. Later versions
+                        are not affected, but this text cannot be recovered.
                       </>
                     ) : (
                       <>

@@ -214,6 +214,16 @@ class Settings(BaseSettings):
     # give. Turning it off never un-supersedes anything; it only stops new
     # uploads being parked.
     version_extraction_enabled: bool = False
+    # Which model judges "is this a new edition of that?". Empty means "use the
+    # project's answer model", which is what 0034 did and is measurably the
+    # wrong default: the answer model is chosen for question-answering, price
+    # or latency, and that incidental choice decides how often the product
+    # proposes DESTROYING content. Over 105 realistic documents the same corpus
+    # produced 28 false matches on one model and 0 on another, and a third
+    # failed outright on 10 of 27 calls. Pin a model that has been measured on
+    # this task; the project's own key is still what pays for it.
+    version_extraction_provider: str = ""
+    version_extraction_model: str = ""
     # How much of the converted markdown the extractor reads. The opening is
     # where an instrument names itself; sending more costs the user's own BYOK
     # tokens on every first-time upload and buys nothing.

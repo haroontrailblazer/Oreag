@@ -152,6 +152,16 @@ class File(Base):
     # authority, so a descriptive edit can never drop a document out of search.
     in_force_to: Mapped[date | None] = mapped_column(Date)
     legal_status: Mapped[str | None] = mapped_column(Text)
+    # Provenance (migration 0035). content_sha256 is taken at upload, before
+    # anything is derived, so it identifies the BYTES the user handed over -
+    # duplicate detection now, an integrity check later. extracted_title is the
+    # document's own first heading, kept so the version shortlist can recognise
+    # a predecessor whose filename says nothing (scan_0001.pdf). instrument_role
+    # is what KIND of document this is; roles that refer to another document
+    # rather than replacing it are refused as supersessions.
+    content_sha256: Mapped[str | None] = mapped_column(Text)
+    extracted_title: Mapped[str | None] = mapped_column(Text)
+    instrument_role: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -405,3 +415,41 @@ class UsageEvent(Base):
     saved_embedding_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
     cache_layer: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DocumentEvent(Base):
+    """Append-only record of every decision taken about a document edition.
+
+    The audit dimension migration 0034 lacked: `files` has no `updated_at`, so a
+    supersession recorded a legal date the user typed and nothing about when the
+    decision was taken or by whom. This table is where "who, when, what" lives,
+    and it is also what finally gives a lineage a defined ORDER - 0034 derived
+    order from `in_force_from`, a nullable user-supplied legal date, so a
+    lineage of undated pre-feature editions had no order at all.
+
+    file_id and document_id are plain uuids with NO foreign key. An audit record
+    must outlive its subject: the most important event about a file is usually
+    its deletion, and a FK would either cascade that record away or block the
+    delete outright. Same reasoning 0034 used for document_id, applied to a
+    stronger requirement.
+
+    UPDATE is refused by a database trigger (0035), so a recorded fact cannot be
+    rewritten by an application bug. DELETE stays possible on purpose - account
+    erasure has to remain possible, and lawful erasure beats an audit trail that
+    cannot be erased.
+    """
+
+    __tablename__ = "document_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    event: Mapped[str] = mapped_column(Text)
+    # NULL when a worker did it (ingest, requeue) - there is no interactive
+    # actor on that path, and inventing one would be a lie in an audit table.
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)

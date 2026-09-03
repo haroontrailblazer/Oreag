@@ -176,6 +176,7 @@ class _Body(NamedTuple):
     version_label: str | None
     in_force_from: date | None
     legal_status: str | None
+    instrument_role: str | None = "principal"
 
 
 def _plan(target, predecessor, lineage=None, body=None):
@@ -268,10 +269,13 @@ class _Row(NamedTuple):
     id: uuid.UUID
     filename: str
     version_label: str | None
+    # 0035: the shortlist scores this too, so a held file whose filename says
+    # nothing is still reachable. A stub without it models an impossible row.
+    extracted_title: str | None = None
 
 
-def _row(filename, label=None):
-    return _Row(uuid.uuid4(), filename, label)
+def _row(filename, label=None, title=None):
+    return _Row(uuid.uuid4(), filename, label, title)
 
 
 class TestVersionShortlist:
@@ -341,7 +345,7 @@ class TestVersionProposalParsing:
 
     def test_clean_json(self):
         shortlist = [_row("a.pdf"), _row("b.pdf")]
-        matched, label, from_date, status = self._parse(
+        matched, label, from_date, status, _role = self._parse(
             '{"match": 2, "version_label": "Act 18", '
             '"in_force_from": "2013-08-29", "legal_status": "in_force"}',
             shortlist,
@@ -381,7 +385,7 @@ class TestVersionProposalParsing:
 
     def test_junk_degrades_to_nothing_at_all(self):
         for reply in ("", "sorry, I cannot help with that", "[]", "null", "{"):
-            assert self._parse(reply) == (None, None, None, None), reply
+            assert self._parse(reply) == (None, None, None, None, None), reply
 
 
 class TestLineageKey:
@@ -817,3 +821,318 @@ class TestLockOrderIsFilesThenChunks:
             "reindex takes chunk locks before file locks, inverting "
             "set_file_version's order - the two can deadlock"
         )
+
+
+# --------------------------------------------------------------------------
+# Migration 0035 - provenance. Each test below corresponds to a finding from
+# the real-corpus audit, so a regression re-opens a measured defect rather than
+# an imagined one.
+# --------------------------------------------------------------------------
+
+MIGRATION_0035 = MIGRATIONS / "0035_document_provenance.sql"
+
+
+class TestMigration0035Shape:
+    def setup_method(self):
+        self.sql = MIGRATION_0035.read_text(encoding="utf-8")
+        self.lower = self.sql.lower()
+
+    def test_no_percent_sign(self):
+        assert "%" not in self.sql
+
+    def test_adds_the_three_provenance_columns(self):
+        added = set(re.findall(r"add column if not exists\s+(\w+)", self.lower))
+        for column in ("content_sha256", "extracted_title", "instrument_role"):
+            assert column in added, f"0035 does not add files.{column}"
+
+    def test_the_events_table_enables_rls(self):
+        # test_migration_rls.py enforces this repo-wide; asserted here too so
+        # the failure names the table rather than the whole migration set.
+        assert "create table if not exists public.document_events" in self.lower
+        assert "alter table public.document_events enable row level security" in self.lower
+
+    def test_events_are_readable_but_not_writable_through_rls(self):
+        # `for all` would let the subject of an audit trail rewrite it.
+        assert "for select using" in self.lower
+        assert "for all using" not in self.lower
+
+    def test_update_is_blocked_by_a_trigger(self):
+        # Append-only enforced by the database, not assumed of the callers.
+        assert "document_events_append_only" in self.lower
+        assert "before update on public.document_events" in self.lower
+        assert "raise exception" in self.lower
+
+    def test_delete_stays_possible(self):
+        # Deliberate: account erasure has to remain possible, and lawful
+        # erasure beats an audit trail that cannot be erased.
+        assert "before update or delete" not in self.lower
+        assert "on delete cascade" in self.lower
+
+    def test_event_ids_are_not_foreign_keys(self):
+        # An event about a deleted file is the event most worth keeping.
+        body = self.lower[self.lower.index("create table if not exists public.document_events"):]
+        body = body[: body.index(");")]
+        assert "file_id     uuid," in body or "file_id uuid," in body.replace("  ", " ")
+        assert "references public.files" not in body
+
+    def test_it_indexes_what_it_added(self):
+        # 0034 added no index for the lineage lookups it introduced.
+        for idx in ("document_events_project_time_idx", "files_document_idx"):
+            assert idx in self.lower, f"0035 does not create {idx}"
+
+
+class TestNonSupersedingRoles:
+    """The largest measured source of destructive proposals.
+
+    Over 105 realistic documents, the worst outcomes were all one shape: a
+    document that REFERS to another being proposed as its replacement. A Lancet
+    Department of Error retiring the trial it corrects; a French WHO guideline
+    retiring the English text that declares itself authoritative; a Japanese
+    translation retiring the English original; a supplementary appendix
+    retiring the paper it belongs to.
+    """
+
+    def test_the_four_referring_roles_cannot_supersede(self):
+        from app.services.ingestion import NON_SUPERSEDING_ROLES
+
+        assert NON_SUPERSEDING_ROLES == {
+            "amending", "correction", "translation", "supplement",
+        }
+
+    def test_unknown_and_null_are_deliberately_allowed(self):
+        # A corpus with no role information must behave exactly as it did
+        # before 0035, or this migration silently disables the feature.
+        from app.services.ingestion import NON_SUPERSEDING_ROLES
+
+        assert "unknown" not in NON_SUPERSEDING_ROLES
+        assert None not in NON_SUPERSEDING_ROLES
+        assert "principal" not in NON_SUPERSEDING_ROLES
+        assert "consolidated" not in NON_SUPERSEDING_ROLES
+
+    def test_the_extractor_refuses_rather_than_matching(self):
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion._propose_version)
+        assert "NON_SUPERSEDING_ROLES" in src, (
+            "a correction or translation can still retire its subject"
+        )
+        assert "refused=" in src, "a refusal must be reported, not silent"
+
+    def test_the_endpoint_enforces_it_too(self):
+        # The UI is not the security boundary: this endpoint accepts a
+        # hand-made request.
+        from app.routers import files as files_router
+
+        assert "NON_SUPERSEDING_ROLES" in inspect.getsource(
+            files_router.set_file_version
+        )
+
+    def test_the_prompt_defines_every_role_it_asks_for(self):
+        from app.services.ingestion import _VERSION_SYSTEM_PROMPT
+        from app.schemas import INSTRUMENT_ROLES
+
+        for role in INSTRUMENT_ROLES:
+            assert role in _VERSION_SYSTEM_PROMPT, f"prompt never mentions {role}"
+
+    def test_the_python_set_matches_the_check_constraint(self):
+        from app.schemas import INSTRUMENT_ROLES
+
+        sql = MIGRATION_0035.read_text(encoding="utf-8")
+        for role in INSTRUMENT_ROLES:
+            assert f"'{role}'" in sql, f"CHECK does not admit {role!r}"
+
+
+class TestExtractedTitleReachesTheShortlist:
+    """The dominant reason a true predecessor never reached the model.
+
+    Stage one could only see `filename + version_label` of a held document, so
+    a file stored as scan_0001.pdf or Document (7).pdf contributed almost no
+    tokens and was unreachable however clearly its text identified it. Measured
+    shortlist recall in a realistically-sized project was 48/68.
+    """
+
+    def test_a_held_file_with_a_useless_filename_is_still_reachable(self):
+        from app.services.ingestion import _shortlist
+
+        target = _row("scan_0001.pdf", None, "The Companies Act, 2013")
+        noise = [_row(f"Unrelated Statute {i}.pdf") for i in range(20)]
+        top = _shortlist(noise + [target], "Companies Act 2013 amendment", limit=3)
+        assert target in top, (
+            "a predecessor whose identity is only in its body is invisible to "
+            "the shortlist and can never be matched"
+        )
+
+    def test_the_candidate_query_selects_it(self):
+        from app.services import ingestion
+
+        assert "File.extracted_title" in inspect.getsource(ingestion._propose_version)
+
+    def test_it_is_captured_at_ingest(self):
+        from app.services import ingestion
+
+        assert "file.extracted_title = _extracted_title" in inspect.getsource(
+            ingestion._ingest_file_inner
+        )
+
+    def test_the_title_helper_handles_a_document_with_no_heading(self):
+        from app.services.ingestion import _extracted_title
+
+        assert _extracted_title("# The Companies Act, 2013\n\nbody") == "The Companies Act, 2013"
+        assert _extracted_title("PRELIMINARY, no heading at all") is None
+
+
+class TestSupersededHistoryIsNotOneClickFromGone:
+    """The only permanent-data-loss path the audit found.
+
+    The whole current-only design rests on 'a superseded edition keeps its
+    blobs, so re-indexing it later costs an embedding run and nothing else'.
+    Nothing enforced it: delete_file removed the row, its chunks and BOTH
+    storage objects with no in_force_to check, permanently, with no soft delete
+    and no backup anywhere in the repository.
+    """
+
+    def test_delete_refuses_a_superseded_edition_without_purge(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.delete_file)
+        assert "in_force_to is not None and not purge" in src
+        assert "409" in src
+
+    def test_purge_is_an_explicit_opt_in(self):
+        import inspect as _i
+
+        from app.routers import files as files_router
+
+        assert "purge" in _i.signature(files_router.delete_file).parameters
+
+    def test_the_deletion_is_recorded_before_the_row_goes(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.delete_file)
+        assert src.index('"deleted"') < src.index("db.delete(file)"), (
+            "the event must be written while the file row still exists"
+        )
+
+
+class TestEveryVersionDecisionIsRecorded:
+    """Migration 0034 recorded no transaction time and no actor.
+
+    files has no updated_at, so a supersession wrote in_force_to - a LEGAL date
+    the user typed - and nothing about when the decision was taken or by whom.
+    'This edition governed until 22 Jan 2021' was recordable; 'on 3 Sep 2026
+    this user recorded that' was not.
+    """
+
+    def test_the_confirm_endpoint_records_who_and_what(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert "document_events.record(" in src
+        assert "actor_id=project.owner_id" in src
+
+    def test_the_event_lands_in_the_same_transaction_as_the_decision(self):
+        # One commit, and the record inside it: a rolled-back supersession
+        # cannot leave an event claiming it happened, and a committed one
+        # cannot go missing.
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.set_file_version)
+        assert src.count("db.commit()") == 1
+        assert src.index("document_events.record(") < src.index("db.commit()")
+
+    def test_record_does_not_commit(self):
+        from app.services import document_events
+
+        src = inspect.getsource(document_events.record)
+        assert "commit" not in src, (
+            "record() must join the caller's transaction, like "
+            "bump_content_version - see the module docstring"
+        )
+
+    def test_worker_paths_use_the_never_raising_variant(self):
+        # An exception escaping into _ingest_file_inner aborts every queued
+        # ingest behind it, so observation events there must not be able to.
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion._ingest_file_inner)
+        assert "record_safely" in src
+        assert "document_events.record(" not in src
+
+    def test_the_python_event_set_matches_the_check_constraint(self):
+        from app.services.document_events import EVENTS
+
+        sql = MIGRATION_0035.read_text(encoding="utf-8")
+        for event in EVENTS:
+            assert f"'{event}'" in sql, f"CHECK does not admit event {event!r}"
+
+    def test_an_unknown_event_is_a_python_error_not_an_integrity_error(self):
+        import pytest
+
+        from app.services.document_events import record
+
+        with pytest.raises(ValueError):
+            record(None, uuid.uuid4(), "not_a_real_event")
+
+    def test_history_is_always_scoped_by_project(self):
+        # document_id is not a foreign key, so the database will not stop a
+        # caller passing one from another tenant.
+        from app.services import document_events
+
+        src = inspect.getsource(document_events.history)
+        assert "DocumentEvent.project_id == project_id" in src
+
+
+class TestContentHash:
+    def test_it_is_taken_at_upload_from_the_raw_bytes(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.upload_files)
+        assert "hashlib.sha256(data).hexdigest()" in src
+
+    def test_it_is_exposed_on_the_file_contract(self):
+        from app.schemas import FileOut
+
+        assert "content_sha256" in FileOut.model_fields
+
+
+class TestFileCapIsEnforcedOnBothRoutes:
+    """retrieval.py relies on the 1000-file cap as a fact when it sums
+    files.chunk_count to size the ANN gate, but only /v1 enforced it. Every
+    retained edition consumes a slot, so 0034 made the gap matter more."""
+
+    def test_the_dashboard_upload_route_counts_files(self):
+        from app.routers import files as files_router
+
+        src = inspect.getsource(files_router.upload_files)
+        assert "max_files_per_project" in src
+        assert "413" in src
+
+
+class TestExtractionModelCanBePinned:
+    """Correctness must not depend on a model chosen for something else.
+
+    Over the same 105 documents, one model produced 28 false matches and
+    another produced 0; a third failed outright on 10 of 27 calls. The
+    extraction borrowed the project's ANSWER model - picked for
+    question-answering, price or latency.
+    """
+
+    def test_the_deployment_can_pin_a_model(self):
+        from app.config import settings
+
+        assert hasattr(settings, "version_extraction_provider")
+        assert hasattr(settings, "version_extraction_model")
+
+    def test_it_defaults_to_the_projects_model(self):
+        # Empty means "behave as 0034 did", so pinning is opt-in.
+        from app.config import settings
+
+        assert settings.version_extraction_provider == ""
+        assert settings.version_extraction_model == ""
+
+    def test_the_override_is_actually_applied(self):
+        from app.services import ingestion
+
+        src = inspect.getsource(ingestion._propose_version)
+        assert "settings.version_extraction_provider or project.llm_provider" in src
+        assert "settings.version_extraction_model or project.llm_model" in src
