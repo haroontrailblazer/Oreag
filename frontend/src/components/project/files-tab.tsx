@@ -249,12 +249,24 @@ export function FilesTab({
   )
 
   const reviewCount = (files ?? []).filter((f) => f.status === "review").length
-  // Does this project hold any lineage at all? A project that tracked versions
-  // and then turned the toggle off still has editions, and stranding them
-  // behind a hidden menu would be worse than showing the entry.
-  const hasEditions = (files ?? []).some(
-    (f) => f.document_id !== null || f.in_force_to !== null
-  )
+  // How many files belong to each document, so a single-version file can be
+  // told from one with a real history. The lineage key is `document_id ?? id`,
+  // so a file that has never been versioned is a lineage of exactly one.
+  const lineageSizes = new Map<string, number>()
+  for (const f of files ?? []) {
+    const key = lineageOf(f)
+    lineageSizes.set(key, (lineageSizes.get(key) ?? 0) + 1)
+  }
+  // "Version history" belongs on a file that HAS one. Offering it on a file
+  // uploaded once and never replaced opens a dialog listing that single file,
+  // which answers a question nobody asked and implies editions exist where
+  // none do. The old test was project-wide - one versioned file put the entry
+  // on every row - so it is per file now.
+  //
+  // A file awaiting a decision keeps it: the dialog is where that decision is
+  // made, and its lineage is deliberately still one until the decision lands.
+  const hasVersionHistory = (f: FileRecord) =>
+    f.status === "review" || (lineageSizes.get(lineageOf(f)) ?? 1) > 1
   // Other editions of the document the delete dialog is aimed at. The lineage
   // key is `document_id ?? id`, so a file with no lineage counts zero.
   const deleteSiblings = deleteTarget
@@ -695,13 +707,13 @@ export function FilesTab({
                               : "Re-index file"}
                           </DropdownMenuItem>
                         )}
-                        {/* Only where versioning is in use. With the toggle
-                            off there are no editions to show, and the entry is
-                            a dead end that implies a feature the project does
-                            not have. A project that HAS editions from an
-                            earlier run keeps the entry, so history stays
-                            reachable rather than being stranded. */}
-                        {(project.version_tracking || hasEditions) && (
+                        {/* Only on a file that actually has more than one
+                            edition - see hasVersionHistory. Independent of the
+                            project toggle in BOTH directions: turning tracking
+                            on does not invent history for files that have
+                            none, and turning it off does not strand the
+                            history of files that do. */}
+                        {hasVersionHistory(file) && (
                           <DropdownMenuItem onSelect={() => setVersionTarget(file)}>
                             <GitBranch className="size-4" />
                             Version history
