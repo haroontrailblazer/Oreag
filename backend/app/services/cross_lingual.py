@@ -172,6 +172,8 @@ def reset_caches() -> None:
         _translations.clear()
     with _language_lock:
         _language_cache.clear()
+    with _question_lock:
+        _question_languages.clear()
 
 
 def corpus_profile(db: Session, project: Project) -> tuple[frozenset[str], str]:
@@ -237,6 +239,23 @@ _IDENTIFY_SYSTEM = (
     "language name."
 )
 
+def _language_name(raw: str | None) -> str:
+    """A model's reply, accepted only if it is actually a language NAME.
+
+    Taking the first word of whatever came back is NOT enough, and a test
+    caught it: asked to name a language the model can answer "I cannot tell",
+    whose first word is "I" - which would then be interpolated as "write the
+    entire answer in I". A language name is ONE word, so anything with a space
+    in it is a sentence, not an answer.
+    """
+    name = (raw or "").strip().strip(".").strip()
+    if not name or len(name) > 30:
+        return ""
+    if any(ch.isspace() for ch in name):
+        return ""
+    return name if name.isalpha() else ""
+
+
 def corpus_language(db: Session, project: Project, llm, on_usage=None) -> str | None:
     """What language this project's documents are written in, or None.
 
@@ -266,11 +285,9 @@ def corpus_language(db: Session, project: Project, llm, on_usage=None) -> str | 
         logger.warning("Corpus language identification failed", exc_info=True)
         return None
 
-    name = (name or "").strip().strip(".").split()[0] if (name or "").strip() else ""
-    # A language name, not a sentence, not a refusal, not a code language.
-    if not name or not name.isalpha() or len(name) > 30:
-        logger.info("Corpus language identification returned %r; skipping", name)
-        name = ""
+    name = _language_name(name)
+    if not name:
+        logger.info("Corpus language identification was not a language name")
     with _language_lock:
         _language_cache[key] = name
     return name or None
@@ -439,3 +456,97 @@ def is_active(db: Session, project: Project, question: str) -> bool:
     a key, not behaviour.
     """
     return should_consider(db, project, question or "")
+
+
+# ── the language the ANSWER is written in ───────────────────────────────────
+#
+# A separate problem from everything above, discovered by measurement rather
+# than reasoning. `system_prompt_for` tells the model to "write the answer in
+# the same language the question was asked in, even when the source material
+# is in another language", and that instruction is NOT reliably followed: with
+# an English question and Hindi sources ranked first, gpt-4o-mini answered in
+# HINDI three times out of three.
+#
+# Two attempts to fix it by rewording made it WORSE, and both failed the same
+# way - naming the foreign script or shouting the rule made the model latch
+# onto the sources harder:
+#
+#     current wording                       12/18
+#     emphatic "SAME LANGUAGE AS QUESTION"   4/18
+#     naming the question's writing system  10/18
+#     naming the question's LANGUAGE        18/18
+#
+# The mechanism that works is the one the answer_language setting already
+# uses: name the target language positively and never mention the sources.
+# So this names it - which means finding out what it is.
+_question_languages: dict[str, str] = {}
+_question_lock = threading.Lock()
+
+
+def _sources_use_another_script(question: str, sources) -> bool:
+    """Do the retrieved sources contain a writing system the question lacks?
+
+    This is the exact condition that failed. The reverse - a Devanagari
+    question with Latin-only sources - was measured and answers correctly
+    without help, so it deliberately does not trigger a model call.
+    """
+    asked = scripts(question or "")
+    found: set[str] = set()
+    for source in sources or ():
+        if isinstance(source, dict):
+            found |= scripts(source.get("content") or "")
+    return bool(found - asked)
+
+
+def answer_language_for(
+    project, question: str, sources, llm=None, on_usage=None, fallback=None
+) -> str | None:
+    """Name the question's language, when leaving it implicit would not hold.
+
+    Returns None - meaning "say nothing, keep the existing instruction" - for
+    every ordinary query. It only names a language when the retrieved sources
+    are written in a script the question is not, which is the case measured to
+    fail, and never when the project has already pinned answer_language.
+
+    One model call per distinct question, memoised across requests, and only
+    on the queries that need it.
+    """
+    if not settings.cross_lingual_retrieval_enabled or not (question or "").strip():
+        return None
+    if not _sources_use_another_script(question, sources):
+        # The sources are in the question's own writing system, and plain
+        # mirroring was measured to hold there (3/3 both ways). Naming a
+        # language would cost a call and buy nothing.
+        return None
+
+    key = question.strip()
+    with _question_lock:
+        hit = _question_languages.get(key)
+    if hit is not None:
+        return hit or fallback
+
+    try:
+        from .tracing import observed_generate
+
+        if llm is None:
+            # No client to ask. `fallback` is the project's house language,
+            # which is a better answer than guessing and a better answer than
+            # leaving the unreliable instruction in place.
+            return fallback
+        if not hasattr(llm, "generate_with_usage") and callable(llm):
+            llm = llm()
+        name, usage = observed_generate(
+            llm, _IDENTIFY_SYSTEM, question, name="identify-question-language"
+        )
+        if on_usage is not None:
+            on_usage(usage)
+    except Exception:
+        logger.warning("Question-language identification failed", exc_info=True)
+        return fallback
+
+    name = _language_name(name)
+    with _question_lock:
+        if len(_question_languages) >= _TRANSLATION_CACHE_MAX:
+            _question_languages.clear()
+        _question_languages[key] = name
+    return name or fallback

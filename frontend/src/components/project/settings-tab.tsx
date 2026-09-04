@@ -165,6 +165,9 @@ export function SettingsTab({
   const [documentLanguage, setDocumentLanguage] = useState(
     project.document_language ?? ""
   )
+  const [languageStrict, setLanguageStrict] = useState(
+    project.answer_language_strict ?? true
+  )
   const [savingPolicy, setSavingPolicy] = useState(false)
   const [versionTracking, setVersionTracking] = useState(project.version_tracking)
 
@@ -232,6 +235,11 @@ export function SettingsTab({
     )
     setDocumentLanguage((v) =>
       v === (synced.document_language ?? "") ? project.document_language ?? "" : v
+    )
+    setLanguageStrict((v) =>
+      v === (synced.answer_language_strict ?? true)
+        ? project.answer_language_strict ?? true
+        : v
     )
     setVersionTracking((v) =>
       v === synced.version_tracking ? project.version_tracking : v
@@ -374,6 +382,7 @@ export function SettingsTab({
           answer_language: answerLanguage.trim(),
           answer_disclaimer: answerDisclaimer.trim(),
           document_language: documentLanguage.trim(),
+          answer_language_strict: languageStrict,
           version_tracking: versionTracking,
         }),
       })
@@ -687,9 +696,9 @@ export function SettingsTab({
                     "It is appended to every answer word for word, so a regulator-facing notice cannot be softened by the model. It also lands on cached answers, and changing it invalidates them.",
                 },
                 {
-                  title: "Version tracking only holds suspected new editions",
+                  title: "Version tracking is for editions, not filenames",
                   detail:
-                    "Nothing is deleted. A replaced version stays downloadable and stops contributing to answers, so the project answers from what is in force today rather than from every edition at once.",
+                    "Nothing is deleted. Turn it on where a later document replaces an earlier one that is still here - a contract and its amended-and-restated version, a policy reissued with a new effective date, a standard's next edition, a statute and its consolidated reprint, an article and its erratum. Elsewhere, files are held for a confirmation that changes nothing.",
                 },
               ]}
             />
@@ -782,10 +791,27 @@ export function SettingsTab({
                       ))}
                     </SelectContent>
                   </Select>
+                  {answerLanguage ? (
+                    <div className="flex items-start gap-2.5 pt-0.5">
+                      <Switch
+                        id="settings-lang-strict"
+                        checked={languageStrict}
+                        onCheckedChange={setLanguageStrict}
+                      />
+                      <Label
+                        htmlFor="settings-lang-strict"
+                        className="cursor-pointer text-xs font-normal leading-relaxed text-muted-foreground"
+                      >
+                        Always use it
+                      </Label>
+                    </div>
+                  ) : null}
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    {answerLanguage
-                      ? `Every answer is written in ${answerLanguage}, whatever language the question or the sources used.`
-                      : "Each answer mirrors its own question, even when the documents are in another language."}
+                    {!answerLanguage
+                      ? "Each answer mirrors its own question, even when the documents are in another language."
+                      : languageStrict
+                        ? `Every answer is written in ${answerLanguage}, whatever language the question was asked in.`
+                        : `${answerLanguage} unless the question is asked in another language — then the answer follows the question.`}
                   </p>
                 </div>
                 <div className="min-w-0 space-y-2">
@@ -857,10 +883,12 @@ export function SettingsTab({
                 </Label>
               </div>
               <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
-                Hold likely new editions for confirmation. Replaced versions
-                remain downloadable but stop contributing to answers. Switching
-                it on also reads the titles of documents already here, so they
-                can be recognised as earlier editions.
+                Hold likely new editions for confirmation. It fits documents
+                that come in editions, not ordinary working files, where a draft
+                named report_v2 is held out of answers until someone confirms
+                it. Replaced versions remain downloadable but stop contributing
+                to answers. Switching it on also reads the titles of documents
+                already here, so they can be recognised as earlier editions.
               </p>
               {!project.version_extraction_available && (
                 <p className="max-w-3xl text-xs leading-relaxed text-amber-700 dark:text-amber-400">

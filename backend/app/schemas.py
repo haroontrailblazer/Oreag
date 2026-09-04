@@ -49,6 +49,9 @@ class ProjectUpdate(BaseModel):
     # heard of degrades to today's behaviour instead of 422-ing a caller on a
     # newer client.
     document_language: str | None = Field(default=None, max_length=60)
+    # False turns answer_language from an override into a default the
+    # question's own language beats (0040).
+    answer_language_strict: bool | None = None
     # Document versions (0034). Toggling this changes nothing already indexed,
     # so - like the four answer-policy fields above - it must NOT bump
     # content_version. Turning it OFF only stops new uploads being held for
@@ -107,6 +110,16 @@ class ProjectOut(BaseModel):
     answer_language: str | None = None
     answer_disclaimer: str | None = None
     document_language: str | None = None
+    answer_language_strict: bool = True
+
+    @field_validator("answer_language_strict", mode="before")
+    @classmethod
+    def _default_answer_language_strict(cls, v):
+        # The same rolling-deploy guard as the three below. TRUE is the right
+        # default in every window: it is what answer_language has meant since
+        # 0032, so a database without 0040 keeps reporting the behaviour it
+        # actually has rather than one it does not.
+        return True if v is None else v
 
     @field_validator("min_similarity", mode="before")
     @classmethod

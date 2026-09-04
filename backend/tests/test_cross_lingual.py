@@ -466,3 +466,218 @@ def test_should_consider_costs_no_model_call(db_session, project, english_corpus
 def test_looks_weak_reads_the_best_row_not_the_first(project):
     assert cross_lingual.looks_weak(rows_at(0.01, 0.02, 0.99)) is False
     assert cross_lingual.looks_weak(rows_at(0.10, 0.09)) is True
+
+
+# ── the language the ANSWER comes back in ───────────────────────────────────
+
+
+def sources(*texts):
+    return [
+        {"filename": "h", "page_number": None, "chunk_index": i,
+         "content": t, "similarity": 0.9 - i * 0.1}
+        for i, t in enumerate(texts)
+    ]
+
+
+HINDI_SOURCE = "वार्षिक विवरणी देर से दाखिल करने पर प्रतिदिन 100 रुपये का जुर्माना लगता है।"
+ENGLISH_SOURCE = "The registration fee for a new company is 500 rupees."
+ENGLISH_Q = "What is the penalty for filing the annual return late?"
+
+
+def test_ordinary_english_on_english_names_nothing(db_session, project):
+    """The common case must cost no model call and change no prompt."""
+    llm = _StubLLM()
+    assert cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(ENGLISH_SOURCE), llm=llm
+    ) is None
+    assert llm.identify_calls == 0
+
+
+def test_foreign_sources_get_the_question_language_named(db_session, project):
+    """MEASURED, and the reason this exists.
+
+    An English question with a Hindi source ranked first came back in HINDI
+    three times out of three. Naming the language scored 18/18 where the
+    inferred rule scored 12/18; rewording the rule made it worse, twice.
+    """
+    llm = _StubLLM(language="English")
+    assert cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(HINDI_SOURCE, ENGLISH_SOURCE), llm=llm
+    ) == "English"
+    assert llm.identify_calls == 1
+
+
+def test_a_strict_pinned_language_never_reaches_the_resolver():
+    """"Always answer in X" is absolute, so it must not cost a call.
+
+    The decision lives in generation.py rather than in the resolver, because
+    the resolver is also what a NON-strict project uses to beat its own house
+    language - it cannot short-circuit on answer_language being set.
+    """
+    import pathlib
+
+    source = (
+        pathlib.Path(__file__).parent.parent / "app/services/generation.py"
+    ).read_text(encoding="utf-8")
+    assert source.count(
+        'pinned_always = bool(language) and getattr(project, "answer_language_strict", True)'
+    ) == 2
+    assert source.count("    if not pinned_always:") == 2
+
+
+def test_a_house_language_is_beaten_by_the_question(db_session, project):
+    """0040, and the whole point of it: answer_language as a DEFAULT.
+
+    The project answers in English by default, someone asks in Hindi, and the
+    answer must come back in Hindi.
+    """
+    project.answer_language = "English"
+    project.answer_language_strict = False
+    llm = _StubLLM(language="Hindi")
+    assert cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(HINDI_SOURCE), llm=llm, fallback="English"
+    ) == "Hindi"
+
+
+def test_the_house_language_is_the_fallback_when_identification_fails(
+    db_session, project
+):
+    """Falling back to the project's own language beats leaving an
+    instruction in place that was measured not to hold."""
+    class Broken:
+        model = "stub/broken"
+
+        def generate_with_usage(self, *_):
+            raise RuntimeError("provider down")
+
+    assert cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(HINDI_SOURCE), llm=Broken(), fallback="English"
+    ) == "English"
+    # ...and a project with no house language keeps the shipped instruction.
+    assert cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(HINDI_SOURCE), llm=Broken()
+    ) is None
+
+
+def test_a_question_in_the_sources_own_script_is_left_alone(db_session, project):
+    """A Devanagari question with Latin-only sources was measured to answer
+    correctly without help, so it must not pay for a model call."""
+    llm = _StubLLM()
+    assert cross_lingual.answer_language_for(
+        project, "वार्षिक विवरणी पर क्या जुर्माना है?", sources(ENGLISH_SOURCE), llm=llm
+    ) is None
+    assert llm.identify_calls == 0
+
+
+def test_the_same_question_is_identified_once(db_session, project):
+    llm = _StubLLM()
+    for _ in range(4):
+        cross_lingual.answer_language_for(
+            project, ENGLISH_Q, sources(HINDI_SOURCE), llm=llm
+        )
+    assert llm.identify_calls == 1
+
+
+def test_it_degrades_to_the_existing_instruction(db_session, project):
+    """Every failure path returns None, which leaves the shipped prompt in
+    place - the worst case is the behaviour that existed before."""
+
+    class Broken:
+        model = "stub/broken"
+
+        def generate_with_usage(self, *_):
+            raise RuntimeError("provider down")
+
+    assert cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(HINDI_SOURCE), llm=Broken()
+    ) is None
+    # No client to ask is not a licence to guess.
+    assert cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(HINDI_SOURCE), llm=None
+    ) is None
+    assert cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(HINDI_SOURCE), llm=_StubLLM(language="I cannot tell")
+    ) is None
+
+
+def test_the_identification_is_metered(db_session, project):
+    seen = []
+    cross_lingual.answer_language_for(
+        project, ENGLISH_Q, sources(HINDI_SOURCE), llm=_StubLLM(), on_usage=seen.append
+    )
+    assert len(seen) == 1
+
+
+def test_generation_passes_a_callable_not_the_accumulator():
+    """A REAL bug this file exists to prevent recurring.
+
+    generation.py holds a usage accumulator OBJECT with .add(); retrieval.py
+    passes a bound method. Handing the object straight through raised
+    TypeError inside a resolver that fails open, so the feature silently did
+    nothing and the measurement looked like the fix had not worked.
+    """
+    import pathlib
+
+    source = (
+        pathlib.Path(__file__).parent.parent / "app/services/generation.py"
+    ).read_text(encoding="utf-8")
+    assert source.count("on_usage=usage_acc.add if usage_acc is not None else None") == 2
+    assert "on_usage=usage_acc\n" not in source
+
+
+@pytest.mark.parametrize(
+    "reply,expected",
+    [
+        ("English", "English"),
+        ("  Hindi.  ", "Hindi"),
+        # The one a test caught: first-word extraction turned a refusal into
+        # the language "I", which would reach the prompt as "write the entire
+        # answer in I".
+        ("I cannot tell", ""),
+        ("I'm sorry, I cannot determine that.", ""),
+        ("The language is Russian", ""),
+        ("", ""),
+        ("   ", ""),
+        ("en-GB", ""),
+        ("Python", "Python"),   # wrong, but a NAME - the prompt asks for a human language
+        ("A" * 40, ""),
+    ],
+)
+def test_only_a_single_word_name_is_accepted(reply, expected):
+    assert cross_lingual._language_name(reply) == expected
+
+
+class TestPinnedLanguageIsActuallyEnforced:
+    """"Always this language" was NOT always, and that was measured.
+
+    The system prompt said "write the entire answer in English, regardless of
+    the language of the question or of the source material" - wording that
+    cannot be made more explicit - and gpt-4o-mini answered a Hindi question
+    in Hindi 3 times out of 3. Repeating one sentence at the END of the user
+    prompt took it from 3/9 to 9/9. Position, not wording.
+    """
+
+    def test_the_instruction_is_repeated_last(self):
+        from app.services.generation import enforce_language
+
+        out = enforce_language("SOURCES\n\nQuestion: x", "English")
+        assert out.endswith("Write the entire answer in English.")
+        assert out.startswith("SOURCES")
+
+    def test_no_pinned_language_leaves_the_prompt_byte_identical(self):
+        """Everything already cached must stay cached."""
+        from app.services.generation import enforce_language
+
+        assert enforce_language("unchanged", None) == "unchanged"
+        assert enforce_language("unchanged", "") == "unchanged"
+
+    def test_only_the_always_mode_appends_it(self):
+        """A project using its language as a DEFAULT must not have it forced,
+        or the question could never override it - which is the whole feature."""
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).parent.parent / "app/services/generation.py"
+        ).read_text(encoding="utf-8")
+        assert source.count("if pinned_always:\n") == 2
+        assert source.count("user_prompt = enforce_language(user_prompt, language)") == 2

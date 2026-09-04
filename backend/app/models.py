@@ -71,6 +71,13 @@ class Project(Base):
     # an ordinary configuration, and conflating the two would force one to be
     # wrong. NULL = English, which is what every project had before 0039.
     document_language: Mapped[str | None] = mapped_column(Text)
+    # How answer_language is applied (0040). True - the shipped meaning and
+    # the default - writes every answer in it. False makes it a house DEFAULT
+    # that the question's own language overrides, which is what a project with
+    # readers in several languages actually wants.
+    answer_language_strict: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
+    )
     # Optional per-project BYOK key overrides (Fernet ciphertext + last4 for
     # display). When null, key resolution falls back to the owner's account key.
     embedding_key_encrypted: Mapped[str | None] = mapped_column(Text)

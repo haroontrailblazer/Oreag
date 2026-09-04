@@ -7,6 +7,7 @@ from ..config import settings
 from ..models import Project
 from ..providers import resolver
 from ..providers.registry import get_llm
+from . import cross_lingual
 from .tracing import observed_generate, observed_stream
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,30 @@ def _restore_loaded_state(snapshot: list[tuple[object, dict]]) -> None:
             continue
 
 
+def enforce_language(user_prompt: str, language: str | None) -> str:
+    """Repeat a PINNED answer language at the very end of the user prompt.
+
+    MEASURED, and the reason this is not merely belt-and-braces. The system
+    prompt already says "write the entire answer in English, regardless of the
+    language of the question or of the source material" - wording that cannot
+    be made any more explicit - and gpt-4o-mini still answered a Hindi
+    question in Hindi three times out of three. The question's own language
+    beat the instruction.
+
+    The variable left was POSITION: the system prompt sits far from the point
+    of generation and the user prompt ends right next to it. Repeating one
+    short sentence there took a pinned language from 3/9 to 9/9 across Hindi,
+    Tamil and English questions.
+
+    Applied ONLY when a project has pinned a language AND asked for it always.
+    Every other request gets `build_user_prompt` byte-for-byte as before, so
+    nothing already cached is disturbed.
+    """
+    if not language:
+        return user_prompt
+    return user_prompt + "\n\nWrite the entire answer in " + language + "."
+
+
 def release_connection(db: Session | None) -> None:
     """Hand this session's pooled DB connection back before a provider call.
 
@@ -237,8 +262,47 @@ def generate_answer(
     else:
         api_key = resolver.resolve_llm_key(db, project)
         llm = get_llm(project.llm_provider, project.llm_model, api_key)
-    system_prompt = system_prompt_for(depth, *policy_for(project))
+    language, disclaimer = policy_for(project)
+    pinned_always = bool(language) and getattr(project, "answer_language_strict", True)
+    if not pinned_always:
+        # Two situations reach here and both want the same thing.
+        #
+        #   no answer_language          mirror the question (the default)
+        #   answer_language, not strict a HOUSE language the question beats
+        #
+        # In both, the language to write in is the QUESTION's, and naming it
+        # is what makes that hold. MEASURED: "answer in the same language as
+        # the question" is not reliably followed when the SOURCES are in
+        # another language - an English question with Hindi sources came back
+        # in Hindi 3 times out of 3. Naming the language scores 18/18 against
+        # 12/18, and rewording the rule made it WORSE twice (4/18 emphatic,
+        # 10/18 naming the script), because every mention of the foreign
+        # language primes the model toward it.
+        #
+        # Returns None - and costs nothing - when the sources are in the
+        # question's own script, where plain mirroring was measured to hold.
+        # `language` then rides through as the fallback: a project that named
+        # a house language gets it when the question's cannot be determined,
+        # and a project that named none keeps today's instruction.
+        language = cross_lingual.answer_language_for(
+            project,
+            question,
+            sources,
+            llm=llm,
+            # `.add`, not the accumulator itself: usage_acc is an object with
+            # an add() method here, while retrieval passes a bound method. The
+            # mismatch was caught only by running the real path - the resolver
+            # fails open, so it swallowed the TypeError and silently did
+            # nothing, which looked exactly like the fix not working.
+            on_usage=usage_acc.add if usage_acc is not None else None,
+            fallback=language,
+        )
+    system_prompt = system_prompt_for(depth, language, disclaimer)
     user_prompt = build_user_prompt(question, sources)
+    if pinned_always:
+        # "Always this language" has to beat the question's own language, and
+        # in the system prompt alone it does not - see enforce_language.
+        user_prompt = enforce_language(user_prompt, language)
     # The key is resolved and both prompts are built from plain data - nothing
     # below this line touches the database, so the pool slot goes back before
     # the longest blocking wait in the whole request.
@@ -286,8 +350,47 @@ def generate_answer_stream(
     else:
         api_key = resolver.resolve_llm_key(db, project)
         llm = get_llm(project.llm_provider, project.llm_model, api_key)
-    system_prompt = system_prompt_for(depth, *policy_for(project))
+    language, disclaimer = policy_for(project)
+    pinned_always = bool(language) and getattr(project, "answer_language_strict", True)
+    if not pinned_always:
+        # Two situations reach here and both want the same thing.
+        #
+        #   no answer_language          mirror the question (the default)
+        #   answer_language, not strict a HOUSE language the question beats
+        #
+        # In both, the language to write in is the QUESTION's, and naming it
+        # is what makes that hold. MEASURED: "answer in the same language as
+        # the question" is not reliably followed when the SOURCES are in
+        # another language - an English question with Hindi sources came back
+        # in Hindi 3 times out of 3. Naming the language scores 18/18 against
+        # 12/18, and rewording the rule made it WORSE twice (4/18 emphatic,
+        # 10/18 naming the script), because every mention of the foreign
+        # language primes the model toward it.
+        #
+        # Returns None - and costs nothing - when the sources are in the
+        # question's own script, where plain mirroring was measured to hold.
+        # `language` then rides through as the fallback: a project that named
+        # a house language gets it when the question's cannot be determined,
+        # and a project that named none keeps today's instruction.
+        language = cross_lingual.answer_language_for(
+            project,
+            question,
+            sources,
+            llm=llm,
+            # `.add`, not the accumulator itself: usage_acc is an object with
+            # an add() method here, while retrieval passes a bound method. The
+            # mismatch was caught only by running the real path - the resolver
+            # fails open, so it swallowed the TypeError and silently did
+            # nothing, which looked exactly like the fix not working.
+            on_usage=usage_acc.add if usage_acc is not None else None,
+            fallback=language,
+        )
+    system_prompt = system_prompt_for(depth, language, disclaimer)
     user_prompt = build_user_prompt(question, sources)
+    if pinned_always:
+        # "Always this language" has to beat the question's own language, and
+        # in the system prompt alone it does not - see enforce_language.
+        user_prompt = enforce_language(user_prompt, language)
     # See generate_answer - a streamed answer holds the slot even longer, for
     # as long as the client keeps reading.
     release_connection(db)

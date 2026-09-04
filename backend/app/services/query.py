@@ -264,6 +264,10 @@ def _answer_signature(project, db=None, question: str | None = None) -> str:
         parts.append(f"n{strong}")
     if lang:
         parts.append(f"l{lang}")
+        # Whether that language is an override or merely a default changes
+        # what the answer is written in, so it changes the answer (0040).
+        if not getattr(project, "answer_language_strict", True):
+            parts.append("lp")
     if disc:
         # Hashed, not inlined: a 500-char disclaimer would otherwise dominate
         # the key, and only its identity matters here.

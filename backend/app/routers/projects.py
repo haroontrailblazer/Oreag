@@ -203,6 +203,11 @@ def update_project(
     # key is never touched. Only the RESOLVED configuration is compared, so
     # switching between two names that map to the same stemmer (Portuguese and
     # Portuguese (Brazil)) rewrites nothing.
+    # Changes how an answer is WORDED, never what is indexed - so like the
+    # other answer-policy fields it must not bump content_version. It does
+    # join the answer-cache signature, which is where staleness is handled.
+    if body.answer_language_strict is not None:
+        project.answer_language_strict = body.answer_language_strict
     if body.document_language is not None:
         wanted = body.document_language.strip() or None
         if text_search.config_for_language(wanted) != text_search.config_for(project):

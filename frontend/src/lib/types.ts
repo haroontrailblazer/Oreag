@@ -22,6 +22,9 @@ export interface Project {
   min_strong: number
   // null = mirror the question's language / no disclaimer.
   answer_language: string | null
+  // true = write every answer in answer_language. false = use it only
+  // as a house default that the question's own language overrides.
+  answer_language_strict: boolean
   answer_disclaimer: string | null
   // The language the DOCUMENTS are written in, which picks the stemmer used
   // for keyword search. A different question from answer_language above: a
