@@ -37,11 +37,11 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <div className="grid grid-cols-3 gap-1 rounded-none border bg-background p-1">
+      <div className="grid grid-cols-3 gap-1 rounded-lg border bg-background p-1">
         {OPTIONS.map(({ label, icon: Icon }) => (
           <div
             key={label}
-            className="inline-flex h-7 items-center justify-center rounded-none px-2 text-muted-foreground"
+            className="inline-flex h-7 items-center justify-center rounded-md px-2 text-muted-foreground"
           >
             <Icon className="size-3.5" />
             <span className="sr-only">{label}</span>
@@ -52,7 +52,7 @@ export function ThemeToggle() {
   }
 
   return (
-    <div className="grid grid-cols-3 gap-1 rounded-none border bg-background p-1">
+    <div className="grid grid-cols-3 gap-1 rounded-lg border bg-background p-1">
       {OPTIONS.map(({ value, label, icon: Icon }) => {
         const selected = currentTheme === value
 

@@ -229,7 +229,7 @@ export function ChangePasswordCard() {
         {/* Only reachable once the code was accepted. */}
         {stage === "verified" && (
           <div className="space-y-4">
-            <div className="flex items-center gap-2 rounded-none border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
               <CheckCircle weight="fill" className="size-4 shrink-0" />
               <p>Code confirmed. Choose your new password.</p>
             </div>

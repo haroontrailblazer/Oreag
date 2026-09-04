@@ -63,7 +63,7 @@ export function Markdown({
             const isBlock = Boolean(lang) || text.includes("\n")
             if (!isBlock) {
               return (
-                <code className="rounded-none bg-muted px-1 py-0.5 text-[0.85em] font-normal">
+                <code className="rounded bg-muted px-1 py-0.5 text-[0.85em] font-normal">
                   {children}
                 </code>
               )
@@ -77,7 +77,7 @@ export function Markdown({
             if (src === "placeholder" || label.startsWith("SCREENSHOT:")) {
               const caption = label.replace(/^SCREENSHOT:\s*/, "")
               return (
-                <span className="not-prose my-3 flex flex-col items-center gap-2 rounded-none border border-dashed bg-muted/40 px-4 py-6 text-center text-xs text-muted-foreground">
+                <span className="not-prose my-3 flex flex-col items-center gap-2 rounded-lg border border-dashed bg-muted/40 px-4 py-6 text-center text-xs text-muted-foreground">
                   <ImageIcon className="size-6" />
                   <span>
                     <strong className="text-foreground">Screenshot:</strong>{" "}
@@ -87,7 +87,7 @@ export function Markdown({
               )
             }
             // eslint-disable-next-line @next/next/no-img-element
-            return <img src={src} alt={label} className="rounded-none border" />
+            return <img src={src} alt={label} className="rounded-lg border" />
           },
         }}
       >

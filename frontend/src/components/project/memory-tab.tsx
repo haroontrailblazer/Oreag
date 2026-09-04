@@ -169,7 +169,7 @@ function SourceMark({ source }: { source: string }) {
     <span
       title={mark.label}
       className={cn(
-        "mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-none border border-current/10 shadow-xs",
+        "mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl border border-current/10 shadow-xs",
         mark.className
       )}
     >
@@ -195,7 +195,7 @@ function MemoryRow({
   return (
     <article
       className={cn(
-        "group rounded-none border bg-card px-3 py-4 shadow-xs transition-[background-color,border-color,box-shadow] hover:border-foreground/15 hover:bg-accent/25 hover:shadow-sm sm:px-4 [contain-intrinsic-size:auto_9rem] [content-visibility:auto]",
+        "group rounded-xl border bg-card px-3 py-4 shadow-xs transition-[background-color,border-color,box-shadow] hover:border-foreground/15 hover:bg-accent/25 hover:shadow-sm sm:px-4 [contain-intrinsic-size:auto_9rem] [content-visibility:auto]",
         memory.pinned && "border-amber-500/25 bg-amber-500/[0.035]"
       )}
     >
@@ -251,7 +251,7 @@ function MemoryRow({
             actions on the row, and the strip is read-only information. Always
             rendered (not hover-only) so a pinned memory can be UNpinned on
             touch, where there is no hover. */}
-        <div className="flex shrink-0 items-center gap-0.5 rounded-none border bg-background/70 p-0.5 shadow-xs">
+        <div className="flex shrink-0 items-center gap-0.5 rounded-lg border bg-background/70 p-0.5 shadow-xs">
           <Button
             variant="ghost"
             size="icon-sm"
@@ -450,12 +450,12 @@ export function MemoryTab({ project }: { project: Project }) {
         ) : loading ? (
           <div className="space-y-2">
             {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-16 rounded-none" />
+              <Skeleton key={i} className="h-16 rounded-md" />
             ))}
           </div>
         ) : all.length === 0 ? (
           <div className="py-10 text-center">
-            <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-none bg-muted text-muted-foreground">
+            <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
               <Brain className="size-5" />
             </div>
             <p className="text-sm font-medium">No memories yet</p>

@@ -78,7 +78,7 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
       <DropdownMenuTrigger asChild>
         <button
           className={cn(
-            "flex items-center gap-2 rounded-none text-left transition-colors",
+            "flex items-center gap-2 rounded-md text-left transition-colors",
             compact
               ? ""
               : "w-full p-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"

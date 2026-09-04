@@ -86,7 +86,7 @@ function CopyButton({
       aria-label="Copy"
       title="Copy"
       className={cn(
-        "inline-flex items-center gap-1 rounded-none px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
         className
       )}
     >
@@ -122,7 +122,7 @@ function SourceChips({ sources }: { sources: SourceChunk[] }) {
                   : `${source.filename} - click to read this passage`
               }
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-none border bg-background px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted",
+                "inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted",
                 open === i && "border-foreground/40 bg-muted"
               )}
             >
@@ -148,7 +148,7 @@ function SourceChips({ sources }: { sources: SourceChunk[] }) {
         })}
       </div>
       {active ? (
-        <div className="rounded-none border bg-muted/40 p-3">
+        <div className="rounded-lg border bg-muted/40 p-3">
           <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
             <span className="flex min-w-0 items-center gap-1.5 font-medium">
               {active.filename === "memory" ? (
@@ -210,7 +210,7 @@ function TurnView({ question, result }: Turn) {
           text={question}
           className="mt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         />
-        <div className="max-w-[85%] rounded-none bg-muted px-3 py-1.5 text-sm break-words">
+        <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
           {question}
         </div>
       </div>
@@ -581,7 +581,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
           <div
             ref={scrollRef}
             onScroll={refreshScrollDown}
-            className="h-full space-y-5 overflow-y-auto rounded-none border bg-background px-4 py-4 sm:px-6"
+            className="h-full space-y-5 overflow-y-auto rounded-2xl border bg-background px-4 py-4 sm:px-6"
           >
             {turns.length === 0 && !loading ? (
               <div className="flex min-h-20 items-center justify-center text-center text-sm text-muted-foreground">
@@ -595,7 +595,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
             {streaming ? (
               <div ref={streamTopRef} className="space-y-2 scroll-mt-4">
                 <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-none bg-muted px-3 py-1.5 text-sm break-words">
+                  <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
                     {streaming.question}
                   </div>
                 </div>
@@ -625,7 +625,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
               onClick={scrollToLatest}
               aria-label="Scroll to latest"
               title="Scroll to latest"
-              className="absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-none border bg-background/90 text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground"
+              className="absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground"
             >
               <CaretDown className="size-4" />
             </button>
@@ -653,7 +653,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
         ) : null}
 
         {!currentModelUsable ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-none border border-amber-300/60 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
             <Warning className="size-4 shrink-0" weight="fill" />
             <span className="min-w-0 flex-1">
               The API key for <strong>{providerOf(model)}</strong> was removed,
@@ -684,7 +684,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
           </div>
         ) : null}
 
-        <div className="rounded-none border bg-background p-1.5 shadow-xs focus-within:border-foreground">
+        <div className="rounded-xl border bg-background p-1.5 shadow-xs focus-within:border-foreground">
           <Textarea
             rows={1}
             placeholder="Ask anything about this knowledge base"
@@ -708,7 +708,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                className="shrink-0 rounded-none"
+                className="shrink-0 rounded-full"
                 title="Add files"
                 aria-label="Add files"
                 disabled={uploading}
@@ -728,7 +728,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                   size="sm"
                   aria-label="Answer model"
                   className={cn(
-                    "h-8 max-w-44 rounded-none border-0 bg-muted px-3 shadow-none focus:ring-0",
+                    "h-8 max-w-44 rounded-full border-0 bg-muted px-3 shadow-none focus:ring-0",
                     !currentModelUsable && "text-muted-foreground"
                   )}
                 >
@@ -773,7 +773,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
             </div>
             <Button
               size="icon"
-              className="size-8 shrink-0 rounded-none"
+              className="size-8 shrink-0 rounded-full"
               onClick={loading ? handleStop : handleAsk}
               disabled={!loading && !question.trim()}
               aria-label={loading ? "Stop" : "Ask"}

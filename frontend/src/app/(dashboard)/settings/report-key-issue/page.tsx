@@ -105,7 +105,7 @@ export default function ReportKeyIssuePage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-start gap-2 rounded-none bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          <div className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
             <Warning className="mt-0.5 size-4 shrink-0" />
             <p>
               Never include your API key or any other secret in this report. We

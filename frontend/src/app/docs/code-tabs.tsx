@@ -40,7 +40,7 @@ export function CodeTabs({ tabs }: { tabs: OsTab[] }) {
   }
 
   return (
-    <div className="not-prose my-4 overflow-hidden rounded-none border bg-muted">
+    <div className="not-prose my-4 overflow-hidden rounded-lg border bg-muted">
       <div className="flex items-center justify-between border-b bg-background/40 pl-1 pr-1.5">
         <div className="flex">
           {tabs.map((t, i) => (

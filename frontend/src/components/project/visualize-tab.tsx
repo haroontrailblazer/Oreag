@@ -266,7 +266,7 @@ function ToolButton({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "size-8 rounded-none text-muted-foreground hover:text-foreground",
+        "size-8 rounded-full text-muted-foreground hover:text-foreground",
         active && "bg-foreground/10 text-foreground"
       )}
     >
@@ -1054,12 +1054,12 @@ export function VisualizeTab({
               ? // Half an inch of blurred page on every side, per the design.
                 // Only the CSS changes here - the element is never re-parented,
                 // so the WebGL context and the settled layout survive.
-                "fixed inset-[0.5in] z-50 rounded-none shadow-2xl"
+                "fixed inset-[0.5in] z-50 rounded-2xl shadow-2xl"
               : // Desktop: size the canvas to the space left under the page
                 // header, tabs and card chrome (~22.5rem) so the whole tab fits
                 // the viewport with no page scroll; phones keep a fixed height
                 // and scroll as usual.
-                "h-[52dvh] min-h-[320px] rounded-none sm:h-[420px] lg:h-[calc(100dvh-26rem)] lg:min-h-[380px]",
+                "h-[52dvh] min-h-[320px] rounded-2xl sm:h-[420px] lg:h-[calc(100dvh-26rem)] lg:min-h-[380px]",
             // Only a hint - the canvas child sets its own cursor while dragging.
             panning && "cursor-grab active:cursor-grabbing"
           )}
@@ -1131,7 +1131,7 @@ export function VisualizeTab({
 
           {/* Canvas toolbar. Hidden while there is nothing to steer. */}
           {ForceGraph3D && data && !isEmpty && (
-            <div className="absolute bottom-3 left-3 z-20 flex items-center gap-0.5 rounded-none border bg-background/80 p-1 shadow-lg backdrop-blur-md">
+            <div className="absolute bottom-3 left-3 z-20 flex items-center gap-0.5 rounded-full border bg-background/80 p-1 shadow-lg backdrop-blur-md">
               <ToolButton label="Zoom out" onClick={() => dolly(ZOOM_STEP_OUT)}>
                 <Minus className="size-4" />
               </ToolButton>
@@ -1183,7 +1183,7 @@ export function VisualizeTab({
             // node popup (file, section, chunk, memory) behaves the same when
             // its text or metadata is long.
             <div
-              className="absolute right-3 top-3 flex max-h-[calc(100%-1.5rem)] w-72 max-w-[calc(100%-1.5rem)] flex-col rounded-none border bg-background/95 p-4 text-foreground shadow-xl backdrop-blur"
+              className="absolute right-3 top-3 flex max-h-[calc(100%-1.5rem)] w-72 max-w-[calc(100%-1.5rem)] flex-col rounded-xl border bg-background/95 p-4 text-foreground shadow-xl backdrop-blur"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
             >

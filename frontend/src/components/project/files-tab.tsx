@@ -537,7 +537,7 @@ export function FilesTab({
 
       {fileCount === 0 ? (
         <div className="px-6 py-16 text-center">
-          <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-none bg-muted text-muted-foreground">
+          <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
             <FileText className="size-5" />
           </div>
           <p className="text-sm font-medium">No files yet</p>
@@ -561,7 +561,7 @@ export function FilesTab({
               back-catalogue import, a card twelve rows down is a hold queue
               nobody sees - and a parked file is stored but NOT searchable. */}
           {reviewCount > 0 && (
-            <div className="mb-2 flex items-center gap-3 rounded-none border border-violet-500/20 bg-violet-500/5 px-3 py-2.5 text-sm sm:px-4">
+            <div className="mb-2 flex items-center gap-3 rounded-xl border border-violet-500/20 bg-violet-500/5 px-3 py-2.5 text-sm sm:px-4">
               <GitBranch className="size-4 shrink-0 text-violet-600 dark:text-violet-400" />
               <p className="min-w-0 flex-1 text-muted-foreground">
                 <span className="font-medium text-foreground">
@@ -611,12 +611,12 @@ export function FilesTab({
                   key={file.id}
                   id={`file-${file.id}`}
                   className={cn(
-                    "group flex scroll-mt-24 items-center gap-3 rounded-none border bg-card px-3 py-3.5 shadow-xs transition-[background-color,border-color,box-shadow] hover:border-foreground/15 hover:bg-accent/25 hover:shadow-sm sm:gap-4 sm:px-4",
+                    "group flex scroll-mt-24 items-center gap-3 rounded-xl border bg-card px-3 py-3.5 shadow-xs transition-[background-color,border-color,box-shadow] hover:border-foreground/15 hover:bg-accent/25 hover:shadow-sm sm:gap-4 sm:px-4",
                     highlightId === file.id &&
                       "bg-primary/10 ring-1 ring-inset ring-primary/30"
                   )}
                 >
-                  <span className="flex size-11 shrink-0 items-center justify-center rounded-none border bg-muted/50 text-muted-foreground shadow-xs transition-colors group-hover:bg-background">
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-muted/50 text-muted-foreground shadow-xs transition-colors group-hover:bg-background">
                     <FileText className="size-5" />
                   </span>
                   <div className="min-w-0 flex-1">

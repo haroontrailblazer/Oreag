@@ -275,13 +275,13 @@ export function FileVersionDialog({
                     type="button"
                     onClick={() => setIsVersion(true)}
                     aria-pressed={isVersion === true}
-                    className={`flex w-full min-w-0 items-start gap-3 rounded-none border p-3.5 text-left text-sm transition-colors ${
+                    className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-3.5 text-left text-sm transition-colors ${
                       isVersion
                         ? "border-foreground/30 bg-muted/60 shadow-xs"
                         : "border-border hover:bg-muted/30"
                     }`}
                   >
-                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-none bg-background">
+                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-background">
                       <GitBranch className="size-4" />
                     </span>
                     <span className="min-w-0">
@@ -299,13 +299,13 @@ export function FileVersionDialog({
                   type="button"
                   onClick={() => setIsVersion(false)}
                   aria-pressed={isVersion === false}
-                  className={`flex w-full min-w-0 items-start gap-3 rounded-none border p-3.5 text-left text-sm transition-colors ${
+                  className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-3.5 text-left text-sm transition-colors ${
                     !isVersion
                       ? "border-foreground/30 bg-muted/60 shadow-xs"
                       : "border-border hover:bg-muted/30"
                   }`}
                 >
-                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-none bg-background">
+                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-background">
                     <FileText className="size-4" />
                   </span>
                   <span className="min-w-0">
@@ -424,7 +424,7 @@ export function FileVersionDialog({
             )}
 
             {retires && (
-              <div className="space-y-1.5 rounded-none border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+              <div className="space-y-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-muted-foreground">
                 <p>
                   While the new version is indexing, this document is briefly
                   not searchable.

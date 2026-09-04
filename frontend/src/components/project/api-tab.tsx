@@ -105,7 +105,7 @@ function CopyButton({
  * label + copy action, horizontal scroll for long lines. */
 function CodePanel({ title, code }: { title: string; code: string }) {
   return (
-    <div className="overflow-hidden rounded-none border border-zinc-800 bg-zinc-950">
+    <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
       <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/80 py-1.5 pl-4 pr-2">
         <span className="font-mono text-[11px] font-medium tracking-wide text-zinc-400">
           {title}
@@ -122,7 +122,7 @@ function CodePanel({ title, code }: { title: string; code: string }) {
 /** Mono value in a quiet field with a copy action (URLs, keys). */
 function CopyRow({ value, label }: { value: string; label: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-none border bg-muted/40 py-2 pl-4 pr-2">
+    <div className="flex items-center gap-3 rounded-lg border bg-muted/40 py-2 pl-4 pr-2">
       <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">
         {value}
       </span>
@@ -625,7 +625,7 @@ print(data["answer"])`
           <CardTitle>API reference</CardTitle>
           <CardDescription>
             Authenticate every request with{" "}
-            <code className="rounded-none bg-muted px-1 py-0.5 font-mono text-[11px]">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
               Authorization: Bearer oreag_sk_…
             </code>
           </CardDescription>
@@ -683,11 +683,11 @@ print(data["answer"])`
               <p>
                 All of a project&apos;s keys share the project budget. Exceeding
                 either scope returns{" "}
-                <code className="rounded-none bg-muted px-1 py-0.5 font-mono text-[11px]">
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
                   429
                 </code>{" "}
                 with a{" "}
-                <code className="rounded-none bg-muted px-1 py-0.5 font-mono text-[11px]">
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
                   Retry-After
                 </code>{" "}
                 header - wait that many seconds, then retry.
@@ -703,7 +703,7 @@ print(data["answer"])`
           <CardDescription>
             Query this project from your app - swap in an API key and go. Pass
             the same{" "}
-            <code className="rounded-none bg-muted px-1 py-0.5 font-mono text-[11px]">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
               conversation_id
             </code>{" "}
             to make follow-ups like &ldquo;summarize that&rdquo; conversational.
@@ -767,7 +767,7 @@ print(data["answer"])`
           {!process.env.NEXT_PUBLIC_MCP_URL && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
               Set{" "}
-              <code className="rounded-none bg-muted px-1 font-mono">
+              <code className="rounded bg-muted px-1 font-mono">
                 NEXT_PUBLIC_MCP_URL
               </code>{" "}
               to your deployed MCP server URL to fill in the host above.
@@ -787,7 +787,7 @@ print(data["answer"])`
           {newKey && (
             <div className="space-y-2">
               <CopyRow value={newKey.key} label="Copy API key" />
-              <p className="rounded-none bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                 Copy this key now - for security it will{" "}
                 <span className="font-medium">never be shown again</span>.
               </p>
@@ -809,7 +809,7 @@ print(data["answer"])`
       >
         <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-h-[90dvh]">
           <DialogHeader>
-            <div className="mb-1 flex size-10 items-center justify-center rounded-none bg-amber-500/10 text-amber-600 dark:text-amber-400">
+            <div className="mb-1 flex size-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
               <ShieldWarning className="size-5" weight="fill" />
             </div>
             <DialogTitle>Allow this key to upload documents?</DialogTitle>
@@ -822,7 +822,7 @@ print(data["answer"])`
           </DialogHeader>
 
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain pr-1 text-sm no-scrollbar">
-            <div className="rounded-none border border-amber-500/25 bg-amber-500/[0.06] p-3">
+            <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3">
               <p className="font-medium text-foreground">
                 This enables indirect prompt injection
               </p>

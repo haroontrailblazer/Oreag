@@ -23,7 +23,7 @@ export function DocsMobileNav() {
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
         aria-label="Open documentation menu"
-        className="inline-flex size-9 shrink-0 items-center justify-center rounded-none border text-muted-foreground transition-colors hover:text-foreground lg:hidden"
+        className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:text-foreground lg:hidden"
       >
         <List className="size-4" />
       </SheetTrigger>

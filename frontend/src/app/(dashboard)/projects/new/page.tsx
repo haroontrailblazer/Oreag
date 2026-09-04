@@ -240,7 +240,7 @@ export default function NewProjectPage() {
                   e.preventDefault()
                   addFiles(e.dataTransfer.files)
                 }}
-                className="flex w-full flex-col items-center gap-2 rounded-none border-2 border-dashed p-8 text-sm text-muted-foreground hover:bg-muted/40"
+                className="flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 text-sm text-muted-foreground hover:bg-muted/40"
               >
                 <FileUp className="size-6" />
                 Drag and drop files here, or click to browse (max {MAX_FILE_MB}{" "}
@@ -258,7 +258,7 @@ export default function NewProjectPage() {
                   {files.map((file) => (
                     <li
                       key={file.name + file.size}
-                      className="flex items-center justify-between rounded-none border px-3 py-1.5 text-sm"
+                      className="flex items-center justify-between rounded border px-3 py-1.5 text-sm"
                     >
                       <span className="truncate">{file.name}</span>
                       <button
@@ -299,7 +299,7 @@ export default function NewProjectPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {models && (!embAvailable || !llmAvailable) && (
-              <div className="rounded-none border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
                 You don&apos;t have a key for a selected model yet. Add one in{" "}
                 <Link href="/settings/api-keys" className="font-medium underline">
                   Settings → API keys

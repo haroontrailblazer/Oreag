@@ -68,7 +68,7 @@ function BaseSecret({
         onFocus={onFocus}
         onBlur={onBlur}
         className={cn(
-          "h-11 rounded-none bg-muted/50 sm:h-12",
+          "h-11 rounded-xl bg-muted/50 sm:h-12",
           // Only the eye needs clearance once the indicator is gone.
           showRight ? rightPad : "pr-12",
           className

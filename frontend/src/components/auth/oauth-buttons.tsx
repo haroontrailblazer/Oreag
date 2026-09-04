@@ -157,7 +157,7 @@ export function OAuthButtons({
   }
 
   const btn = cn(
-    "flex h-11 flex-1 items-center justify-center gap-2 rounded-none border bg-card text-sm font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-60",
+    "flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border bg-card text-sm font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-60",
     buttonClassName
   )
 

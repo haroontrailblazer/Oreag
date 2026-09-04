@@ -47,7 +47,7 @@ export function BestPractices({
           className={cn(
             // Icon-only on phones so it doesn't crowd the page title/actions;
             // full label from sm+.
-            "size-7 shrink-0 rounded-none p-0 text-muted-foreground hover:text-foreground sm:h-7 sm:w-auto sm:gap-1.5 sm:px-2.5 sm:text-xs sm:font-medium",
+            "size-7 shrink-0 rounded-full p-0 text-muted-foreground hover:text-foreground sm:h-7 sm:w-auto sm:gap-1.5 sm:px-2.5 sm:text-xs sm:font-medium",
             className
           )}
         >
@@ -61,7 +61,7 @@ export function BestPractices({
           {tips.map((tip) => (
             <div key={tip.title} className="space-y-1">
               {tip.visual ? (
-                <div className="rounded-none border bg-muted/30 px-2 py-1.5 text-muted-foreground">
+                <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-muted-foreground">
                   {tip.visual}
                 </div>
               ) : null}

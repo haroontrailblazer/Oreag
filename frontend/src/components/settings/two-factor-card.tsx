@@ -368,13 +368,13 @@ export function TwoFactorCard() {
       <CardContent className="space-y-5">
         {loading ? (
           <div className="space-y-2">
-            <div className="h-14 animate-pulse rounded-none bg-muted/60" />
-            <div className="h-14 animate-pulse rounded-none bg-muted/40" />
+            <div className="h-14 animate-pulse rounded-xl bg-muted/60" />
+            <div className="h-14 animate-pulse rounded-xl bg-muted/40" />
           </div>
         ) : (
           <>
             {total === 1 && (
-              <div className="flex gap-2.5 rounded-none border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+              <div className="flex gap-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                 <Warning weight="fill" className="mt-0.5 size-4 shrink-0" />
                 <p>
                   Add a second method. There are no backup codes, so if you lose
@@ -421,7 +421,7 @@ export function TwoFactorCard() {
             />
 
             {total > 0 && (
-              <div className="flex flex-wrap items-start justify-between gap-3 rounded-none border bg-muted/30 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border bg-muted/30 p-3">
                 <div className="flex gap-2.5">
                   <Key weight="duotone" className="mt-0.5 size-5 text-muted-foreground" />
                   <div>
@@ -521,7 +521,7 @@ export function TwoFactorCard() {
           <div className="space-y-4">
             {totpQr && (
               <div className="flex justify-center">
-                <div className="rounded-none bg-white p-3">
+                <div className="rounded-xl bg-white p-3">
                   {/* Supabase returns an SVG data URI; next/image cannot run a
                       loader over one, hence unoptimized. */}
                   <Image
@@ -591,7 +591,7 @@ export function TwoFactorCard() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-2 rounded-none border bg-muted/40 p-3 font-mono text-sm">
+          <div className="grid grid-cols-2 gap-2 rounded-xl border bg-muted/40 p-3 font-mono text-sm">
             {(codes ?? []).map((c) => (
               <span key={c} className="tracking-widest">
                 {c}
@@ -711,7 +711,7 @@ function Group({
           {items.map((item) => (
             <li
               key={item.id}
-              className="flex items-center justify-between gap-3 rounded-none border bg-muted/30 px-3 py-2"
+              className="flex items-center justify-between gap-3 rounded-xl border bg-muted/30 px-3 py-2"
             >
               <div className="min-w-0">
                 <p className="truncate text-sm">{item.label}</p>

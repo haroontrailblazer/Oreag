@@ -33,9 +33,9 @@ import { usePasskeySupport, useResendCooldown } from "@/lib/auth-hooks"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "@/lib/toast"
 
-const FIELD = "h-11 sm:h-12 rounded-none bg-muted/50"
+const FIELD = "h-11 sm:h-12 rounded-xl bg-muted/50"
 const ALTERNATE_METHOD =
-  "h-10 min-w-32 flex-1 basis-[calc(50%-0.25rem)] rounded-none bg-card px-3 text-sm"
+  "h-10 min-w-32 flex-1 basis-[calc(50%-0.25rem)] rounded-xl bg-card px-3 text-sm"
 
 type Provider = "google" | "github"
 type AuthMethods = {
@@ -440,7 +440,7 @@ export default function LoginPage() {
       <Button
         type="button"
         variant="outline"
-        className="h-11 w-full gap-2 rounded-none text-[15px] sm:h-12"
+        className="h-11 w-full gap-2 rounded-xl text-[15px] sm:h-12"
         disabled={loading || passkeySupported === null}
         onClick={handlePasskey}
       >
@@ -483,7 +483,7 @@ export default function LoginPage() {
     <button
       type="button"
       onClick={backToEmail}
-      className="flex w-full items-center justify-between gap-2 rounded-none border bg-muted/40 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted"
+      className="flex w-full items-center justify-between gap-2 rounded-xl border bg-muted/40 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted"
     >
       <span className="min-w-0 truncate font-medium">{email}</span>
       <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
@@ -543,7 +543,7 @@ export default function LoginPage() {
                 />
               </div>
               {notFound && (
-                <div className="rounded-none border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
                   No account found for this email.{" "}
                   <Link href="/signup" className="font-medium underline">
                     Create one
@@ -553,7 +553,7 @@ export default function LoginPage() {
               )}
               <Button
                 type="submit"
-                className="h-11 w-full gap-1.5 rounded-none text-[15px] sm:h-12"
+                className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
                 disabled={checking}
               >
                 {checking ? (
@@ -601,7 +601,7 @@ export default function LoginPage() {
               </div>
               <Button
                 type="submit"
-                className="h-11 w-full gap-1.5 rounded-none text-[15px] sm:h-12"
+                className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
                 disabled={loading}
               >
                 {loading ? (
@@ -694,7 +694,7 @@ export default function LoginPage() {
             />
             <Button
               type="button"
-              className="h-11 w-full gap-1.5 rounded-none text-[15px] sm:h-12"
+              className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
               disabled={!isCompleteCode(code) || loading}
               onClick={() => verifyLoginCode(code)}
             >
@@ -726,7 +726,7 @@ export default function LoginPage() {
             />
             <Button
               type="button"
-              className="h-11 w-full gap-1.5 rounded-none text-[15px] sm:h-12"
+              className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
               disabled={!isCompleteCode(code, TOTP_LENGTH) || loading}
               onClick={() => verifyMfa(code)}
             >
@@ -779,7 +779,7 @@ export default function LoginPage() {
               />
               <Button
                 type="button"
-                className="h-11 w-full gap-1.5 rounded-none text-[15px] sm:h-12"
+                className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
                 disabled={!isCompleteCode(code) || loading}
                 onClick={() => submitResetCode(code)}
               >
@@ -809,7 +809,7 @@ export default function LoginPage() {
             />
             <Button
               type="button"
-              className="h-11 w-full gap-1.5 rounded-none text-[15px] sm:h-12"
+              className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
               disabled={!isCompleteCode(code, TOTP_LENGTH) || loading}
               onClick={() => verifyMfa(code)}
             >

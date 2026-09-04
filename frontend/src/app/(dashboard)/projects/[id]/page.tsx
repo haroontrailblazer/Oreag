@@ -136,8 +136,8 @@ export default function ProjectPage({
         </div>
         {/* tabs bar + active tab content */}
         <div className="space-y-4">
-          <Skeleton className="h-9 w-full max-w-sm rounded-none" />
-          <Skeleton className="h-72 rounded-none" />
+          <Skeleton className="h-9 w-full max-w-sm rounded-lg" />
+          <Skeleton className="h-72 rounded-xl" />
         </div>
       </div>
     )

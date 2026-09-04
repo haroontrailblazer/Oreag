@@ -20,7 +20,7 @@ import { useResendCooldown } from "@/lib/auth-hooks"
 import { passwordFailures } from "@/lib/password"
 import { createClient } from "@/lib/supabase/client"
 
-const FIELD = "h-11 sm:h-12 rounded-none bg-muted/50"
+const FIELD = "h-11 sm:h-12 rounded-xl bg-muted/50"
 
 /**
  * Tell the backend to register this account with Langfuse.
@@ -165,7 +165,7 @@ export default function SignupPage() {
           />
           <Button
             type="button"
-            className="h-11 w-full gap-1.5 rounded-none text-[15px] sm:h-12"
+            className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
             disabled={!isCompleteCode(code) || verifying}
             onClick={() => verifyCode(code)}
           >
@@ -186,7 +186,7 @@ export default function SignupPage() {
         <>
           <form onSubmit={handleSubmit} className="space-y-3">
             {existing && (
-              <div className="rounded-none border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
                 You already have an account with this email.{" "}
                 <Link href="/login" className="font-medium underline">
                   Sign in instead
@@ -238,7 +238,7 @@ export default function SignupPage() {
             </div>
             <Button
               type="submit"
-              className="h-11 w-full gap-1.5 rounded-none text-[15px] sm:h-12"
+              className="h-11 w-full gap-1.5 rounded-xl text-[15px] sm:h-12"
               disabled={loading}
             >
               {loading ? (

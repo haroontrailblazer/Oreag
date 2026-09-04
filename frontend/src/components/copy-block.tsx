@@ -21,7 +21,7 @@ export function CopyBlock({ value }: { value: string }) {
 
   return (
     <div className="not-prose relative">
-      <pre className="overflow-x-auto rounded-none bg-muted p-3 pr-12 text-xs">
+      <pre className="overflow-x-auto rounded-lg bg-muted p-3 pr-12 text-xs">
         {value}
       </pre>
       <Button
