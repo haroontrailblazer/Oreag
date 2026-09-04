@@ -647,8 +647,8 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card className="overflow-hidden">
+        <CardHeader className="pb-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-1.5">
               <CardTitle className="flex items-center gap-2">
@@ -704,17 +704,17 @@ export function SettingsTab({
             />
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
           <div className="grid min-w-0 gap-6 lg:grid-cols-2 lg:gap-0">
-            <section className="min-w-0 space-y-4 lg:pr-6">
-              <div className="space-y-1">
+            <section className="min-w-0 space-y-5 lg:pr-6">
+              <div className="space-y-1 border-b pb-3">
                 <h3 className="text-sm font-medium">Grounding</h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Decide how much matching evidence the project needs before it
                   answers.
                 </p>
               </div>
-              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-4">
                 <div className="min-w-0 space-y-2">
                   <Label htmlFor="settings-minsim">Minimum similarity</Label>
                   <Input
@@ -750,8 +750,8 @@ export function SettingsTab({
               </div>
             </section>
 
-            <section className="min-w-0 space-y-4 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
-              <div className="space-y-1">
+            <section className="min-w-0 space-y-5 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
+              <div className="space-y-1 border-b pb-3">
                 <h3 className="text-sm font-medium">Language &amp; format</h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   What your documents are written in, and how every response is
@@ -849,7 +849,7 @@ export function SettingsTab({
                     re-embedded.
                   </p>
                 </div>
-                <div className="min-w-0 space-y-2">
+                <div className="min-w-0 space-y-2 sm:col-span-2">
                   <Label htmlFor="settings-disclaimer">Standing notice</Label>
                   <Textarea
                     id="settings-disclaimer"
@@ -866,44 +866,59 @@ export function SettingsTab({
             </section>
           </div>
 
-          <div className="mt-6 flex flex-col gap-4 border-t pt-5 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1.5">
-              <div className="flex items-center gap-2.5">
+          <div className="border-t pt-6">
+            <div className="flex min-w-0 flex-col gap-4 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
+              <div className="min-w-0 space-y-1.5">
+                <Label
+                  htmlFor="version-tracking"
+                  className={cn(
+                    "cursor-pointer text-sm font-medium",
+                    !project.version_extraction_available &&
+                      "cursor-not-allowed opacity-60"
+                  )}
+                >
+                  Track document versions
+                </Label>
+                <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+                  Hold likely new editions for confirmation. It fits documents
+                  that come in editions, not ordinary working files, where a
+                  draft named report_v2 is held out of answers until someone
+                  confirms it. Replaced versions remain downloadable but stop
+                  contributing to answers. Switching it on also reads the titles
+                  of documents already here, so they can be recognised as
+                  earlier editions.
+                </p>
+                {!project.version_extraction_available && (
+                  <p className="max-w-3xl text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                    Turned off for this deployment. Ask an administrator to
+                    enable document version extraction.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {versionTracking ? "On" : "Off"}
+                </span>
                 <Switch
                   id="version-tracking"
                   checked={versionTracking}
                   disabled={!project.version_extraction_available}
                   onCheckedChange={setVersionTracking}
+                  className="border-border shadow-xs data-[state=checked]:bg-emerald-600 dark:data-[state=checked]:bg-emerald-500"
                 />
-                <Label
-                  htmlFor="version-tracking"
-                  className="cursor-pointer text-sm font-medium"
-                >
-                  Track document versions
-                </Label>
               </div>
-              <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
-                Hold likely new editions for confirmation. It fits documents
-                that come in editions, not ordinary working files, where a draft
-                named report_v2 is held out of answers until someone confirms
-                it. Replaced versions remain downloadable but stop contributing
-                to answers. Switching it on also reads the titles of documents
-                already here, so they can be recognised as earlier editions.
-              </p>
-              {!project.version_extraction_available && (
-                <p className="max-w-3xl text-xs leading-relaxed text-amber-700 dark:text-amber-400">
-                  Turned off for this deployment. Ask an administrator to
-                  enable document version extraction.
-                </p>
-              )}
             </div>
-            <Button
-              className="shrink-0 sm:min-w-28"
-              onClick={handleSavePolicy}
-              disabled={savingPolicy}
-            >
-              {savingPolicy ? <Spin /> : "Save policy"}
-            </Button>
+
+            <div className="mt-4 flex justify-end">
+              <Button
+                className="w-full sm:w-auto sm:min-w-28"
+                onClick={handleSavePolicy}
+                disabled={savingPolicy}
+              >
+                {savingPolicy ? <Spin /> : "Save policy"}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
