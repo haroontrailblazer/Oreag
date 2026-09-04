@@ -49,9 +49,11 @@ import { api, fetcher } from "@/lib/api"
 import {
   CostViz,
   DimensionsViz,
+  GroundingViz,
   KeyViz,
   OverrideViz,
   TopKViz,
+  TranslateViz,
 } from "@/components/ui/best-practice-visuals"
 import {
   dimensionOptions,
@@ -61,6 +63,56 @@ import {
 } from "@/lib/models"
 import { cn } from "@/lib/utils"
 import type { ModelsResponse, Project } from "@/lib/types"
+
+// Radix Select cannot hold "" as an item value, and "" is what the API means
+// by "mirror each question". A sentinel stands in for it in the widget only -
+// what gets saved is still "" or a language name.
+const MATCH_QUESTION = "__match__"
+
+// The stored value is interpolated straight into the model's instruction
+// ("write the entire answer in X"), so these are plain language names rather
+// than locale codes - "Portuguese (Brazil)" reads correctly to a model,
+// "pt-BR" does not.
+//
+// EVERY ENTRY IS VERIFIED, not assumed. Each was run end to end through the
+// product's own prompt - English sources, English question, this language
+// pinned - and kept only when the answer came back in the right writing
+// system, was identified as that language, and still carried the fact from
+// the source. 39 of the 40 candidates passed.
+//
+// Malay is why one entry carries its endonym. Asked for "Malay" the model
+// returned INDONESIAN three times out of three ("pengajuan", "lewat"), and a
+// judge told to choose between the two called it Indonesian every time.
+// Asked for "Malay (Bahasa Melayu)" it returned Malay three times out of
+// three. The parenthetical is load-bearing, not decoration - do not tidy it
+// away. Re-measure before adding anything here.
+const ANSWER_LANGUAGES = [
+  "Arabic", "Bengali", "Burmese", "Chinese (Simplified)",
+  "Chinese (Traditional)", "Dutch", "English", "French", "German", "Gujarati",
+  "Hebrew", "Hindi", "Indonesian", "Italian", "Japanese", "Kannada", "Khmer",
+  "Korean", "Lao", "Malay (Bahasa Melayu)", "Malayalam", "Marathi", "Nepali",
+  "Odia", "Persian", "Polish", "Portuguese", "Portuguese (Brazil)", "Punjabi",
+  "Russian", "Sinhala", "Spanish", "Swahili", "Tamil", "Telugu", "Thai",
+  "Turkish", "Ukrainian", "Urdu", "Vietnamese",
+]
+
+// Languages whose DOCUMENTS Oreag can stem for keyword search (migration
+// 0039). A different list from ANSWER_LANGUAGES above, and deliberately much
+// shorter: every entry here changes how the search index is built, and a
+// language Postgres has no stemmer for would be an option that silently does
+// nothing. Offering those would be worse than leaving them out.
+//
+// The first group was MEASURED - a query word in a different grammatical form
+// finds the document under this language's stemmer and does not under
+// English. The second group has a stemmer built for the language, which beats
+// one built for English, but the test pair did not demonstrate it.
+const DOCUMENT_LANGUAGES = [
+  "Arabic", "Armenian", "Basque", "Catalan", "Danish", "Dutch", "English",
+  "Finnish", "French", "German", "Greek", "Hindi", "Hungarian", "Indonesian",
+  "Irish", "Italian", "Lithuanian", "Nepali", "Norwegian", "Portuguese",
+  "Portuguese (Brazil)", "Romanian", "Russian", "Serbian", "Spanish",
+  "Swedish", "Tamil", "Turkish", "Yiddish",
+]
 
 export function SettingsTab({
   project,
@@ -109,6 +161,9 @@ export function SettingsTab({
   const [answerLanguage, setAnswerLanguage] = useState(project.answer_language ?? "")
   const [answerDisclaimer, setAnswerDisclaimer] = useState(
     project.answer_disclaimer ?? ""
+  )
+  const [documentLanguage, setDocumentLanguage] = useState(
+    project.document_language ?? ""
   )
   const [savingPolicy, setSavingPolicy] = useState(false)
   const [versionTracking, setVersionTracking] = useState(project.version_tracking)
@@ -174,6 +229,9 @@ export function SettingsTab({
       v === (synced.answer_disclaimer ?? "")
         ? project.answer_disclaimer ?? ""
         : v
+    )
+    setDocumentLanguage((v) =>
+      v === (synced.document_language ?? "") ? project.document_language ?? "" : v
     )
     setVersionTracking((v) =>
       v === synced.version_tracking ? project.version_tracking : v
@@ -315,6 +373,7 @@ export function SettingsTab({
           min_strong: strong,
           answer_language: answerLanguage.trim(),
           answer_disclaimer: answerDisclaimer.trim(),
+          document_language: documentLanguage.trim(),
           version_tracking: versionTracking,
         }),
       })
@@ -581,14 +640,60 @@ export function SettingsTab({
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Scales className="size-4 text-muted-foreground" />
-            Answer policy
-          </CardTitle>
-          <CardDescription>
-            Set the evidence bar for an answer, then control how every response
-            is presented.
-          </CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <CardTitle className="flex items-center gap-2">
+                <Scales className="size-4 text-muted-foreground" />
+                Answer policy
+              </CardTitle>
+              <CardDescription>
+                Set the evidence bar for an answer, then control how every
+                response is presented.
+              </CardDescription>
+            </div>
+            <BestPractices
+              className="ml-auto"
+              tips={[
+                {
+                  visual: <GroundingViz />,
+                  title: "Raise the floor before you raise the count",
+                  detail:
+                    "Minimum similarity decides what counts as evidence at all; required sources decides how much of it is enough. A project answering from weak matches usually needs a higher floor, not more sources - more sources at a low floor just adds more weak ones.",
+                },
+                {
+                  title: "Required sources 0 means it always answers",
+                  detail:
+                    "It will answer from whatever it found, however thin. Set 1 or more when a wrong confident answer costs more than a clarifying question - policy, legal, medical and safety content usually qualify.",
+                },
+                {
+                  visual: <TranslateViz />,
+                  title: "Leave the language matching unless the audience is fixed",
+                  detail:
+                    "By default each answer comes back in the language its question was asked in, even when every document is in another language - a Tamil question against an English handbook is answered in Tamil. Pin a language only when every reader wants the same one, like a public help centre.",
+                },
+                {
+                  title: "Keep languages in separate projects",
+                  detail:
+                    "A question in a script your documents do not use is translated before searching, which is what makes cross-language questions work. That is skipped when the project already contains that script - so English and Hindi files in ONE project means a Hindi question reaches only the Hindi half.",
+                },
+                {
+                  title: "Set the document language if your files are not English",
+                  detail:
+                    "Keyword search stems words, and until you set this it stems them as English. A Russian search for the singular will not find the plural; with the language set, it will. Measured to rescue searches in Russian, German, Spanish, Portuguese, Italian, Dutch, Hindi, Nepali, Arabic and Indonesian among others. It re-stems the index in place — nothing is re-embedded and no provider key is touched.",
+                },
+                {
+                  title: "The standing notice is copied, not summarised",
+                  detail:
+                    "It is appended to every answer word for word, so a regulator-facing notice cannot be softened by the model. It also lands on cached answers, and changing it invalidates them.",
+                },
+                {
+                  title: "Version tracking only holds suspected new editions",
+                  detail:
+                    "Nothing is deleted. A replaced version stays downloadable and stops contributing to answers, so the project answers from what is in force today rather than from every edition at once.",
+                },
+              ]}
+            />
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid min-w-0 gap-6 lg:grid-cols-2 lg:gap-0">
@@ -638,23 +743,84 @@ export function SettingsTab({
 
             <section className="min-w-0 space-y-4 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
               <div className="space-y-1">
-                <h3 className="text-sm font-medium">Answer format</h3>
+                <h3 className="text-sm font-medium">Language &amp; format</h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Keep the question&apos;s language or apply a consistent language
-                  and notice to every response.
+                  What your documents are written in, and how every response is
+                  presented.
                 </p>
               </div>
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <div className="min-w-0 space-y-2">
                   <Label htmlFor="settings-lang">Answer language</Label>
-                  <Input
-                    id="settings-lang"
-                    placeholder="Match the question"
-                    value={answerLanguage}
-                    onChange={(e) => setAnswerLanguage(e.target.value)}
-                  />
+                  <Select
+                    value={answerLanguage || MATCH_QUESTION}
+                    onValueChange={(v) =>
+                      setAnswerLanguage(v === MATCH_QUESTION ? "" : v)
+                    }
+                  >
+                    <SelectTrigger id="settings-lang" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={MATCH_QUESTION}>
+                        Match the question
+                      </SelectItem>
+                      {/* A value set before this was a menu - or through the
+                          API, which still accepts any string - would otherwise
+                          vanish from the trigger and be silently overwritten on
+                          the next save. */}
+                      {answerLanguage &&
+                        !ANSWER_LANGUAGES.includes(answerLanguage) && (
+                          <SelectItem value={answerLanguage}>
+                            {answerLanguage}
+                          </SelectItem>
+                        )}
+                      {ANSWER_LANGUAGES.map((lang) => (
+                        <SelectItem key={lang} value={lang}>
+                          {lang}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Leave blank to mirror each question&apos;s language.
+                    {answerLanguage
+                      ? `Every answer is written in ${answerLanguage}, whatever language the question or the sources used.`
+                      : "Each answer mirrors its own question, even when the documents are in another language."}
+                  </p>
+                </div>
+                <div className="min-w-0 space-y-2">
+                  <Label htmlFor="settings-doclang">Document language</Label>
+                  <Select
+                    value={documentLanguage || "English"}
+                    onValueChange={(v) =>
+                      setDocumentLanguage(v === "English" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger id="settings-doclang" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* A value the API accepted but this build has no
+                          stemmer for would otherwise vanish from the trigger
+                          and be silently overwritten on the next save. */}
+                      {documentLanguage &&
+                        !DOCUMENT_LANGUAGES.includes(documentLanguage) && (
+                          <SelectItem value={documentLanguage}>
+                            {documentLanguage}
+                          </SelectItem>
+                        )}
+                      {DOCUMENT_LANGUAGES.map((lang) => (
+                        <SelectItem key={lang} value={lang}>
+                          {lang}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    What your files are written in. Keyword search stems words
+                    in this language, so a search finds other forms of the same
+                    word. Changing it re-stems the index in place — nothing is
+                    re-embedded.
                   </p>
                 </div>
                 <div className="min-w-0 space-y-2">

@@ -242,6 +242,33 @@ class Settings(BaseSettings):
     # if the full-text column is missing (migration 0012 not applied).
     hybrid_search_enabled: bool = True
 
+    # Cross-lingual retrieval: when a question is written in a script the
+    # corpus does not use, embed a translation of it instead of the question.
+    # Measured on text-embedding-3-large, a Burmese question scores 0.00
+    # against the English passage that answers it where an English control
+    # scores 0.75 - and the lexical half returns nothing at all cross-lingually,
+    # so there is no second ranking to recover it. Off restores the previous
+    # behaviour exactly; the gate is a no-op for same-script projects either way.
+    cross_lingual_retrieval_enabled: bool = True
+    # A translation is only worth making when the embedder actually failed, and
+    # that is observable: when a model has no useful representation of a
+    # language every chunk scores near zero, because the query vector points
+    # nowhere. Measured over 80 cross-lingual queries in 40 languages, gating
+    # on this in ADDITION to the script check scored 80/80 at first place
+    # against 79/80 for the script check alone, using 31 percent fewer model
+    # calls. The one case it fixes is instructive: a Ukrainian question ranked
+    # the right passage first as asked, and its English translation ranked it
+    # second, because "vidpovidalnist" came back as "responsibility" rather
+    # than "penalty". Translating a language the embedder already handles can
+    # only lose nuance, so this stops doing it.
+    cross_lingual_similarity_floor: float = 0.40
+    # Chunks read to decide what script the corpus is written in. Cached per
+    # project content_version, so this runs once per corpus change, not per query.
+    cross_lingual_sample: int = 24
+    # How much of one chunk is shown to the translator as a reference passage.
+    # Enough to establish the language, short enough to stay cheap.
+    cross_lingual_sample_chars: int = 400
+
     # Approximate vector search (HNSW). The master kill switch: false forces
     # every vector search back onto today's exact SQL without dropping an index
     # or shipping code. Safe to default True because three further gates

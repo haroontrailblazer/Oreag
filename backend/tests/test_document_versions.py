@@ -1817,8 +1817,29 @@ class TestDeterministicGuardsUnderTheModel:
     def test_every_script_pattern_is_a_real_range(self):
         import re as _re
 
-        from app.services.ingestion import _SCRIPTS
+        # The table moved to services/cross_lingual.py, which needs the same
+        # question answered for retrieval. Ingestion's own copy covered ten
+        # scripts and missed Khmer, Lao and Myanmar - so a Khmer translation
+        # of an English act read as "same script as the original" and
+        # _looks_like_a_translation let it RETIRE the authoritative edition.
+        from app.services.cross_lingual import _SCRIPTS
 
         assert len(_SCRIPTS) >= 8
         for name, pattern in _SCRIPTS:
             assert isinstance(pattern, _re.Pattern), name
+
+    def test_a_translation_into_an_abugida_is_detected(self):
+        """The three scripts the old table missed, pinned by name.
+
+        These are the ones whose absence was silent: no error, no test
+        failure, just a translation that was never recognised as one.
+        """
+        from app.services.ingestion import _looks_like_a_translation
+
+        english = "The Companies Act 2013 - Annual Return"
+        for other in (
+            "ប្រព័ន្ធគ្រប់គ្រង",  # Khmer
+            "ລະບົບຈັດການ",  # Lao
+            "စာရွက်စာစီ",  # Burmese
+        ):
+            assert _looks_like_a_translation(other, english), other

@@ -37,7 +37,7 @@ from ..config import settings
 from ..models import Project
 from ..providers import resolver
 from ..providers.registry import get_embedder
-from . import query_cache
+from . import cross_lingual, query_cache, text_search
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,23 @@ _UNSPACED_SPLIT = (
     r"E'([\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\u0E00-\u0E7F\u0E80-\u0EFF\u1000-\u109F\u1780-\u17FF])', "
     r"' \1 ', 'g')"
 )
-_TSV_QUERY = "websearch_to_tsquery('english', " + _UNSPACED_SPLIT.format(col=":question") + ")"
+# The configuration is a BIND PARAMETER, not a literal, because since
+# migration 0039 it is per project - see services/text_search.py. It is cast
+# rather than interpolated: the value reaches the database as data, and a
+# name outside ALLOWED_CONFIGS is then a hard error instead of a silent
+# mismatch or an injection point.
+#
+# It stays a single constant for the whole scan rather than reading
+# chunks.ts_config per row, and that is load-bearing: the GIN index is on
+# content_tsv, and an index scan needs the tsquery on the other side of `@@`
+# to be constant. Verified with EXPLAIN that this form still produces a
+# Bitmap Index Scan on chunks_content_tsv_idx. A project has exactly one
+# configuration, so per-row would buy nothing and cost the index.
+_TSV_QUERY = (
+    "websearch_to_tsquery(CAST(:ts_config AS regconfig), "
+    + _UNSPACED_SPLIT.format(col=":question")
+    + ")"
+)
 
 # websearch_to_tsquery is forgiving of raw user input (plain words, "quoted
 # phrases", OR) and never raises on malformed input - which is why the query is
@@ -82,9 +98,12 @@ _TSV_QUERY = "websearch_to_tsquery('english', " + _UNSPACED_SPLIT.format(col=":q
 # Cosine similarity is still selected so lexical-only hits carry a meaningful
 # `similarity` downstream.
 #
-# 'english' MUST match the config on the generated `content_tsv` column
-# (migrations 0031, 0033). Stemmed index + unstemmed query means the terms
-# never meet and this half silently returns nothing.
+# The config MUST match the one `content_tsv` was generated with for these
+# rows (migration 0039 stores it per row in chunks.ts_config, written from the
+# project's document language at ingest). A stemmed index against a query
+# parsed by a different stemmer means the terms never meet and this half
+# silently returns nothing - no error, just an empty result indistinguishable
+# from "this corpus had no keyword matches".
 LEXICAL_SQL = text(
     f"""
     SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename,
@@ -635,7 +654,15 @@ def retrieve(
     question: str,
     top_k: int,
     embed_fn=None,
+    llm=None,
+    on_usage=None,
 ) -> list[dict]:
+    # Is this a question a translation COULD help - written in a script the
+    # corpus does not use? Cheap, cached, and no model call; false for every
+    # same-script project, which is the common case.
+    consider_translating = cross_lingual.should_consider(db, project, question)
+    search_text = question
+
     # query.py passes its per-request memoized embedder as ``embed_fn`` so the
     # same string is never embedded twice in one request (each embed is a
     # blocking provider round-trip). Standalone callers omit it and embedding
@@ -648,9 +675,9 @@ def retrieve(
             api_key,
             dimensions=project.embedding_dimensions,
         )
-        query_vector = embedder.embed_query(question)
+        query_vector = embedder.embed_query(search_text)
     else:
-        query_vector = embed_fn(question)
+        query_vector = embed_fn(search_text)
     qvec = "[" + ",".join(repr(v) for v in query_vector) + "]"
     params = {"qvec": qvec, "project_id": str(project.id), "limit": top_k}
 
@@ -664,13 +691,55 @@ def retrieve(
         semantic_sql = SEMANTIC_SQL
     semantic = [dict(row) for row in db.execute(semantic_sql, params).mappings()]
 
+    # SECOND gate: the search above has run with the question AS ASKED, so its
+    # top similarity now says whether the embedder understood the language at
+    # all. Only if it did NOT is a translation worth paying for - an embedder
+    # that already places the question well loses nuance by being handed
+    # English instead (measured: a Ukrainian question ranked the right passage
+    # first as asked and second once translated). When it did not, the query
+    # vector points nowhere and everything scores near zero.
+    #
+    # The re-run costs one extra vector query, and only on the queries that
+    # were failing anyway.
+    if consider_translating and cross_lingual.looks_weak(semantic):
+        translated = cross_lingual.retrieval_query(
+            db, project, question, rows=semantic, llm=llm, on_usage=on_usage
+        )
+        if translated != question:
+            search_text = translated
+            query_vector = (
+                embedder.embed_query(search_text)
+                if embed_fn is None
+                else embed_fn(search_text)
+            )
+            params["qvec"] = "[" + ",".join(repr(v) for v in query_vector) + "]"
+            semantic = [
+                dict(row) for row in db.execute(semantic_sql, params).mappings()
+            ]
+
+    # The lexical half searches for `search_text` too. Cross-lingually it is
+    # not merely unhelped but structurally dead - an English `content_tsv`
+    # holds no Khmer lexemes, measured at zero rows for 28 of 28 non-English
+    # questions - so a translation is the only form of the query it can ever
+    # match, and the translation prompt is told to preserve proper nouns,
+    # numbers and technical terms verbatim so the exact-term matching that
+    # justifies the lexical half survives. When nothing was translated this is
+    # the question itself and the statement is byte-identical to before.
+    #
+    # What is never translated is the question the caller GENERATES from: the
+    # reply must come back in the language it was asked in.
     lexical: list[dict] = []
     if settings.hybrid_search_enabled:
         try:
             lexical = [
                 dict(row)
                 for row in db.execute(
-                    LEXICAL_SQL, {**params, "question": question}
+                    LEXICAL_SQL,
+                    {
+                        **params,
+                        "question": search_text,
+                        "ts_config": text_search.config_for(project),
+                    },
                 ).mappings()
             ]
         except Exception:

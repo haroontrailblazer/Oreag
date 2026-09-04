@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     func,
+    text,
 )
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -64,6 +65,12 @@ class Project(Base):
     # the single generation chokepoint, so they cost nothing when unset.
     answer_language: Mapped[str | None] = mapped_column(Text)
     answer_disclaimer: Mapped[str | None] = mapped_column(Text)
+    # The language the project's DOCUMENTS are written in, which picks the
+    # stemmer keyword search uses (migration 0039). Deliberately NOT the same
+    # setting as answer_language above: a Hindi corpus answering in English is
+    # an ordinary configuration, and conflating the two would force one to be
+    # wrong. NULL = English, which is what every project had before 0039.
+    document_language: Mapped[str | None] = mapped_column(Text)
     # Optional per-project BYOK key overrides (Fernet ciphertext + last4 for
     # display). When null, key resolution falls back to the owner's account key.
     embedding_key_encrypted: Mapped[str | None] = mapped_column(Text)
@@ -219,6 +226,19 @@ class Chunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer)
     page_number: Mapped[int | None] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(NulSafeText)
+    # Which text-search configuration built this row's `content_tsv` (migration
+    # 0039). Written from the owning project's document language at ingest and
+    # read by nothing in Python - the generated column consumes it inside the
+    # database. Changing it on existing rows re-stems them on UPDATE, with no
+    # re-chunking and no re-embedding.
+    # Plain Text on purpose, though the column is a Postgres `regconfig`.
+    # MEASURED: psycopg sends a Python str as `unknown`, which Postgres coerces
+    # to the target column type, so both a single INSERT and the executemany
+    # path this table is written with accept it. A TypeDecorator rendering
+    # "regconfig" was tried first and is worse - get_col_spec is ignored on a
+    # TypeDecorator, and the DDL matters here because the test suite builds
+    # these tables on SQLite, which has no such type.
+    ts_config: Mapped[str] = mapped_column(Text, server_default=text("'english'"))
     embedding = mapped_column(Vector)  # dimension varies per project
     # Full-fidelity original, banked by a Matryoshka shrink (migration 0024).
     # DEFERRED: it is never read by search, and loading a full ORM Chunk would

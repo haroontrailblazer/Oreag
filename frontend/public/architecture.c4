@@ -236,9 +236,36 @@ model {
           technology 'pgvector cosine + Postgres FTS · RRF k=60 · HNSW planner'
           metadata {
             semantic 'cosine distance operator <=>, ORDER BY embedding <=> qvec LIMIT top_k'
-            lexical 'content_tsv @@ websearch_to_tsquery(simple), ranked by ts_rank_cd, GIN index'
+            lexical 'content_tsv @@ websearch_to_tsquery(the project stemmer), ranked by ts_rank_cd, GIN index. This said simple for three years after 0031 replaced it with english - a model that told anyone reasoning from it to break lexical search by matching the code to the diagram.'
             fusion 'Reciprocal Rank Fusion: score = sum of 1/(60 + rank) across both lists; raw cosine kept for thresholds and the UI match %'
             degradation 'lexical failure (missing content_tsv) rolls back and falls through to semantic-only'
+          }
+        }
+        textSearch = component 'Text Search Config' 'Which Postgres stemmer a project keyword-searches with. ONE definition, read by the write side and the read side of a contract nothing checks at runtime.' {
+          #readpath #scale
+          technology 'services/text_search.py - language name to regconfig - migration 0039'
+          metadata {
+            why 'until 0039 every project on the server was indexed with english, because a generated column takes a CONSTANT config and there was nowhere to put a per-project one. English stemming knows no other language morphology, so a query only matched the exact surface form the document used - and inflected languages make that the exception.'
+            measured 'one sentence per language, one query word in a DIFFERENT grammatical form. Fails under english, succeeds under the language own config, for Russian, German, Spanish, Portuguese, Italian, Dutch, Hindi, Nepali, Arabic, Indonesian, Greek, Hungarian, Serbian, Swedish, Catalan, Basque and Yiddish. Russian stores otchyoty as otchet, so the nominative a user types finds the plural.'
+            how 'to_tsvector(regconfig, text) is IMMUTABLE - unlike the one-argument form, which reads a GUC and is only STABLE - so a generated column may take its config from another COLUMN. chunks.ts_config holds it per row.'
+            the-contract 'ingestion stamps ts_config on every chunk it writes; retrieval binds the same value as a parameter. Disagree and the @@ operator matches zero rows - no exception, no log line, indistinguishable from a corpus with no keyword hits. backend/tests/test_text_search_config.py is the only thing that catches it.'
+            query-side-is-constant 'the GIN index is on content_tsv and an index scan needs the tsquery constant for the whole scan, so retrieval binds the project one value rather than reading the column per row. Verified with EXPLAIN that the bind-parameter form still produces a Bitmap Index Scan.'
+            changing-it-is-cheap 'a plain UPDATE. content_tsv is generated, so writing ts_config re-stems the row in the database - nothing re-chunked, nothing re-embedded, the user provider key never touched.'
+            unknown-language 'falls back to english, which is what every project had before 0039 - so this is additive, not a change to anything already working. simple was measured against english on Bengali and Polish and made no difference, while costing the English stemming a mixed corpus still wants.'
+          }
+        }
+        crossLingual = component 'Cross-Lingual Gate' 'Ask in one script, search a corpus written in another. When the question uses a writing system the corpus does not, the TRANSLATION is what gets searched - the question itself is untouched, so the answer still comes back in the language it was asked in.' {
+          #readpath
+          technology 'script table + corpus profile · services/cross_lingual.py · fails open'
+          metadata {
+            why 'measured on text-embedding-3-large: a Burmese question scores 0.00 cosine against the English passage that answers it, where an English control scores 0.75. Tamil, Lao, Khmer and Burmese all rank the right passage BELOW a wrong one.'
+            lexical-is-dead-too 'an English content_tsv holds no Khmer lexemes - zero rows for 28 of 28 non-English questions - so there is no second ranking to recover it, and the translation is the only form of the query the lexical half can ever match'
+            gate 'TWO gates, both must open. First: the question script is ABSENT from the corpus - a Hindi corpus asked in Hindi already works and is left alone. Second: the search that already ran came back WEAK, because an embedder with no grasp of a language scores every chunk near zero. Measured over 80 queries in 40 languages - never translate 67/80, script gate alone 79/80 at 52 model calls, both gates 80/80 at 36.'
+            why-the-second-gate 'a Ukrainian question ranked the right passage FIRST as asked and SECOND once translated - vidpovidalnist (liability) came back as responsibility. Where the embedder already works, replacing the users own words only loses nuance. Fusing the two rankings instead of choosing was measured and is WORSE (33/39 against 38/39): under RRF a wrong chunk ranked 1st+2nd beats a right chunk ranked 1st+6th.'
+            target 'the language is NAMED in the prompt, and that is measured. Showing a sample passage instead - which avoids identifying the language at all - failed 24 of 24 queries against gpt-4o-mini: the model read the sample as CONTENT and ANSWERED the question in the users own language. The script guard caught all 24, so the cost was wasted calls rather than poisoned queries.'
+            cost 'zero for Latin-script questions (no call at all); one memoised translate call otherwise, plus one language-identification call per corpus version - all metered and traced as translate-query / identify-corpus-language'
+            degradation 'a provider failure, an empty translation, or one that stayed in the asked script all fall back to the question as typed'
+            known-limit 'a corpus mixing scripts satisfies the first gate for both, so a Hindi question there is left alone. Measured, the English passage still came back at rank 2 of 6 - inside the window the model reads, so a ranking penalty rather than a wall.'
           }
         }
         annPlanner = component 'HNSW Planner' 'Decides whether a vector search runs EXACT or APPROXIMATE. Exact is the default and is never removed; the index is an optimisation the planner may decline.' {
@@ -603,6 +630,10 @@ model {
   ingestion -[persist]-> files 'raw file and markdown'
   ingestion -[persist]-> db 'chunks and embeddings, committed per batch'
   conversion -[persist]-> files 'reads the raw upload'
+  retrieval -> textSearch 'which stemmer to parse the query with'
+  ingestion -> textSearch 'which stemmer to index this project chunks with'
+  retrieval -> crossLingual 'what to SEARCH for: the question, or a translation of it'
+  crossLingual -[persist]-> db 'sample chunks to learn what script the corpus uses'
   retrieval -[persist]-> db 'hybrid search: cosine plus full-text, RRF fusion'
   memory -[persist]-> db 'embed on save, cosine search'
   memoryGraph -[persist]-> db 'nodes and related edges'

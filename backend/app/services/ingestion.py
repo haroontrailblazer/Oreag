@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import math
 import re
 import time
 import uuid
@@ -25,7 +24,9 @@ from ..schemas import (
     RELATION_KINDS,
     RELATIONS,
 )
+from . import cross_lingual
 from . import embedding_usage
+from . import text_search
 from .usage import record_usage
 from ..providers import registry, resolver
 from ..providers.registry import (
@@ -603,23 +604,17 @@ def find_duplicate(db: Session, project_id: uuid.UUID, digest: str):
 # Writing systems, as character ranges. Latin is deliberately absent: the test
 # below asks whether a NON-Latin script appears, because that is the signal
 # that survives OCR noise and transliterated filenames.
-_SCRIPTS = (
-    ("devanagari", re.compile(r"[ऀ-ॿ]")),
-    ("cjk",        re.compile(r"[぀-ヿ一-鿿]")),
-    ("arabic",     re.compile(r"[؀-ۿ]")),
-    ("cyrillic",   re.compile(r"[Ѐ-ӿ]")),
-    ("tamil",      re.compile(r"[஀-௿]")),
-    ("bengali",    re.compile(r"[ঀ-৿]")),
-    ("thai",       re.compile(r"[฀-๿]")),
-    ("hangul",     re.compile(r"[가-힯]")),
-    ("hebrew",     re.compile(r"[֐-׿]")),
-    ("greek",      re.compile(r"[Ͱ-Ͽ]")),
-)
-
-
-def _scripts(text: str) -> frozenset[str]:
-    """Which non-Latin writing systems appear in this text."""
-    return frozenset(name for name, pattern in _SCRIPTS if pattern.search(text))
+#
+# ONE table, shared with services/cross_lingual.py, which needs the same
+# question answered for a different reason. It used to be defined here and
+# covered ten scripts; the shared table covers twenty-four. The three that
+# matter most were among the missing: a Khmer, Lao or Burmese translation of
+# an English act scored as "same script as the original" here, so
+# _looks_like_a_translation returned False and the translation was free to
+# RETIRE the authoritative English edition - the exact outcome that function
+# exists to prevent. Verified against the 105-case extraction corpus: the
+# wider table changes no case there, it only stops missing these three.
+_scripts = cross_lingual.scripts
 
 
 def _looks_like_a_translation(probe: str, candidate: str) -> bool:
@@ -1131,6 +1126,9 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
         db.commit()
 
         batch_size = embed_batch_size(embedder)
+        # Resolved ONCE, outside the batch loop: it is a pure lookup off the
+        # project and identical for every chunk of every batch.
+        ts_config = text_search.config_for(project)
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i : i + batch_size]
             vectors = embedder.embed_texts([content for _, _, content in batch])
@@ -1150,6 +1148,20 @@ def _ingest_file_inner(file_id: uuid.UUID) -> None:
                 }
                 for (idx, page_number, content), vector in zip(batch, vectors)
             ]
+            # The text-search configuration this project's keyword search
+            # will PARSE with, stamped on the row so the generated
+            # `content_tsv` is BUILT with the same one. The two must agree or
+            # `@@` matches nothing, silently - see services/text_search.py.
+            #
+            # OMITTED when it is the default, exactly as embedding_full is
+            # omitted above and for the same reason: a key present in the dict
+            # names that column in the INSERT, and naming ts_config would
+            # break every upload on a database that has not run 0039 yet. A
+            # project can only hold a non-default document language if 0039
+            # HAS run, so the branch that names it is unreachable before then.
+            if ts_config != text_search.DEFAULT_CONFIG:
+                for row in rows:
+                    row["ts_config"] = ts_config
             if archiving:
                 # OMITTED, not set to None, when there is nothing to archive.
                 # A key present in the dict makes SQLAlchemy name that column in

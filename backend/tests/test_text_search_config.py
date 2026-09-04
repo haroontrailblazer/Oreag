@@ -15,8 +15,27 @@ RETRIEVAL = pathlib.Path(__file__).resolve().parent.parent / "app/services/retri
 
 
 def _query_configs() -> set[str]:
+    """Configs the QUERY side can parse with.
+
+    Since migration 0039 the config is per project, so retrieval.py no longer
+    holds a literal - it binds `:ts_config` and casts it. The set of values
+    that bind can ever take is services/text_search.py's table, which is what
+    this returns, so the agreement test below still compares like with like.
+    """
     src = RETRIEVAL.read_text(encoding="utf-8")
-    return set(re.findall(r"websearch_to_tsquery\('(\w+)'", src))
+    literals = set(re.findall(r"websearch_to_tsquery\('(\w+)'", src))
+    assert not literals, (
+        f"retrieval.py hardcodes a text-search config {literals} - it must "
+        "bind :ts_config so each project is parsed with the stemmer its own "
+        "chunks were indexed under"
+    )
+    assert "CAST(:ts_config AS regconfig)" in src, (
+        "retrieval.py no longer binds :ts_config as a regconfig; the query "
+        "side and the index side would drift with nothing to catch it"
+    )
+    from app.services.text_search import ALLOWED_CONFIGS
+
+    return set(ALLOWED_CONFIGS)
 
 
 def _latest_tsv_migration() -> str:
@@ -49,34 +68,66 @@ def _executable_sql(src: str) -> str:
     return src[min(starts):]
 
 
-def _index_config() -> str:
-    """The config on the LATEST migration that defines content_tsv."""
-    # Tolerant of whitespace: 0033 wraps the expression across several lines,
-    # so the config name no longer sits on the same line as `generated always`.
-    matches = re.findall(
-        r"to_tsvector\(\s*'(\w+)'", _executable_sql(_latest_tsv_migration())
-    )
-    assert matches, "no migration defines content_tsv"
-    return matches[-1]
+def _index_source() -> str:
+    """What the INDEX side builds content_tsv from: a column, or a literal.
+
+    Before 0039 this was a quoted literal ('english'). From 0039 it is the
+    per-row `ts_config` column, which is the whole point - a generated column
+    may take its configuration from another column because
+    `to_tsvector(regconfig, text)` is IMMUTABLE.
+    """
+    sql = _executable_sql(_latest_tsv_migration())
+    literals = re.findall(r"to_tsvector\(\s*'(\w+)'", sql)
+    columns = re.findall(r"to_tsvector\(\s*([a-z_]+)\s*,", sql)
+    assert literals or columns, "no migration defines content_tsv"
+    return literals[-1] if literals else columns[-1]
 
 
 class TestConfigsAgree:
-    def test_every_query_uses_one_config(self):
-        configs = _query_configs()
-        assert len(configs) == 1, f"retrieval.py mixes configs: {configs}"
+    """The index side and the query side must pick the same stemmer.
 
-    def test_the_query_matches_the_index(self):
-        query = _query_configs().pop()
-        assert query == _index_config(), (
-            f"lexical search queries with '{query}' but content_tsv is built "
-            f"with '{_index_config()}' - the terms will never meet and lexical "
-            "search will silently return nothing"
+    Nothing at runtime checks this. A stemmed index parsed by a different
+    stemmer makes `@@` match zero rows - no exception, no log line, just an
+    empty lexical half indistinguishable from a corpus with no keyword hits.
+    """
+
+    def test_the_index_reads_the_per_row_column(self):
+        """Migration 0039 moved the config off a literal and onto a column, so
+        one project can be stemmed as Russian while another stays English."""
+        assert _index_source() == "ts_config", (
+            f"content_tsv is built from {_index_source()!r}; it must be built "
+            "from the ts_config column, or a project's document language "
+            "cannot reach the rows it owns"
         )
 
-    def test_it_is_a_stemming_config(self):
+    def test_the_query_binds_the_same_column_values(self):
+        """Both sides must draw from ONE table of configuration names."""
+        from app.services import text_search
+
+        assert _query_configs() == set(text_search.ALLOWED_CONFIGS)
+        assert text_search.DEFAULT_CONFIG in text_search.ALLOWED_CONFIGS
+
+    def test_the_write_side_stamps_what_the_read_side_binds(self):
+        """Ingestion writes ts_config, retrieval binds it - from one function.
+
+        If ingestion ever computed the config a different way, every chunk it
+        wrote would be unfindable by keyword and only this test would notice.
+        """
+        ingestion = (ROOT / "backend/app/services/ingestion.py").read_text("utf-8")
+        assert "text_search.config_for(project)" in ingestion
+        assert 'row["ts_config"]' in ingestion
+        assert "text_search.config_for(project)" in RETRIEVAL.read_text("utf-8")
+
+    def test_the_default_still_stems_english(self):
         """'simple' does not stem, so "investing" never reached "invest" and
-        the lexical half was close to dead weight on prose."""
-        assert _index_config() != "simple"
+        the lexical half was close to dead weight on prose. Every project that
+        has not chosen a language must keep the English stemmer, which is also
+        what makes 0039 additive rather than a change to anything working."""
+        from app.services import text_search
+
+        assert text_search.DEFAULT_CONFIG == "english"
+        assert text_search.config_for_language(None) == "english"
+        assert text_search.config_for_language("Klingon") == "english"
 
 
 class TestMigrationIsRunnableByOurOwnTooling:

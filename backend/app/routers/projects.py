@@ -2,16 +2,18 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from .. import crypto
 from ..config import settings
 from ..auth.jwt import get_current_user
 from ..db import get_db
-from ..models import File, Project, QueryLog
+from ..models import Chunk, File, Project, QueryLog
 from ..providers.registry import resolve_embedding_dimensions, validate_llm
 from ..schemas import ProjectCreate, ProjectOut, ProjectUpdate
-from ..services import storage
+from ..services import storage, text_search
+from ..services.content_version import bump_content_version
 from ..services.ingestion import backfill_extracted_titles
 from .deps import ensure_valid_provider_key, get_owned_project
 
@@ -188,6 +190,31 @@ def update_project(
         project.answer_language = body.answer_language.strip() or None
     if body.answer_disclaimer is not None:
         project.answer_disclaimer = body.answer_disclaimer.strip() or None
+    # The DOCUMENT language (0039) is the one setting here that has to reach
+    # rows already in the table. Keyword search parses a query with the
+    # project's configuration and matches it against a `content_tsv` BUILT with
+    # whatever configuration each chunk was written under - so changing the
+    # setting without restamping the chunks makes the two disagree and the
+    # lexical half silently returns nothing.
+    #
+    # The restamp is a plain UPDATE, not a re-index: `content_tsv` is a
+    # generated column, so writing ts_config recomputes it in the database.
+    # Nothing is re-chunked, nothing is re-embedded, and the user's provider
+    # key is never touched. Only the RESOLVED configuration is compared, so
+    # switching between two names that map to the same stemmer (Portuguese and
+    # Portuguese (Brazil)) rewrites nothing.
+    if body.document_language is not None:
+        wanted = body.document_language.strip() or None
+        if text_search.config_for_language(wanted) != text_search.config_for(project):
+            db.execute(
+                sa_update(Chunk)
+                .where(Chunk.project_id == project.id)
+                .values(ts_config=text_search.config_for_language(wanted))
+            )
+            # The lexical half now matches different rows, so any answer
+            # computed under the old stemming is stale.
+            bump_content_version(db, project)
+        project.document_language = wanted
     # Document versions (0034). Like the answer-policy fields above, this
     # deliberately does NOT bump content_version: it changes nothing already
     # indexed. Turning it OFF only stops new uploads being held for review -

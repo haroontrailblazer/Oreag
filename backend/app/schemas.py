@@ -42,6 +42,13 @@ class ProjectUpdate(BaseModel):
     # it alone", so it cannot double as the clear signal.
     answer_language: str | None = Field(default=None, max_length=60)
     answer_disclaimer: str | None = Field(default=None, max_length=500)
+    # The language the DOCUMENTS are written in (0039), which picks the stemmer
+    # keyword search uses - a different question from answer_language above.
+    # Unrecognised names are not rejected here: services/text_search.py maps
+    # anything it does not know to English, so a name this build has never
+    # heard of degrades to today's behaviour instead of 422-ing a caller on a
+    # newer client.
+    document_language: str | None = Field(default=None, max_length=60)
     # Document versions (0034). Toggling this changes nothing already indexed,
     # so - like the four answer-policy fields above - it must NOT bump
     # content_version. Turning it OFF only stops new uploads being held for
@@ -99,6 +106,7 @@ class ProjectOut(BaseModel):
     min_strong: int = 1
     answer_language: str | None = None
     answer_disclaimer: str | None = None
+    document_language: str | None = None
 
     @field_validator("min_similarity", mode="before")
     @classmethod

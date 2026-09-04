@@ -25,6 +25,7 @@ from ..providers.base import (
 from ..providers.registry import get_embedder, get_llm
 from ..schemas import QueryResponse, SourceChunk
 from . import agentic
+from . import cross_lingual
 from . import generation
 from . import memory as memory_service
 from . import query_cache
@@ -238,7 +239,7 @@ def _grounding_policy(project) -> tuple[float, int]:
     )
 
 
-def _answer_signature(project) -> str:
+def _answer_signature(project, db=None, question: str | None = None) -> str:
     """Everything that changes the ANSWER but not the CONTENT.
 
     The cache key already covers models, top_k and content_version. The answer
@@ -267,6 +268,20 @@ def _answer_signature(project) -> str:
         # Hashed, not inlined: a 500-char disclaimer would otherwise dominate
         # the key, and only its identity matters here.
         parts.append("d" + hashlib.sha256(disc.encode("utf-8")).hexdigest()[:12])
+    # A cross-lingual question is retrieved from a TRANSLATION of itself, so an
+    # answer cached before that existed was built from different sources.
+    # Marked per-question rather than globally on purpose: a flag on every
+    # signature would orphan every project's cache the moment this deployed,
+    # trading a stale answer for a stampede. Only the questions whose retrieval
+    # actually changes get a new key. `is_active` costs a cached read and no
+    # LLM call, and both arguments are optional so the lightweight project
+    # stand-ins in tests keep working.
+    if db is not None and question:
+        try:
+            if cross_lingual.is_active(db, project, question):
+                parts.append("x1")
+        except Exception:  # pragma: no cover - a cache key must never raise
+            logger.debug("Cross-lingual cache signature check failed", exc_info=True)
     return "|".join(parts)
 
 
@@ -399,7 +414,20 @@ def run_query(
         vector (via the per-request memo) serves both searches.
         """
         sources = (
-            retrieval.retrieve(db, project, query, k, embed_fn=embed_query)
+            retrieval.retrieve(
+                db,
+                project,
+                query,
+                k,
+                embed_fn=embed_query,
+                # A cross-lingual question is translated before it is
+                # embedded; that is an LLM call, so it rides the request's
+                # own client and lands in the request's token total like
+                # every other call. Passing neither would still work and
+                # would silently stop metering it.
+                llm=_llm,
+                on_usage=request_usage.add,
+            )
             if has_chunks
             else []
         )
@@ -513,7 +541,7 @@ def run_query(
         # threshold reuses the cached answer, below it the query runs for real.
         # Both are scoped by models + top_k + content_version, so ANY content
         # write (including in-place edits) instantly orphans stale answers.
-        signature = _answer_signature(project)
+        signature = _answer_signature(project, db, question)
         semantic_vector: list[float] | None = None
         cache_layer: str | None = None
         cache_similarity: float | None = None
@@ -676,7 +704,7 @@ def run_query_stream(
         project_id = project.id
         project_key = str(project_id)
         model = f"{project.llm_provider}/{project.llm_model}"
-        signature = _answer_signature(project)
+        signature = _answer_signature(project, db, question)
         top_k = min(top_k_override or project.top_k, 20)
         has_chunks = bool(
             db.scalar(select(Chunk.id).where(Chunk.project_id == project.id).limit(1))
@@ -719,7 +747,20 @@ def run_query_stream(
 
     def retrieve_fn(query: str, k: int) -> list[dict]:
         sources = (
-            retrieval.retrieve(db, project, query, k, embed_fn=embed_query)
+            retrieval.retrieve(
+                db,
+                project,
+                query,
+                k,
+                embed_fn=embed_query,
+                # A cross-lingual question is translated before it is
+                # embedded; that is an LLM call, so it rides the request's
+                # own client and lands in the request's token total like
+                # every other call. Passing neither would still work and
+                # would silently stop metering it.
+                llm=_llm,
+                on_usage=request_usage.add,
+            )
             if has_chunks
             else []
         )

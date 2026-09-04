@@ -23,6 +23,10 @@ export interface Project {
   // null = mirror the question's language / no disclaimer.
   answer_language: string | null
   answer_disclaimer: string | null
+  // The language the DOCUMENTS are written in, which picks the stemmer used
+  // for keyword search. A different question from answer_language above: a
+  // Hindi corpus answering in English is an ordinary setup. null = English.
+  document_language: string | null
   status: "empty" | "indexing" | "ready" | "error"
   // When true the public /v1 API + MCP are blocked (403) until resumed.
   suspended: boolean

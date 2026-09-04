@@ -409,3 +409,44 @@ export function VectorViz() {
     </Frame>
   )
 }
+
+/**
+ * A question in one script reaching a document in another: the question is
+ * rewritten for the SEARCH (dashed arrow), the document is untouched, and the
+ * answer returns in the script it was asked in.
+ */
+export function TranslateViz() {
+  return (
+    <Frame>
+      <rect x="4" y="12" width="26" height="16" rx="3" className="fill-sky-500/15 stroke-sky-500" strokeWidth="1.2" />
+      <text x="9" y="23.2" className="fill-sky-600 dark:fill-sky-400" style={{ fontSize: 7, fontWeight: 600 }}>&#3936;&#3937;&#3938;</text>
+      <path d="M32 20 L46 20 M42 16.5 L46 20 L42 23.5" className="fill-none stroke-muted-foreground/50" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2 2" />
+      <rect x="48" y="12" width="26" height="16" rx="3" className="fill-muted-foreground/10 stroke-muted-foreground/50" strokeWidth="1.2" />
+      <text x="52" y="23" className="fill-muted-foreground" style={{ fontSize: 6, fontWeight: 600 }}>abc</text>
+      <path d="M76 20 L88 20 M84 16.5 L88 20 L84 23.5" className="fill-none stroke-muted-foreground/50" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="90" y="7" width="24" height="26" rx="2" className="fill-none stroke-muted-foreground/50" strokeWidth="1.5" />
+      <line x1="94" y1="14" x2="110" y2="14" className="stroke-muted-foreground/40" strokeWidth="1.4" />
+      <line x1="94" y1="20" x2="110" y2="20" className="stroke-muted-foreground/40" strokeWidth="1.4" />
+      <line x1="94" y1="26" x2="104" y2="26" className="stroke-muted-foreground/40" strokeWidth="1.4" />
+    </Frame>
+  )
+}
+
+/** A grounding floor: only matches above the line count as evidence. */
+export function GroundingViz() {
+  return (
+    <Frame>
+      <line x1="8" y1="24" x2="112" y2="24" className="stroke-sky-500" strokeWidth="1.2" strokeDasharray="3 2" />
+      {[
+        [18, 10],
+        [38, 14],
+        [58, 19],
+        [78, 28],
+        [98, 31],
+      ].map(([x, y]) => (
+        <circle key={x} cx={x} cy={y} r="3.4" className={y < 24 ? "fill-sky-500/70 stroke-sky-500" : "fill-none stroke-muted-foreground/40"} strokeWidth="1.2" />
+      ))}
+      <text x="8" y="36.5" className="fill-muted-foreground" style={{ fontSize: 5.5 }}>ignored below the floor</text>
+    </Frame>
+  )
+}
