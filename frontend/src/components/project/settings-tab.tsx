@@ -716,6 +716,10 @@ export function SettingsTab({
                 <Scales className="size-4 text-muted-foreground" />
                 Answer policy
               </CardTitle>
+              <CardDescription>
+                Set the evidence bar for an answer, then control how every
+                response is presented.
+              </CardDescription>
             </div>
             <BestPractices
               className="ml-auto"
@@ -764,12 +768,12 @@ export function SettingsTab({
         <CardContent className="space-y-6">
           <div className="grid min-w-0 gap-6 lg:grid-cols-2 lg:gap-0">
             <section className="min-w-0 space-y-5 lg:pr-6">
-              <div className="flex items-center gap-1.5 border-b pb-3">
+              <div className="space-y-1 border-b pb-3">
                 <h3 className="text-sm font-medium">Grounding</h3>
-                <PolicyHelp label="Grounding">
+                <p className="text-xs leading-relaxed text-muted-foreground">
                   Decide how much matching evidence the project needs before it
                   answers.
-                </PolicyHelp>
+                </p>
               </div>
               <div className="grid min-w-0 gap-4">
                 <div className="min-w-0 space-y-2">
@@ -812,8 +816,12 @@ export function SettingsTab({
             </section>
 
             <section className="min-w-0 space-y-5 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
-              <div className="border-b pb-3">
+              <div className="space-y-1 border-b pb-3">
                 <h3 className="text-sm font-medium">Language &amp; format</h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  What your documents are written in, and how every response is
+                  presented.
+                </p>
               </div>
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <div className="min-w-0 space-y-2">
