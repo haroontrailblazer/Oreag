@@ -32,7 +32,7 @@ export default async function Home() {
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <BrandMark
-              className="size-9 shrink-0 rounded-lg"
+              className="size-9 shrink-0 rounded-none"
               imgClassName="scale-150"
             />
             <span className="text-lg font-semibold tracking-tight">Oreag</span>
@@ -71,7 +71,7 @@ export default async function Home() {
           <div className="flex items-center gap-5">
             {user ? (
               // Already signed in - go straight to the dashboard, no sign in.
-              <Button asChild size="lg" className="group rounded-full px-6">
+              <Button asChild size="lg" className="group rounded-none px-6">
                 <Link href="/dashboard">
                   Go to dashboard
                   <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
@@ -79,7 +79,7 @@ export default async function Home() {
               </Button>
             ) : (
               <>
-                <Button asChild size="lg" className="rounded-full px-6">
+                <Button asChild size="lg" className="rounded-none px-6">
                   <Link href="/signup">Get started</Link>
                 </Button>
                 <Link

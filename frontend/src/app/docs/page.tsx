@@ -53,7 +53,7 @@ export default function DocsPage() {
             <DocsMobileNav />
             <Link href="/" className="flex min-w-0 items-center gap-2.5">
               <BrandMark
-                className="size-8 shrink-0 rounded-lg"
+                className="size-8 shrink-0 rounded-none"
                 imgClassName="scale-150"
               />
               <span className="truncate font-semibold tracking-tight">
@@ -93,7 +93,7 @@ export default function DocsPage() {
 
         <main
           id="docs-content"
-          className="min-w-0 flex-1 space-y-16 py-10 pb-24"
+          className="min-w-0 flex-1 overflow-x-hidden space-y-16 py-10 pb-24"
         >
           {sections.map((s) => (
             <section key={s.id}>

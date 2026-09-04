@@ -74,8 +74,8 @@ function StatTile({
   value: number | null
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border bg-background p-4">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+    <div className="flex items-center gap-3 rounded-none border bg-background p-4">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-none bg-muted text-muted-foreground">
         {icon}
       </span>
       <div className="min-w-0">
@@ -379,7 +379,7 @@ export default function ProfilePage() {
 
               {/* Verify prompt: only when the email isn't confirmed yet. */}
               {meta && !meta.verified ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-left text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-none border border-amber-300/60 bg-amber-50 px-3 py-2 text-left text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
                   <span className="min-w-0 flex-1">
                     Your email isn&apos;t verified yet. Confirm it to secure your
                     account and keep access if you ever need to reset your

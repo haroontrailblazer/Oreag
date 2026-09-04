@@ -53,7 +53,7 @@ export function RecoveryCodeForm({ onSignOut }: { onSignOut: () => void }) {
   return (
     <div className="space-y-3">
       {open ? (
-        <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
+        <div className="space-y-3 rounded-none border bg-muted/30 p-3">
           <p className="text-xs text-muted-foreground">
             Enter one of the recovery codes you saved when you set up two-factor.
             Each works once, and using one turns two-factor off so you can set it

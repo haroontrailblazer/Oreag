@@ -112,7 +112,7 @@ function PolicyHelp({
           onClick={(event) => {
             if (open) event.preventDefault()
           }}
-          className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="inline-flex size-4 shrink-0 items-center justify-center rounded-none text-muted-foreground/70 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <WarningCircle className="size-3.5" />
         </button>
@@ -692,7 +692,7 @@ export function SettingsTab({
           {overview.map((item) => (
             <div
               key={item.label}
-              className="rounded-lg border bg-muted/30 px-3 py-2.5"
+              className="rounded-none border bg-muted/30 px-3 py-2.5"
             >
               <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 {item.label}
@@ -944,7 +944,7 @@ export function SettingsTab({
           </div>
 
           <div className="border-t pt-6">
-            <div className="flex min-w-0 flex-col gap-4 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
+            <div className="flex min-w-0 flex-col gap-4 rounded-none border bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
               <div className="min-w-0 space-y-1.5">
                 <div className="flex items-center gap-1.5">
                   <Label
@@ -1335,7 +1335,7 @@ export function SettingsTab({
                 </SelectContent>
               </Select>
               {instantChange && (
-                <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                <p className="rounded-none bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
                   {instantShrink
                     ? "Same model, smaller size: applied instantly, and your full-size vectors are kept so you can switch back."
                     : "Restoring a size you used before: applied instantly from the kept copies - no re-embedding."}

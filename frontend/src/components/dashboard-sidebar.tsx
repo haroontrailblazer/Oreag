@@ -74,7 +74,7 @@ function SidebarLink({
     <Link
       href={href}
       className={cn(
-        "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex h-9 items-center gap-2 rounded-none px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
@@ -126,7 +126,7 @@ function ProjectLink({
       href={`/projects/${project.id}`}
       prefetch={false}
       className={cn(
-        "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex h-9 items-center gap-2 rounded-none px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
@@ -192,7 +192,7 @@ function FileItem({
       href={href}
       title={file.filename}
       onClick={handleClick}
-      className="flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="flex h-8 items-center gap-2 rounded-none px-3 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
       <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
       <span className="min-w-0 flex-1 truncate">{display}</span>
@@ -381,7 +381,7 @@ function SidebarBody() {
         href="/dashboard"
         className="group flex min-w-0 items-center gap-3"
       >
-        <BrandMark className="size-14 shrink-0 rounded-xl transition-transform group-hover:scale-[1.03]" />
+        <BrandMark className="size-14 shrink-0 rounded-none transition-transform group-hover:scale-[1.03]" />
         <span className="min-w-0 leading-tight">
           <span className="block truncate text-lg font-semibold tracking-tight">
             Oreag
@@ -414,7 +414,7 @@ function SidebarBody() {
             {inProject ? "Files" : "Projects"}
           </span>
           {(inProject ? files?.length : projects?.length) ? (
-            <Badge variant="secondary" className="h-5 rounded-md px-1.5 text-[10px]">
+            <Badge variant="secondary" className="h-5 rounded-none px-1.5 text-[10px]">
               {inProject ? files?.length : projects?.length}
             </Badge>
           ) : null}
@@ -442,12 +442,12 @@ function SidebarBody() {
           {inProject ? (
             <>
               {files?.length === 0 && (
-                <div className="rounded-md px-3 py-2 text-xs text-sidebar-foreground/55">
+                <div className="rounded-none px-3 py-2 text-xs text-sidebar-foreground/55">
                   No files yet
                 </div>
               )}
               {files && files.length > 0 && filteredFiles.length === 0 && (
-                <div className="rounded-md px-3 py-2 text-xs text-sidebar-foreground/55">
+                <div className="rounded-none px-3 py-2 text-xs text-sidebar-foreground/55">
                   No matching files
                 </div>
               )}
@@ -469,7 +469,7 @@ function SidebarBody() {
                     <button
                       type="button"
                       onClick={() => toggleGroup(group.type)}
-                      className="flex h-8 w-full items-center gap-2 rounded-md px-3 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      className="flex h-8 w-full items-center gap-2 rounded-none px-3 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     >
                       <ChevronRight
                         className={cn(
@@ -482,7 +482,7 @@ function SidebarBody() {
                       </span>
                       <Badge
                         variant="secondary"
-                        className="h-5 rounded-md px-1.5 text-[10px]"
+                        className="h-5 rounded-none px-1.5 text-[10px]"
                       >
                         {group.items.length}
                       </Badge>
@@ -507,14 +507,14 @@ function SidebarBody() {
           ) : (
             <>
               {projects?.length === 0 && (
-                <div className="rounded-md px-3 py-2 text-xs text-sidebar-foreground/55">
+                <div className="rounded-none px-3 py-2 text-xs text-sidebar-foreground/55">
                   No projects yet
                 </div>
               )}
               {projects &&
                 projects.length > 0 &&
                 filteredProjects.length === 0 && (
-                  <div className="rounded-md px-3 py-2 text-xs text-sidebar-foreground/55">
+                  <div className="rounded-none px-3 py-2 text-xs text-sidebar-foreground/55">
                     No matching projects
                   </div>
                 )}
@@ -568,7 +568,7 @@ export function DashboardSidebar() {
           </SheetContent>
         </Sheet>
         <Link href="/dashboard" className="group flex min-w-0 items-center gap-2">
-          <BrandMark className="size-8 shrink-0 rounded-lg" />
+          <BrandMark className="size-8 shrink-0 rounded-none" />
           <span className="truncate text-base font-semibold tracking-tight">
             Oreag
           </span>

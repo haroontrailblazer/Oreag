@@ -208,10 +208,10 @@ export default function UsagePreviewPage() {
             Requests, tokens and cost across your API keys, models and projects.
           </p>
           </div>
-          <div className="hidden rounded-xl border border-border/80 bg-muted/60 p-1 text-xs font-semibold shadow-sm sm:flex">
-            <span className="rounded-lg px-3.5 py-2 text-muted-foreground">7 days</span>
-            <span className="rounded-lg bg-background px-3.5 py-2 text-foreground shadow-sm">30 days</span>
-            <span className="rounded-lg px-3.5 py-2 text-muted-foreground">90 days</span>
+          <div className="hidden rounded-none border border-border/80 bg-muted/60 p-1 text-xs font-semibold shadow-sm sm:flex">
+            <span className="rounded-none px-3.5 py-2 text-muted-foreground">7 days</span>
+            <span className="rounded-none bg-background px-3.5 py-2 text-foreground shadow-sm">30 days</span>
+            <span className="rounded-none px-3.5 py-2 text-muted-foreground">90 days</span>
           </div>
         </div>
         <UsageView data={fixture} />

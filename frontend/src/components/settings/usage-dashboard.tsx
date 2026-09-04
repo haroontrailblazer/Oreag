@@ -273,7 +273,7 @@ function MetricTile({
       <CardHeader className="grid grid-cols-[auto_1fr] items-center gap-3 px-5">
         <span
           aria-hidden="true"
-          className="usage-metric-icon flex size-9 items-center justify-center rounded-lg"
+          className="usage-metric-icon flex size-9 items-center justify-center rounded-none"
           style={{ color: accent }}
         >
           {icon}
@@ -381,7 +381,7 @@ function TotalsRow({
   )
 
   return (
-    <div className="usage-summary-grid grid grid-cols-2 overflow-hidden rounded-2xl border border-blue-500/20 bg-blue-50/35 shadow-[0_16px_50px_-42px_rgba(37,99,235,0.55)] xl:grid-cols-6 dark:bg-blue-950/10">
+    <div className="usage-summary-grid grid grid-cols-2 overflow-hidden rounded-none border border-blue-500/20 bg-blue-50/35 shadow-[0_16px_50px_-42px_rgba(37,99,235,0.55)] xl:grid-cols-6 dark:bg-blue-950/10">
       <MetricTile
         label="Requests"
         value={totals.requests}
@@ -1806,9 +1806,9 @@ export function UsageDashboard() {
           value={String(days)}
           onValueChange={(value) => setDays(Number(value) as UsageWindow)}
         >
-          <TabsList className="h-10 rounded-xl border border-border/80 bg-muted/60 p-1 shadow-sm">
+          <TabsList className="h-10 rounded-none border border-border/80 bg-muted/60 p-1 shadow-sm">
             {USAGE_WINDOWS.map((window) => (
-              <TabsTrigger key={window} value={String(window)} className="rounded-lg px-3.5 text-xs font-semibold data-[state=active]:shadow-sm">
+              <TabsTrigger key={window} value={String(window)} className="rounded-none px-3.5 text-xs font-semibold data-[state=active]:shadow-sm">
                 {window} days
               </TabsTrigger>
             ))}

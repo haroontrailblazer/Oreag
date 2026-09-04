@@ -151,7 +151,7 @@ export default function TwoFactorPage() {
             />
             <Button
               type="button"
-              className="h-11 w-full rounded-xl text-[15px] sm:h-12"
+              className="h-11 w-full rounded-none text-[15px] sm:h-12"
               disabled={!isCompleteCode(code, TOTP_LENGTH) || loading}
               onClick={() => verify(code)}
             >

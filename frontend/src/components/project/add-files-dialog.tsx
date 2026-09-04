@@ -210,7 +210,7 @@ export function AddFilesDialog({
                 e.preventDefault()
                 addFiles(e.dataTransfer.files)
               }}
-              className="flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed p-6 text-sm text-muted-foreground hover:bg-muted/40"
+              className="flex w-full flex-col items-center gap-2 rounded-none border-2 border-dashed p-6 text-sm text-muted-foreground hover:bg-muted/40"
             >
               <FileUp className="size-5" />
               Drag &amp; drop or click to choose (max {MAX_FILE_MB} MB each)
@@ -227,7 +227,7 @@ export function AddFilesDialog({
                 {files.map((file) => (
                   <li
                     key={file.name + file.size}
-                    className="flex items-center gap-2 rounded border px-3 py-1.5 text-sm"
+                    className="flex items-center gap-2 rounded-none border px-3 py-1.5 text-sm"
                   >
                     <span className="min-w-0 flex-1 truncate">{file.name}</span>
                     <button
@@ -326,7 +326,7 @@ export function AddFilesDialog({
               </SelectContent>
             </Select>
             {!embCurrentUsable && (
-              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              <p className="rounded-none bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                 The API key for {embProvider} was removed. Add it in Settings or
                 choose a model whose provider still has a key - indexing needs an
                 embedding key.
@@ -334,13 +334,13 @@ export function AddFilesDialog({
             )}
             {embeddingChanged &&
               (project.file_count > 0 ? (
-                <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                <p className="rounded-none bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                   The embedding model is project-wide. Changing it re-indexes all{" "}
                   {project.file_count} existing file
                   {project.file_count === 1 ? "" : "s"} too.
                 </p>
               ) : (
-                <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                <p className="rounded-none bg-muted px-3 py-2 text-xs text-muted-foreground">
                   Sets the embedding model for this project. No existing files to
                   re-index yet.
                 </p>
@@ -366,7 +366,7 @@ export function AddFilesDialog({
                 </SelectContent>
               </Select>
               {instantShrink && (
-                <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                <p className="rounded-none bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
                   Same model, smaller size: existing vectors are truncated in
                   place (Matryoshka) - instant, nothing is re-embedded.
                 </p>

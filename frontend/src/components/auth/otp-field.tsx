@@ -200,7 +200,7 @@ export function OtpField({
               onPaste={handlePaste}
               onFocus={(e) => e.currentTarget.select()}
               className={cn(
-                "otp-slot-input relative z-10 rounded-xl border bg-muted/50 text-center font-mono tabular-nums",
+                "otp-slot-input relative z-10 rounded-none border bg-muted/50 text-center font-mono tabular-nums",
                 "transition-[transform,box-shadow,border-color,background-color,color] duration-200 ease-out",
                 LENGTH > 6
                   ? "size-9 text-base sm:size-11 sm:text-lg"
@@ -216,7 +216,7 @@ export function OtpField({
               <span
                 key={`${value}-${i}`}
                 aria-hidden="true"
-                className="otp-complete-sweep pointer-events-none absolute inset-0 z-20 rounded-xl"
+                className="otp-complete-sweep pointer-events-none absolute inset-0 z-20 rounded-none"
                 style={{ animationDelay: `${i * 45}ms` }}
               />
             ) : null}
