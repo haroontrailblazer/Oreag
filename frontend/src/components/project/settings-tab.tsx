@@ -6,10 +6,11 @@ import {
   GaugeIcon as Gauge,
   ScalesIcon as Scales,
   GearSixIcon as GearSix,
+  WarningCircleIcon as WarningCircle,
   WarningOctagonIcon as WarningOctagon,
 } from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
-import { useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
 
@@ -36,6 +37,11 @@ import { EncryptingLoader } from "@/components/ui/encrypting-loader"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spin } from "@/components/ui/loader"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -68,6 +74,61 @@ import type { ModelsResponse, Project } from "@/lib/types"
 // by "mirror each question". A sentinel stands in for it in the widget only -
 // what gets saved is still "" or a language name.
 const MATCH_QUESTION = "__match__"
+
+function PolicyHelp({
+  label,
+  children,
+}: {
+  label: string
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current)
+    },
+    []
+  )
+
+  function show() {
+    if (closeTimer.current) clearTimeout(closeTimer.current)
+    setOpen(true)
+  }
+
+  function hide() {
+    closeTimer.current = setTimeout(() => setOpen(false), 120)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`About ${label}`}
+          onMouseEnter={show}
+          onMouseLeave={hide}
+          onClick={(event) => {
+            if (open) event.preventDefault()
+          }}
+          className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <WarningCircle className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        className="w-72 p-3 text-xs leading-relaxed text-muted-foreground"
+      >
+        {children}
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 // The stored value is interpolated straight into the model's instruction
 // ("write the entire answer in X"), so these are plain language names rather
@@ -655,10 +716,6 @@ export function SettingsTab({
                 <Scales className="size-4 text-muted-foreground" />
                 Answer policy
               </CardTitle>
-              <CardDescription>
-                Set the evidence bar for an answer, then control how every
-                response is presented.
-              </CardDescription>
             </div>
             <BestPractices
               className="ml-auto"
@@ -707,16 +764,22 @@ export function SettingsTab({
         <CardContent className="space-y-6">
           <div className="grid min-w-0 gap-6 lg:grid-cols-2 lg:gap-0">
             <section className="min-w-0 space-y-5 lg:pr-6">
-              <div className="space-y-1 border-b pb-3">
+              <div className="flex items-center gap-1.5 border-b pb-3">
                 <h3 className="text-sm font-medium">Grounding</h3>
-                <p className="text-xs leading-relaxed text-muted-foreground">
+                <PolicyHelp label="Grounding">
                   Decide how much matching evidence the project needs before it
                   answers.
-                </p>
+                </PolicyHelp>
               </div>
               <div className="grid min-w-0 gap-4">
                 <div className="min-w-0 space-y-2">
-                  <Label htmlFor="settings-minsim">Minimum similarity</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="settings-minsim">Minimum similarity</Label>
+                    <PolicyHelp label="Minimum similarity">
+                      Match score from 0 to 1. Lower-scoring chunks are ignored;
+                      0.2 is the permissive default.
+                    </PolicyHelp>
+                  </div>
                   <Input
                     id="settings-minsim"
                     type="number"
@@ -726,13 +789,15 @@ export function SettingsTab({
                     value={minSimilarity}
                     onChange={(e) => setMinSimilarity(e.target.value)}
                   />
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Match score from 0 to 1. Lower-scoring chunks are ignored;
-                    0.2 is the permissive default.
-                  </p>
                 </div>
                 <div className="min-w-0 space-y-2">
-                  <Label htmlFor="settings-minstrong">Required sources</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="settings-minstrong">Required sources</Label>
+                    <PolicyHelp label="Required sources">
+                      Ask for clarification when fewer sources qualify. Set 0 to
+                      always answer.
+                    </PolicyHelp>
+                  </div>
                   <Input
                     id="settings-minstrong"
                     type="number"
@@ -742,25 +807,26 @@ export function SettingsTab({
                     value={minStrong}
                     onChange={(e) => setMinStrong(e.target.value)}
                   />
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Ask for clarification when fewer sources qualify. Set 0 to
-                    always answer.
-                  </p>
                 </div>
               </div>
             </section>
 
             <section className="min-w-0 space-y-5 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
-              <div className="space-y-1 border-b pb-3">
+              <div className="border-b pb-3">
                 <h3 className="text-sm font-medium">Language &amp; format</h3>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  What your documents are written in, and how every response is
-                  presented.
-                </p>
               </div>
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <div className="min-w-0 space-y-2">
-                  <Label htmlFor="settings-lang">Answer language</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="settings-lang">Answer language</Label>
+                    <PolicyHelp label="Answer language">
+                      {!answerLanguage
+                        ? "Each answer mirrors its own question, even when the documents are in another language."
+                        : languageStrict
+                          ? `Every answer is written in ${answerLanguage}, whatever language the question was asked in.`
+                          : `${answerLanguage} unless the question is asked in another language — then the answer follows the question.`}
+                    </PolicyHelp>
+                  </div>
                   <Select
                     value={answerLanguage || MATCH_QUESTION}
                     onValueChange={(v) =>
@@ -798,24 +864,31 @@ export function SettingsTab({
                         checked={languageStrict}
                         onCheckedChange={setLanguageStrict}
                       />
-                      <Label
-                        htmlFor="settings-lang-strict"
-                        className="cursor-pointer text-xs font-normal leading-relaxed text-muted-foreground"
-                      >
-                        Always use it
-                      </Label>
+                      <div className="flex items-center gap-1.5">
+                        <Label
+                          htmlFor="settings-lang-strict"
+                          className="cursor-pointer text-xs font-normal leading-relaxed text-muted-foreground"
+                        >
+                          Always use it
+                        </Label>
+                        <PolicyHelp label="Always use answer language">
+                          Write every answer in {answerLanguage}, even when the
+                          question is asked in another language.
+                        </PolicyHelp>
+                      </div>
                     </div>
                   ) : null}
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    {!answerLanguage
-                      ? "Each answer mirrors its own question, even when the documents are in another language."
-                      : languageStrict
-                        ? `Every answer is written in ${answerLanguage}, whatever language the question was asked in.`
-                        : `${answerLanguage} unless the question is asked in another language — then the answer follows the question.`}
-                  </p>
                 </div>
                 <div className="min-w-0 space-y-2">
-                  <Label htmlFor="settings-doclang">Document language</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="settings-doclang">Document language</Label>
+                    <PolicyHelp label="Document language">
+                      What your files are written in. Keyword search stems words
+                      in this language, so a search finds other forms of the same
+                      word. Changing it re-stems the index in place — nothing is
+                      re-embedded.
+                    </PolicyHelp>
+                  </div>
                   <Select
                     value={documentLanguage || "English"}
                     onValueChange={(v) =>
@@ -842,15 +915,14 @@ export function SettingsTab({
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    What your files are written in. Keyword search stems words
-                    in this language, so a search finds other forms of the same
-                    word. Changing it re-stems the index in place — nothing is
-                    re-embedded.
-                  </p>
                 </div>
                 <div className="min-w-0 space-y-2 sm:col-span-2">
-                  <Label htmlFor="settings-disclaimer">Standing notice</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="settings-disclaimer">Standing notice</Label>
+                    <PolicyHelp label="Standing notice">
+                      Appended verbatim to every answer when provided.
+                    </PolicyHelp>
+                  </div>
                   <Textarea
                     id="settings-disclaimer"
                     rows={2}
@@ -858,9 +930,6 @@ export function SettingsTab({
                     value={answerDisclaimer}
                     onChange={(e) => setAnswerDisclaimer(e.target.value)}
                   />
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Appended verbatim to every answer when provided.
-                  </p>
                 </div>
               </div>
             </section>
@@ -869,25 +938,27 @@ export function SettingsTab({
           <div className="border-t pt-6">
             <div className="flex min-w-0 flex-col gap-4 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
               <div className="min-w-0 space-y-1.5">
-                <Label
-                  htmlFor="version-tracking"
-                  className={cn(
-                    "cursor-pointer text-sm font-medium",
-                    !project.version_extraction_available &&
-                      "cursor-not-allowed opacity-60"
-                  )}
-                >
-                  Track document versions
-                </Label>
-                <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
-                  Hold likely new editions for confirmation. It fits documents
-                  that come in editions, not ordinary working files, where a
-                  draft named report_v2 is held out of answers until someone
-                  confirms it. Replaced versions remain downloadable but stop
-                  contributing to answers. Switching it on also reads the titles
-                  of documents already here, so they can be recognised as
-                  earlier editions.
-                </p>
+                <div className="flex items-center gap-1.5">
+                  <Label
+                    htmlFor="version-tracking"
+                    className={cn(
+                      "cursor-pointer text-sm font-medium",
+                      !project.version_extraction_available &&
+                        "cursor-not-allowed opacity-60"
+                    )}
+                  >
+                    Track document versions
+                  </Label>
+                  <PolicyHelp label="Track document versions">
+                    Hold likely new editions for confirmation. It fits documents
+                    that come in editions, not ordinary working files, where a
+                    draft named report_v2 is held out of answers until someone
+                    confirms it. Replaced versions remain downloadable but stop
+                    contributing to answers. Switching it on also reads the
+                    titles of documents already here, so they can be recognised
+                    as earlier editions.
+                  </PolicyHelp>
+                </div>
                 {!project.version_extraction_available && (
                   <p className="max-w-3xl text-xs leading-relaxed text-amber-700 dark:text-amber-400">
                     Turned off for this deployment. Ask an administrator to
