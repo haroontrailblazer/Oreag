@@ -10,6 +10,8 @@ import {
   ReceiptIcon as Receipt,
   StackIcon as Stack,
   InfoIcon as Info,
+  CalendarBlankIcon as Calendar,
+  CaretDownIcon as CaretDown,
 } from "@phosphor-icons/react/dist/ssr"
 import {
   type CSSProperties,
@@ -59,7 +61,6 @@ import {
   RetrievalQuality,
 } from "@/components/settings/usage-quality"
 import { ProjectPortfolio } from "@/components/settings/usage-projects"
-import { TextScrambleEffect } from "@/components/ui/text-scramble-effect"
 import {
   Table,
   TableBody,
@@ -68,7 +69,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import {
   DEFAULT_USAGE_WINDOW,
@@ -350,9 +351,8 @@ function MetricTile({
           </div>
         ) : (
           <div className="text-[1.75rem] font-semibold leading-none tracking-[-0.035em] sm:text-[2rem]">
-            <TextScrambleEffect
-              key={formattedValue}
-              text={formattedValue ?? ""}
+            <AnimatedValue
+              value={formattedValue ?? ""}
               className="tabular-nums"
             />
           </div>
@@ -487,7 +487,7 @@ function TotalsRow({
   )
 
   return (
-    <div className="usage-summary-grid grid grid-cols-2 overflow-hidden rounded-2xl border border-blue-500/20 bg-blue-50/35 shadow-[0_16px_50px_-42px_rgba(37,99,235,0.55)] xl:grid-cols-6 dark:bg-blue-950/10">
+    <div className="usage-summary-grid grid grid-cols-2 overflow-hidden rounded-2xl border border-blue-500/20 bg-blue-50/35 shadow-[0_16px_50px_-42px_rgba(37,99,235,0.55)] md:grid-cols-3 2xl:grid-cols-6 dark:bg-blue-950/10">
       <MetricTile
         label="Requests"
         value={totals.requests}
@@ -1289,13 +1289,16 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
       <Button
         variant="ghost"
         size="sm"
-        className="text-muted-foreground"
+        className="min-h-10 text-muted-foreground"
+        aria-expanded={showTable}
+        aria-controls="usage-daily-data"
         onClick={() => setShowTable((v) => !v)}
       >
         {showTable ? "Hide daily table" : "View daily data as a table"}
+        <CaretDown className={cn("size-4 transition-transform", showTable && "rotate-180")} />
       </Button>
       {showTable && (
-        <div className="usage-enter">
+        <div id="usage-daily-data" className="usage-enter">
           <DailyTable series={series} />
         </div>
       )}
@@ -1420,7 +1423,7 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
     <Card
       className={cn(
         "usage-data-card gap-0 overflow-hidden",
-        rows.length > 0 && "h-[34rem] md:h-[27rem]"
+        expanded && "max-h-[42rem] md:max-h-[32rem]"
       )}
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
@@ -1543,7 +1546,7 @@ function ModelsTable({
     <Card
       className={cn(
         "usage-data-card gap-0 overflow-hidden",
-        rows.length > 0 && "h-[34rem] md:h-[27rem]"
+        expanded && "max-h-[42rem] md:max-h-[32rem]"
       )}
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
@@ -1713,7 +1716,7 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
     <Card
       className={cn(
         "usage-data-card gap-0 overflow-hidden",
-        rows.length > 0 && "h-[38rem] md:h-[27rem]"
+        expanded && "max-h-[42rem] md:max-h-[32rem]"
       )}
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
@@ -1923,74 +1926,109 @@ function EmptyState({ days }: { days: number }) {
  * (and so the loading/error plumbing stays in one place).
  */
 export function UsageView({ data }: { data: AccountUsage }) {
+  const contentRef = useRef<HTMLDivElement>(null)
+
   if (data.totals.requests === 0) {
     return <EmptyState days={data.window_days} />
   }
   return (
-    <div className="usage-dashboard-content usage-motion flex min-h-full flex-col gap-6 sm:gap-8">
-      <MotionReveal>
-        <TotalsRow
-          totals={data.totals}
-          days={data.window_days}
-          caveats={data.caveats}
-        />
-      </MotionReveal>
-      <MotionReveal delay={60}>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <SpendSplit totals={data.totals} caveats={data.caveats} />
-          <CacheSavingsCard totals={data.totals} />
+    <Tabs
+      ref={contentRef}
+      defaultValue="overview"
+      onValueChange={() => {
+        contentRef.current?.closest(".usage-scroll")?.scrollTo({ top: 0 })
+      }}
+      className="usage-dashboard-content usage-motion min-h-full gap-5 sm:gap-6"
+    >
+      <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 bg-background pb-2">
+        <TabsList aria-label="Usage sections" className="grid h-11! w-full grid-cols-4 sm:w-auto">
+          <TabsTrigger value="overview" className="px-2 text-xs sm:px-4 sm:text-sm">Overview</TabsTrigger>
+          <TabsTrigger value="activity" className="px-2 text-xs sm:px-4 sm:text-sm">Activity</TabsTrigger>
+          <TabsTrigger value="performance" className="px-2 text-xs sm:px-4 sm:text-sm">Performance</TabsTrigger>
+          <TabsTrigger value="breakdown" className="px-2 text-xs sm:px-4 sm:text-sm">Breakdown</TabsTrigger>
+        </TabsList>
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Calendar aria-hidden="true" className="size-3.5" />
+          Last {data.window_days} days
+        </span>
+      </div>
+      <TabsContent value="overview" className="space-y-5 sm:space-y-6">
+        <div className="usage-section-heading">
+          <div>
+            <h2>Account overview</h2>
+            <p>Your consumption at a glance, with spend and cache savings side by side.</p>
+          </div>
         </div>
-      </MotionReveal>
-      <MotionReveal delay={80}>
-        <CaveatsNote caveats={data.caveats} />
-      </MotionReveal>
-      <MotionReveal delay={90}>
-        <section className="flex flex-col gap-4" aria-labelledby="usage-activity-heading">
-          <div className="usage-section-heading">
-            <div>
-              <h2 id="usage-activity-heading">Activity over time</h2>
-              <p>Traffic, token volume and delivery performance across the selected window.</p>
-            </div>
-          </div>
-          <DailyTrends daily={data.daily} />
-        </section>
-      </MotionReveal>
-      <MotionReveal delay={70}>
-        <section className="flex flex-col gap-4" aria-labelledby="usage-operations-heading">
-          <div className="usage-section-heading">
-            <div>
-              <h2 id="usage-operations-heading">Operational performance</h2>
-              <p>Latency, endpoint demand, cache behavior and retrieval quality.</p>
-            </div>
-          </div>
-          {/* Operational half: how the system BEHAVED, next to what it spent. */}
-          <LatencyTrend daily={data.daily} />
-          <div className="grid gap-4 lg:grid-cols-2">
-            <EndpointBreakdown rows={data.by_endpoint} />
-            <CacheTrend daily={data.daily} />
-          </div>
-          <ModelUsage rows={data.by_model} />
-          <RetrievalQuality daily={data.daily} />
-        </section>
-      </MotionReveal>
-      <MotionReveal delay={70}>
-        <section className="flex flex-col gap-4" aria-labelledby="usage-allocation-heading">
-          <div className="usage-section-heading">
-            <div>
-              <h2 id="usage-allocation-heading">Allocation &amp; governance</h2>
-              <p>Trace account consumption across credentials, models and projects.</p>
-            </div>
-          </div>
-          <ProjectPortfolio rows={data.by_project} />
-          <ApiKeysTable rows={data.by_api_key} />
-          <ModelsTable
-            rows={data.by_model}
-            unmeasuredModels={data.caveats.unmeasured_models}
+        <MotionReveal>
+          <TotalsRow
+            totals={data.totals}
+            days={data.window_days}
+            caveats={data.caveats}
           />
-          <ProjectsTable rows={data.by_project} />
-        </section>
-      </MotionReveal>
-    </div>
+        </MotionReveal>
+        <MotionReveal delay={60}>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <SpendSplit totals={data.totals} caveats={data.caveats} />
+            <CacheSavingsCard totals={data.totals} />
+          </div>
+        </MotionReveal>
+        <MotionReveal delay={80}>
+          <CaveatsNote caveats={data.caveats} />
+        </MotionReveal>
+      </TabsContent>
+      <TabsContent value="activity">
+        <MotionReveal delay={90}>
+          <section className="flex flex-col gap-4" aria-labelledby="usage-activity-heading">
+            <div className="usage-section-heading">
+              <div>
+                <h2 id="usage-activity-heading">Activity over time</h2>
+                <p>Follow daily requests and token volume, or open the table for exact values.</p>
+              </div>
+            </div>
+            <DailyTrends daily={data.daily} />
+          </section>
+        </MotionReveal>
+      </TabsContent>
+      <TabsContent value="performance">
+        <MotionReveal delay={70}>
+          <section className="flex flex-col gap-4" aria-labelledby="usage-operations-heading">
+            <div className="usage-section-heading">
+              <div>
+                <h2 id="usage-operations-heading">Operational performance</h2>
+                <p>Latency, endpoint demand, cache behavior and retrieval quality.</p>
+              </div>
+            </div>
+            {/* Operational half: how the system BEHAVED, next to what it spent. */}
+            <LatencyTrend daily={data.daily} />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <EndpointBreakdown rows={data.by_endpoint} />
+              <CacheTrend daily={data.daily} />
+            </div>
+            <ModelUsage rows={data.by_model} />
+            <RetrievalQuality daily={data.daily} />
+          </section>
+        </MotionReveal>
+      </TabsContent>
+      <TabsContent value="breakdown">
+        <MotionReveal delay={70}>
+          <section className="flex flex-col gap-4" aria-labelledby="usage-allocation-heading">
+            <div className="usage-section-heading">
+              <div>
+                <h2 id="usage-allocation-heading">Usage breakdown</h2>
+                <p>See which projects, API keys and models account for your usage.</p>
+              </div>
+            </div>
+            <ProjectPortfolio rows={data.by_project} />
+            <ApiKeysTable rows={data.by_api_key} />
+            <ModelsTable
+              rows={data.by_model}
+              unmeasuredModels={data.caveats.unmeasured_models}
+            />
+            <ProjectsTable rows={data.by_project} />
+          </section>
+        </MotionReveal>
+      </TabsContent>
+    </Tabs>
   )
 }
 
@@ -2021,32 +2059,41 @@ export function UsageDashboard() {
             projects.
           </p>
         </div>
-        <Tabs
-          value={String(days)}
-          onValueChange={(value) => setDays(Number(value) as UsageWindow)}
-        >
-          <TabsList className="h-10 rounded-xl border border-border/80 bg-muted/60 p-1 shadow-sm">
+        <fieldset className="flex w-full flex-col gap-1.5 sm:w-auto">
+          <legend className="mb-1.5 text-xs font-medium text-muted-foreground">Reporting period</legend>
+          <div className="flex h-11 rounded-xl border border-border/80 bg-muted/60 p-1 shadow-sm">
             {USAGE_WINDOWS.map((window) => (
-              <TabsTrigger key={window} value={String(window)} className="rounded-lg px-3.5 text-xs font-semibold data-[state=active]:shadow-sm">
-                {window} days
-              </TabsTrigger>
+              <label key={window} className="relative flex flex-1 cursor-pointer">
+                <input
+                  type="radio"
+                  name="usage-window"
+                  value={window}
+                  checked={days === window}
+                  onChange={() => setDays(window)}
+                  className="peer sr-only"
+                />
+                <span className="flex w-full items-center justify-center whitespace-nowrap rounded-lg px-3.5 text-xs font-semibold text-muted-foreground peer-checked:bg-background peer-checked:text-foreground peer-checked:shadow-sm peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring">
+                  {window} days
+                </span>
+              </label>
             ))}
-          </TabsList>
-        </Tabs>
+          </div>
+        </fieldset>
       </div>
 
       {/* Signed out is not a load failure - see lib/api.ts isSessionExpired. */}
       {error && !isSessionExpired(error) && (
-        <p className="shrink-0 text-sm text-destructive">
+        <p role="alert" className="shrink-0 text-sm text-destructive">
           Could not load usage: {error.message}
         </p>
       )}
 
       {isLoading && !data && (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 sm:gap-6">
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-            {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-24" />
+        <div role="status" aria-label="Loading usage" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 sm:gap-6">
+          <Skeleton className="h-11 w-full sm:w-96" />
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 2xl:grid-cols-6">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <Skeleton key={i} className="h-36" />
             ))}
           </div>
           <Skeleton className="h-40" />
@@ -2060,11 +2107,15 @@ export function UsageDashboard() {
 
       {data && (
         <div
+          aria-busy={isLoading}
           className={cn(
             "usage-scroll min-h-0 flex-1 overflow-y-auto pb-3 pr-0.5",
             isLoading && "opacity-60 transition-opacity"
           )}
         >
+          <p role="status" className={cn("mb-3 text-xs text-muted-foreground", !isLoading && "sr-only")}>
+            {isLoading ? `Loading ${days}-day usage. Showing the previous period until it is ready.` : `Showing the last ${data.window_days} days.`}
+          </p>
           <UsageView data={data} />
         </div>
       )}

@@ -94,8 +94,8 @@ export function LatencyTrend({ daily }: { daily: UsageDaily[] }) {
       <CardHeader>
         <CardTitle className="text-base">Response time</CardTitle>
         <CardDescription>
-          Percentiles, not an average - a mean latency hides exactly the slow
-          tail it is asked about. p95 is the request users complain about.
+          Typical (p50), slow-tail (p95) and high-end (p99) response times.
+          These are percentiles, not averages.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -191,9 +191,7 @@ export function EndpointBreakdown({ rows }: { rows: UsageByEndpoint[] }) {
       <CardHeader>
         <CardTitle className="text-base">Traffic by endpoint</CardTitle>
         <CardDescription>
-          Which surfaces this account actually uses. Recorded since metering
-          began and never shown until now, so a spike in spend could not be
-          attributed to anything.
+          Request volume by endpoint. Hover over a bar for its typical response time.
           {hidden > 0 && ` ${hidden} smaller endpoint${hidden === 1 ? "" : "s"} not shown.`}
         </CardDescription>
       </CardHeader>
