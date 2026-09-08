@@ -566,7 +566,28 @@ EMBEDDING_PRICES_USD_PER_MTOK: dict[str, float] = {
 _COST_DP = 10
 
 
-def embedding_cost_for(model: str, tokens: int | None) -> float | None:
+def _feed_price(model: str, provider: str | None):
+    """The feed's entry for this model as sold by this provider, or None.
+
+    Consulted BEFORE the hand-written tables below, which become the fallback.
+    Requires a provider on purpose: the same id costs different money on
+    different vendors, and a lookup without one cannot answer the question. A
+    caller that has no provider gets the hand-written price, i.e. exactly the
+    behaviour that existed before the feed.
+    """
+    if not provider:
+        return None
+    try:
+        from . import pricing
+
+        return pricing.lookup(model, provider)
+    except Exception:  # pragma: no cover - pricing must never break costing
+        return None
+
+
+def embedding_cost_for(
+    model: str, tokens: int | None, provider: str | None = None
+) -> float | None:
     """USD for `tokens` embedded by `model`, or None when it cannot be known.
 
     None - never 0 - for an unpriced model or an unmeasured call, so the Usage
@@ -577,13 +598,16 @@ def embedding_cost_for(model: str, tokens: int | None) -> float | None:
     """
     if not model or tokens is None:
         return None
-    price = EMBEDDING_PRICES_USD_PER_MTOK.get(model)
+    entry = _feed_price(model, provider)
+    price = entry.input if entry is not None else EMBEDDING_PRICES_USD_PER_MTOK.get(model)
     if price is None:
         return None
     return round(tokens * price / 1_000_000, _COST_DP)
 
 
-def cost_breakdown(model: str, usage) -> dict[str, float] | None:
+def cost_breakdown(
+    model: str, usage, provider: str | None = None
+) -> dict[str, float] | None:
     """The input/output/total split of one call, or None when unpriceable.
 
     Exists because Langfuse wants the same shape it would have derived itself.
@@ -598,7 +622,11 @@ def cost_breakdown(model: str, usage) -> dict[str, float] | None:
     """
     if not model:
         return None
-    prices = MODEL_PRICES_USD_PER_MTOK.get(model)
+    entry = _feed_price(model, provider)
+    if entry is not None and entry.output is not None:
+        prices = (entry.input, entry.output)
+    else:
+        prices = MODEL_PRICES_USD_PER_MTOK.get(model)
     if prices is None:
         return None
     prompt = getattr(usage, "prompt_tokens", None)
@@ -615,7 +643,7 @@ def cost_breakdown(model: str, usage) -> dict[str, float] | None:
     }
 
 
-def cost_for(model: str, usage) -> float | None:
+def cost_for(model: str, usage, provider: str | None = None) -> float | None:
     """USD cost of one measured call, or None when it cannot be known.
 
     None - never 0 - when the model has no listed price OR either token count
@@ -631,7 +659,7 @@ def cost_for(model: str, usage) -> float | None:
     billing table and the number handed to Langfuse cannot drift apart: they
     are the same arithmetic, not two implementations of it.
     """
-    breakdown = cost_breakdown(model, usage)
+    breakdown = cost_breakdown(model, usage, provider)
     return None if breakdown is None else breakdown["total"]
 
 
@@ -705,6 +733,22 @@ def get_embedder(
 
 @lru_cache(maxsize=128)
 def get_llm(provider: str, model: str, api_key: str | None = None) -> LLMProvider:
+    """The LLM for this (provider, model, key), with `provider` stamped on it.
+
+    The stamp is what lets pricing be provider-scoped without threading the
+    name through six constructors: this is the one function that knows the
+    canonical provider id, and `provider` is the first element of the cache
+    key, so the attribute is stable for the life of the cached instance.
+    """
+    llm = _build_llm(provider, model, api_key)
+    try:
+        llm.provider = provider
+    except Exception:  # pragma: no cover - a stub with __slots__
+        pass
+    return llm
+
+
+def _build_llm(provider: str, model: str, api_key: str | None = None) -> LLMProvider:
     validate_llm(provider, model)
     if provider == "openai":
         from .openai_provider import OpenAILLM

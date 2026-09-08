@@ -107,6 +107,11 @@ class TokenUsage:
     # Appended last, with a default, so the many `TokenUsage(a, b, c)` literals
     # in the suite keep working.
     reasoning_tokens: int | None = None
+    # Which VENDOR sold this call. Required to price it: the same model id
+    # costs different money on different vendors, so a price looked up without
+    # one is a guess. Stamped once in `get_llm`, which is the only place that
+    # knows the canonical provider name.
+    provider: str = ""
 
     @property
     def known(self) -> bool:
@@ -142,6 +147,7 @@ class TokenUsage:
             completion_tokens=add(self.completion_tokens, other.completion_tokens),
             model=self.model or other.model,
             reasoning_tokens=add(self.reasoning_tokens, other.reasoning_tokens),
+            provider=self.provider or other.provider,
         )
 
 

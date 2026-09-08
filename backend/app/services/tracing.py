@@ -219,7 +219,8 @@ def _usage_fields(usage, metadata: dict | None) -> dict:
             "total": prompt + completion,
         }
     }
-    cost = cost_breakdown(usage.model, usage)
+    cost = cost_breakdown(usage.model, usage,
+                          provider=getattr(usage, "provider", None))
     if cost is not None:
         update["cost_details"] = cost
     if usage.reasoning_tokens is not None:

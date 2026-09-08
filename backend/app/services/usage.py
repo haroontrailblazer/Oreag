@@ -66,7 +66,10 @@ def record_usage(
         if embedding is not None and embedding.known:
             embedding_tokens = embedding.prompt_tokens
             embedding_model = embedding.model or None
-            embedding_cost = embedding_cost_for(embedding.model, embedding_tokens)
+            embedding_cost = embedding_cost_for(
+                embedding.model, embedding_tokens,
+                provider=getattr(project, "embedding_provider", None),
+            )
 
         prompt_tokens = completion_tokens = None
         model = None
@@ -75,7 +78,10 @@ def record_usage(
             completion_tokens = usage.completion_tokens
             model = usage.model or None
             if cost_usd is None:
-                cost_usd = cost_for(usage.model, usage)
+                cost_usd = cost_for(
+                    usage.model, usage,
+                    provider=getattr(project, "llm_provider", None),
+                )
         db.add(
             UsageEvent(
                 owner_id=project.owner_id,
@@ -97,7 +103,9 @@ def record_usage(
                 # carried on the cached answer. NULL when that model has no
                 # listed price or the original run was never measured.
                 saved_cost_usd=(
-                    cost_for(saved.model, saved) if saved is not None else None
+                    cost_for(saved.model, saved,
+                             provider=getattr(project, "llm_provider", None))
+                    if saved is not None else None
                 ),
                 cache_layer=cache_layer,
                 embedding_tokens=embedding_tokens,
@@ -109,7 +117,8 @@ def record_usage(
                 ),
                 saved_embedding_cost_usd=(
                     embedding_cost_for(
-                        saved_embedding.model, saved_embedding.prompt_tokens
+                        saved_embedding.model, saved_embedding.prompt_tokens,
+                        provider=getattr(project, "embedding_provider", None),
                     )
                     if saved_embedding is not None else None
                 ),

@@ -47,7 +47,26 @@ def prune_old_rows() -> None:
         db.close()
 
 
+def refresh_prices() -> None:
+    """Pull the LLM price feed. Never raises - a stale price is not an outage.
+
+    Rides this sweep rather than getting its own thread: the cadence that suits
+    row pruning (hours) also suits vendor price changes, which move on the
+    order of months.
+    """
+    try:
+        from ..providers import pricing
+
+        pricing.refresh()
+    except Exception:
+        logger.warning("Price refresh failed", exc_info=True)
+
+
 def maintenance_loop(stop: threading.Event) -> None:
+    # Once before the first wait, so a fresh process is not stuck on the
+    # bundled snapshot for a whole interval.
+    refresh_prices()
     while not stop.is_set():
         prune_old_rows()
+        refresh_prices()
         stop.wait(settings.maintenance_interval_seconds)

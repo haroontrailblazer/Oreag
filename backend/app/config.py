@@ -189,6 +189,23 @@ class Settings(BaseSettings):
     log_retention_days: int = 90
     maintenance_interval_seconds: int = 6 * 3600
 
+    # -- LLM price feed ------------------------------------------------------
+    #
+    # Where per-token prices come from. `MODEL_PRICES_USD_PER_MTOK` in
+    # providers/registry.py stops being the authority and becomes the last
+    # fallback: it is hand-written and dated, six of its 29 entries were
+    # measurably wrong on 2026-09-08, and 17 of the catalog's other 27 ids had
+    # no price at all so their spend showed as nothing.
+    #
+    # Off turns the whole subsystem into a no-op and restores exactly the
+    # previous behaviour - the bundled snapshot is not read either.
+    pricing_feed_enabled: bool = True
+    pricing_feed_url: str = (
+        "https://raw.githubusercontent.com/BerriAI/litellm/main/"
+        "model_prices_and_context_window.json"
+    )
+    pricing_feed_timeout_seconds: int = 30
+
     # Audio ingestion: BYOK transcription through the uploader's own provider
     # keys - every STT-capable provider they hold a key for is tried in order
     # (own answer-model provider first): OpenAI Whisper, Gemini, Groq, Mistral
