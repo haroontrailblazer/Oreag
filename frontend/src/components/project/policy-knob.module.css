@@ -1,0 +1,74 @@
+.control { display: flex; justify-content: center; width: 100%; }
+.dial {
+  position: relative;
+  width: clamp(64px, 25cqi, 112px);
+  aspect-ratio: 1;
+  flex-shrink: 0;
+  border-radius: 50%;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+.dial:active { cursor: grabbing; }
+/* Keyboard focus stays visible without drawing a circle around the dial. */
+.dial:focus-visible .value { text-decoration: underline; text-underline-offset: 4px; }
+.ticks { position: absolute; inset: 0; width: 100%; height: 100%; }
+.tick { stroke: var(--muted-foreground); opacity: 0.35; }
+.activeTick { stroke: var(--foreground); opacity: 0.8; }
+.face {
+  position: absolute;
+  inset: 14%;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(from 2deg, transparent 0deg 3deg, #00000024 3deg 4deg),
+    conic-gradient(from 135deg, #85888b, #f6f6f6 22%, #b9bcbf 42%, #66696c 60%, #d8dadd 82%, #85888b);
+  box-shadow:
+    0 2px 1px #00000055,
+    0 5px 0 -1px color-mix(in oklch, var(--foreground) 42%, var(--card)),
+    2px 9px 9px #00000030,
+    5px 13px 18px #0000001c,
+    -2px -2px 5px color-mix(in oklch, var(--background) 80%, transparent);
+}
+.face::before {
+  content: "";
+  position: absolute;
+  inset: 4%;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse at 30% 12%, color-mix(in oklch, var(--background) 88%, white), transparent 64%),
+    linear-gradient(150deg, var(--background) 10%, var(--muted) 72%, color-mix(in oklch, var(--muted) 85%, var(--foreground)));
+  box-shadow: inset 0 1px 1px #ffffffb0, inset 0 -2px 3px #00000018, 0 1px 2px #00000040;
+}
+.rotor { position: absolute; inset: 4%; border-radius: inherit; }
+.indicator {
+  position: absolute;
+  top: 11%;
+  left: calc(50% - 1.5px);
+  width: 3px;
+  height: 13%;
+  border-radius: 3px;
+  background: var(--foreground);
+  box-shadow: 0 1px 1px #ffffff90;
+}
+.value {
+  position: relative;
+  font-size: clamp(11px, 3.7cqi, 16px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  pointer-events: none;
+}
+.hint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

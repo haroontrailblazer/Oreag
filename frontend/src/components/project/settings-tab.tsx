@@ -15,6 +15,7 @@ import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
 
 import { ProviderKeyField } from "@/components/project/provider-key-field"
+import { PolicyKnob } from "@/components/project/policy-knob"
 import { BestPractices } from "@/components/ui/best-practices"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
@@ -835,8 +836,8 @@ export function SettingsTab({
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid min-w-0 gap-6 lg:grid-cols-2 lg:gap-0">
-            <section className="min-w-0 space-y-5 lg:pr-6">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+            <section className="@container min-w-0 space-y-4 rounded-xl border bg-muted/20 p-3 sm:p-4">
               <div className="space-y-1 border-b pb-3">
                 <h3 className="text-sm font-medium">Grounding</h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -844,46 +845,46 @@ export function SettingsTab({
                   answers.
                 </p>
               </div>
-              <div className="grid min-w-0 gap-4">
-                <div className="min-w-0 space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor="settings-minsim">Minimum similarity</Label>
+              <div className="grid min-w-0 grid-cols-3 gap-1 sm:gap-3">
+                <div className="flex min-w-0 flex-col items-center gap-2">
+                  <div className="flex min-h-10 items-center justify-center gap-0.5 text-center">
+                    <Label className="text-[10px] leading-tight sm:text-xs" htmlFor="settings-minsim-knob">Minimum similarity</Label>
                     <PolicyHelp label="Minimum similarity">
                       Match score from 0 to 1. Lower-scoring chunks are ignored;
                       0.2 is the permissive default.
                     </PolicyHelp>
                   </div>
-                  <Input
-                    id="settings-minsim"
-                    type="number"
+                  <PolicyKnob
+                    id="settings-minsim-knob"
+                    label="Minimum similarity"
                     min={0}
                     max={1}
                     step={0.05}
-                    value={minSimilarity}
-                    onChange={(e) => setMinSimilarity(e.target.value)}
+                    value={Number(minSimilarity)}
+                    onChange={setMinSimilarity}
                   />
                 </div>
-                <div className="min-w-0 space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor="settings-minstrong">Required sources</Label>
+                <div className="flex min-w-0 flex-col items-center gap-2">
+                  <div className="flex min-h-10 items-center justify-center gap-0.5 text-center">
+                    <Label className="text-[10px] leading-tight sm:text-xs" htmlFor="settings-minstrong-knob">Required sources</Label>
                     <PolicyHelp label="Required sources">
                       Ask for clarification when fewer sources qualify. Set 0 to
                       always answer.
                     </PolicyHelp>
                   </div>
-                  <Input
-                    id="settings-minstrong"
-                    type="number"
+                  <PolicyKnob
+                    id="settings-minstrong-knob"
+                    label="Required sources"
                     min={0}
                     max={20}
                     step={1}
-                    value={minStrong}
-                    onChange={(e) => setMinStrong(e.target.value)}
+                    value={Number(minStrong)}
+                    onChange={setMinStrong}
                   />
                 </div>
-                <div className="min-w-0 space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor="settings-crosslingual">
+                <div className="flex min-w-0 flex-col items-center gap-2">
+                  <div className="flex min-h-10 items-center justify-center gap-0.5 text-center">
+                    <Label className="text-[10px] leading-tight sm:text-xs" htmlFor="settings-crosslingual-knob">
                       Cross-lingual sensitivity
                     </Label>
                     <PolicyHelp label="Cross-lingual sensitivity">
@@ -897,11 +898,31 @@ export function SettingsTab({
                       embedding models.
                     </PolicyHelp>
                   </div>
+                  <PolicyKnob
+                    id="settings-crosslingual-knob"
+                    label="Cross-lingual sensitivity"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={crossLingualPreset === "custom"
+                      ? Number(crossLingualFloor)
+                      : CROSS_LINGUAL_PRESETS.find((preset) => preset.value === crossLingualPreset)?.floor ?? 0}
+                    valueText={crossLingualPreset === "auto" ? "Auto" : undefined}
+                    onChange={(value) => {
+                      setCrossLingualFloor(value)
+                      setCrossLingualPreset("custom")
+                    }}
+                  />
+
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                <span className="text-[10px] text-muted-foreground">Sensitivity mode</span>
                   <Select
                     value={crossLingualPreset}
                     onValueChange={setCrossLingualPreset}
                   >
-                    <SelectTrigger id="settings-crosslingual" className="w-full">
+                    <SelectTrigger id="settings-crosslingual" aria-label="Cross-lingual sensitivity mode" className="h-8 w-full max-w-52 bg-background/60 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -913,22 +934,11 @@ export function SettingsTab({
                       <SelectItem value="custom">Custom…</SelectItem>
                     </SelectContent>
                   </Select>
-                  {crossLingualPreset === "custom" ? (
-                    <Input
-                      aria-label="Cross-lingual sensitivity value"
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={crossLingualFloor}
-                      onChange={(e) => setCrossLingualFloor(e.target.value)}
-                    />
-                  ) : null}
-                </div>
               </div>
+              <p className="text-center text-[10px] text-muted-foreground">Drag to turn · Use arrow keys</p>
             </section>
 
-            <section className="min-w-0 space-y-5 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
+            <section className="min-w-0 space-y-4 rounded-xl border p-3 sm:p-4">
               <div className="space-y-1 border-b pb-3">
                 <h3 className="text-sm font-medium">Language &amp; format</h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
