@@ -221,13 +221,40 @@ class TestCaveats:
         _event(db, project, model="sarvam-m")          # model known, no tokens
         _event(db, project, model="sarvam-m")
         _event(db, project, model="ollama-x")
-        _event(db, project)                            # no model either
+        # No model at all. Deliberately NOT counted any more: a row with no
+        # model is an endpoint that never called an LLM (/retrieve, /files,
+        # /memory), so reporting it as "the provider returned no usage" names a
+        # provider that was never asked. It used to make this assertion 4.
+        _event(db, project)
         _event(db, project, model="gpt-4o-mini", prompt_tokens=5,
                completion_tokens=2)                    # measured - not a caveat
 
         caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
-        assert caveats.unmeasured_requests == 4
+        assert caveats.unmeasured_requests == 3
         assert caveats.unmeasured_models == ["ollama-x", "sarvam-m"]
+
+    def test_an_endpoint_that_calls_no_llm_is_not_called_unmeasured(self, db):
+        """/retrieve, /files and /memory never ask a provider anything, so they
+        write model NULL and prompt_tokens NULL. Counting them here made the
+        page say "N requests came back without token usage from the provider"
+        about requests no provider ever saw - the exact misreading the comment
+        above the rollup argues against, applied only to the cache case."""
+        project = _project(db, uuid.uuid4())
+        _event(db, project, endpoint="retrieve", embedding_model="text-embedding-3-small",
+               embedding_tokens=120, embedding_cost_usd=0.0000024)
+
+        caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
+        assert caveats.unmeasured_requests == 0
+
+    def test_a_model_that_ran_and_reported_nothing_is_still_unmeasured(self, db):
+        """The other side of the same predicate: a real LLM call that came back
+        without usage must keep being reported. That is what the caveat is for."""
+        project = _project(db, uuid.uuid4())
+        _event(db, project, model="sarvam-m")
+
+        caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
+        assert caveats.unmeasured_requests == 1
+        assert caveats.unmeasured_models == ["sarvam-m"]
 
     def test_captioning_and_transcription_are_no_longer_declared_excluded(self, db):
         """This flag was hardcoded True, so the page told every account that

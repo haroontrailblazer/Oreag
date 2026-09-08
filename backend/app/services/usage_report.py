@@ -378,10 +378,19 @@ def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
     # because no model ran at all, so counting it here would report "N
     # requests have no token data" about requests whose zero cost is the
     # entire point of the cache.
+    # `row.model is not None` is the third exclusion, alongside the cache one
+    # the comment above describes. An endpoint that never calls an LLM -
+    # /retrieve, /files, /memory, /memory-graph, file_ingest - writes a row with
+    # no model and no token counts, because `record_usage` was passed no usage
+    # object at all. Counting those made the page report "N requests came back
+    # without token usage from the provider" about requests where no provider
+    # was ever asked, which is the same misreading as the cache case and was
+    # excluded only for the cache case. A model id is what makes "the provider
+    # reported nothing" a statement about anything.
     unmeasured = [
         (row.model, int(row.requests))
         for row in cube
-        if row.unmeasured and row.uncached
+        if row.unmeasured and row.uncached and row.model is not None
     ]
 
     # "Unpriced" is the OTHER way a dollar figure goes missing, and until now
