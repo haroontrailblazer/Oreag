@@ -16,6 +16,7 @@ import useSWR, { mutate as globalMutate } from "swr"
 
 import { ProviderKeyField } from "@/components/project/provider-key-field"
 import { PolicyKnob } from "@/components/project/policy-knob"
+import policySwitchStyles from "@/components/project/policy-switch.module.css"
 import { BestPractices } from "@/components/ui/best-practices"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
@@ -1107,7 +1108,7 @@ export function SettingsTab({
                   checked={versionTracking}
                   disabled={!project.version_extraction_available}
                   onCheckedChange={setVersionTracking}
-                  className="border-border shadow-xs data-[state=checked]:bg-emerald-600 dark:data-[state=checked]:bg-emerald-500"
+                    className={policySwitchStyles.switch}
                 />
               </div>
             </div>
