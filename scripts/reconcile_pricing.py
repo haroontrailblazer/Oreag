@@ -9,10 +9,21 @@ in the codebase would notice: `usage_events.cost_usd` is computed at write time
 from that table, so a stale entry produces invoices that are quietly, uniformly
 wrong. There is no test that can catch it - the table IS the expected value.
 
-Langfuse prices the same generations independently, from a model table it
-maintains. That makes it a genuine second opinion, and disagreement between the
-two is the signal: either our price is stale, or theirs is, and a human should
-look.
+Langfuse maintains its own model price table, and THAT is the second opinion.
+
+READ THIS BEFORE TRUSTING A GREEN RUN. This script used to compare our cost
+against `calculatedTotalCost` on each observation. That stopped being a second
+opinion the moment services/tracing.py began sending `cost_details`: a supplied
+cost takes precedence over Langfuse's own derivation, so `calculatedTotalCost`
+became our own number handed back to us, and the drift arm compared our
+arithmetic against itself - printing a clean bill forever, for a table whose
+whole problem is that nothing else can check it.
+
+The comparison is therefore made against Langfuse's PRICE TABLE - GET
+/api/public/models - and the token counts it recorded, which is a number we did
+not supply. Where that endpoint has no definition matching a model id, the model
+is reported as having no independent price rather than skipped: an un-checkable
+row must never read as a passing one.
 
 WHAT THIS DOES NOT DO
 
@@ -46,6 +57,73 @@ def load_env() -> None:
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def fetch_langfuse_prices(base: str, auth) -> list:
+    """Langfuse's own managed + project model definitions, every page.
+
+    This is the independent opinion the whole script rests on, so failing to
+    read it is reported rather than degraded into a pass.
+    """
+    import httpx
+
+    out: list = []
+    try:
+        with httpx.Client(base_url=base, auth=auth, timeout=60) as http:
+            page = 1
+            while page <= 20:
+                resp = http.get(
+                    "/api/public/models", params={"page": page, "limit": 100}
+                )
+                resp.raise_for_status()
+                body = resp.json()
+                out.extend(body.get("data", []))
+                meta = body.get("meta") or {}
+                if page >= int(meta.get("totalPages") or 1):
+                    break
+                page += 1
+    except Exception as exc:  # noqa: BLE001 - this is a report, not a service
+        print(f"  could not read Langfuse's model table: {exc}")
+        return []
+    return out
+
+
+def match_langfuse_model(model: str, definitions: list):
+    """(input, output) USD per 1M tokens from Langfuse's table, or None.
+
+    Langfuse resolves a model by regex `matchPattern`, not equality, and several
+    definitions can match one id - a project-scoped model overrides a managed
+    one, and among equals the latest `startDate` wins. Mirrored here so the
+    comparison uses the rates the Langfuse UI would show. None means Langfuse
+    has no opinion, which is reported, never treated as agreement.
+    """
+    import re
+
+    candidates = []
+    for definition in definitions:
+        try:
+            if re.search(definition.get("matchPattern") or "", model):
+                candidates.append(definition)
+        except re.error:
+            continue
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda d: (not d.get("isLangfuseManaged"), d.get("startDate") or ""),
+        reverse=True,
+    )
+    prices = candidates[0].get("prices") or {}
+
+    def rate(key):
+        value = prices.get(key)
+        if isinstance(value, dict):
+            value = value.get("price")
+        return None if value is None else value * 1_000_000
+
+    input_rate, output_rate = rate("input"), rate("output")
+    if input_rate is None or output_rate is None:
+        return None
+    return input_rate, output_rate
 
 
 def main() -> int:
@@ -83,6 +161,8 @@ def main() -> int:
     # Per model: what Langfuse charged, and the tokens it charged for. Summed
     # rather than compared per call, because a single generation rounds to six
     # decimal places and the rounding noise would swamp a real 1% drift.
+    # `charged` is retained only to show how much of the window carried a cost
+    # we supplied; it is NOT the comparison any more. See the docstring.
     charged: dict[str, float] = defaultdict(float)
     tokens: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     counted: dict[str, int] = defaultdict(int)
@@ -133,12 +213,31 @@ def main() -> int:
         print("No priced generations in this window - nothing to reconcile.")
         return 0
 
+    langfuse_prices = fetch_langfuse_prices(base, auth)
+    if not langfuse_prices:
+        print("Could not read Langfuse's model table (GET /api/public/models) "
+              "- there is no independent price to compare against, so nothing "
+              "was reconciled.")
+        return 1
+
     rows = []
+    unmatched = []
     for model in sorted(charged):
         prompt, completion = tokens[model]
         ours = cost_for(model, TokenUsage(prompt, completion, model))
-        theirs = charged[model]
+        rates = match_langfuse_model(model, langfuse_prices)
+        if rates is None:
+            unmatched.append(model)
+            continue
+        theirs = (prompt * rates[0] + completion * rates[1]) / 1_000_000
         rows.append((model, counted[model], ours, theirs))
+
+    if not rows:
+        print("Langfuse's table matched none of the models in this window, so "
+              "there was nothing to compare.")
+        for model in unmatched:
+            print(f"  no Langfuse definition: {model}")
+        return 1
 
     width = max(len(r[0]) for r in rows)
     print()
@@ -172,6 +271,12 @@ def main() -> int:
         print("Nothing was changed - usage_events remains the billing record.")
     else:
         print(f"Every priced model agrees within {args.tolerance:.0%}.")
+
+    if unmatched:
+        print()
+        print("No Langfuse price definition for: " + ", ".join(unmatched))
+        print("These could NOT be checked - our figure for them is "
+              "unverified, not agreed.")
 
     missing = sorted(set(charged) - set(MODEL_PRICES_USD_PER_MTOK))
     if missing:

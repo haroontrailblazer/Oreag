@@ -554,6 +554,18 @@ EMBEDDING_PRICES_USD_PER_MTOK: dict[str, float] = {
 }
 
 
+# How many decimal places a stored cost keeps, matching
+# usage_events.*_cost_usd NUMERIC(18,10) (migration 0041).
+#
+# Six was not enough, and the failure was silent. A 20-token embedding costs
+# $0.0000004 and quantised to exactly $0.000000 - a MEASURED zero for a call
+# that really cost money, which is the precise lie the NULL-is-not-zero rule
+# above exists to prevent. Ten places holds a single token of the cheapest
+# rate in either table (text-embedding-3-small at $0.02/Mtok = $0.00000002 per
+# token) with two decimal places still to spare.
+_COST_DP = 10
+
+
 def embedding_cost_for(model: str, tokens: int | None) -> float | None:
     """USD for `tokens` embedded by `model`, or None when it cannot be known.
 
@@ -568,7 +580,39 @@ def embedding_cost_for(model: str, tokens: int | None) -> float | None:
     price = EMBEDDING_PRICES_USD_PER_MTOK.get(model)
     if price is None:
         return None
-    return round(tokens * price / 1_000_000, 6)
+    return round(tokens * price / 1_000_000, _COST_DP)
+
+
+def cost_breakdown(model: str, usage) -> dict[str, float] | None:
+    """The input/output/total split of one call, or None when unpriceable.
+
+    Exists because Langfuse wants the same shape it would have derived itself.
+    Handing it `cost_details` stops it re-pricing the call from a model table
+    we do not control - which is what made the dashboard and the app disagree
+    even though both had the identical token counts. Measured against this
+    project's own Langfuse: of 29 priced ids, 13 match nothing there (so the
+    dashboard showed a blank against real spend) and `claude-sonnet-5` matched
+    at $2/$10 against our $3/$15.
+
+    Same NULL discipline as `cost_for`, which is defined in terms of this.
+    """
+    if not model:
+        return None
+    prices = MODEL_PRICES_USD_PER_MTOK.get(model)
+    if prices is None:
+        return None
+    prompt = getattr(usage, "prompt_tokens", None)
+    completion = getattr(usage, "completion_tokens", None)
+    if prompt is None or completion is None:
+        return None
+    input_per_mtok, output_per_mtok = prices
+    input_cost = round(prompt * input_per_mtok / 1_000_000, _COST_DP)
+    output_cost = round(completion * output_per_mtok / 1_000_000, _COST_DP)
+    return {
+        "input": input_cost,
+        "output": output_cost,
+        "total": round(input_cost + output_cost, _COST_DP),
+    }
 
 
 def cost_for(model: str, usage) -> float | None:
@@ -582,21 +626,13 @@ def cost_for(model: str, usage) -> float | None:
 
     ``usage`` is duck-typed (providers.base.TokenUsage in practice) so this
     stays importable without the providers' SDKs.
+
+    Defined as the total of `cost_breakdown` so the number stored in the
+    billing table and the number handed to Langfuse cannot drift apart: they
+    are the same arithmetic, not two implementations of it.
     """
-    if not model:
-        return None
-    prices = MODEL_PRICES_USD_PER_MTOK.get(model)
-    if prices is None:
-        return None
-    prompt = getattr(usage, "prompt_tokens", None)
-    completion = getattr(usage, "completion_tokens", None)
-    if prompt is None or completion is None:
-        return None
-    input_per_mtok, output_per_mtok = prices
-    # 6dp matches usage_events.cost_usd NUMERIC(12,6).
-    return round(
-        (prompt * input_per_mtok + completion * output_per_mtok) / 1_000_000, 6
-    )
+    breakdown = cost_breakdown(model, usage)
+    return None if breakdown is None else breakdown["total"]
 
 
 # Providers are stateless wrappers around thread-safe SDK clients, so instances

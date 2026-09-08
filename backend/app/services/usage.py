@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..models import Project, UsageEvent
 from ..providers.base import TokenUsage
 from ..providers.registry import cost_for, embedding_cost_for
-from . import embedding_usage
+from . import embedding_usage, tracing
 
 logger = logging.getLogger(__name__)
 
@@ -122,3 +122,34 @@ def record_usage(
             db.rollback()
         except Exception:
             pass
+        return
+
+    # Mirror the SAME numbers into Langfuse. Langfuse held no embedding
+    # observation of any kind, while the Usage page adds embedding dollars into
+    # its headline - so the two totals were summing different sets of calls and
+    # could never agree. Measured on this account, that gap alone was $0.005371
+    # of a $0.010321 discrepancy.
+    #
+    # Emitted from here, rather than from the tracing helpers, so the figure
+    # Langfuse receives is by construction the figure the row just stored - one
+    # variable, two ledgers.
+    #
+    # OUTSIDE the billing try, not merely after the commit. Inside it, anything
+    # that ever escaped `record_embedding_spend` would be logged as "Usage event
+    # write failed" - a report that billing was lost when it had already
+    # committed - and would then roll back a completed transaction. Nothing can
+    # escape today; the separation is what keeps that true as the function
+    # grows. Its own handler names the thing that actually failed.
+    if embedding_model and embedding_tokens is not None:
+        try:
+            tracing.record_embedding_spend(
+                {embedding_model: embedding_tokens},
+                owner_id=project.owner_id,
+                project_id=project.id,
+                api_key_id=api_key_id,
+            )
+        except Exception:
+            logger.warning(
+                "Langfuse embedding mirror failed for %s (the usage row is "
+                "committed and correct)", endpoint, exc_info=True
+            )

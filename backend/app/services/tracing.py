@@ -159,6 +159,199 @@ def shutdown() -> None:
         logger.debug("Langfuse shutdown failed", exc_info=True)
 
 
+def _usage_fields(usage, metadata: dict | None) -> dict:
+    """The `usage_details` / `cost_details` half of a generation update.
+
+    WHY COST IS SENT AND NOT LEFT TO LANGFUSE. Given a model name and token
+    counts, Langfuse prices the call itself, from a model table it maintains.
+    That is a SECOND pricing authority, and the two disagree in two measurable
+    ways - checked against this project's live Langfuse, 182 model definitions:
+
+      * 13 of our 29 priced model ids match nothing there at all (grok-4, both
+        deepseek-v4, both groq llamas, gpt-oss-120b, both cohere, both
+        together, both fireworks, anthropic/claude-sonnet-4.5). Those calls
+        showed real dollars on the Usage page and a BLANK in Langfuse.
+      * `claude-sonnet-5` matched at $2/$10 against our $3/$15 - a 50% split on
+        the same call.
+
+    Sending `cost_details` makes Oreag the single source of truth FOR EVERY
+    MODEL IT PRICES: Langfuse stores what it is given rather than re-deriving
+    it, so those two numbers cannot drift no matter what either table says
+    next.
+
+    It is not a guarantee about everything. `cost_breakdown` returns None for
+    any id absent from the table - 27 of the catalog's LLM ids, and all but
+    three embedders - and for those we still send tokens and a model name with
+    no cost, so Langfuse prices them from its own table while `usage_events`
+    stores NULL. A model named in the `unpriced_models` caveat can therefore
+    show dollars in Langfuse and nothing here. The only lever on that is
+    registry coverage; withholding the tokens too would break the one thing the
+    two ledgers already agree on.
+
+    The gate is `priceable`, not `known`. See TokenUsage.priceable - `known` is
+    an OR, and a half-measured call used to be sent as `output: 0`, which
+    Langfuse happily priced while `cost_for` stored NULL.
+    """
+    from ..providers.registry import cost_breakdown
+
+    if not usage.priceable:
+        # Two different failures, and saying "the provider reported nothing"
+        # about a call that reported 1500 prompt tokens is a statement this
+        # code knows to be false. The half-measured case keeps its number - as
+        # metadata, so Langfuse still cannot turn it into a price.
+        note = (
+            "not reported by this provider"
+            if not usage.known
+            else "partial - only one side of the call was reported"
+        )
+        extra = {"token_usage": note}
+        if usage.known:
+            extra["reported_input_tokens"] = usage.prompt_tokens
+            extra["reported_output_tokens"] = usage.completion_tokens
+        return {"metadata": {**(metadata or {}), **extra}}
+
+    prompt = usage.prompt_tokens or 0
+    completion = usage.completion_tokens or 0
+    update: dict = {
+        "usage_details": {
+            "input": prompt,
+            "output": completion,
+            "total": prompt + completion,
+        }
+    }
+    cost = cost_breakdown(usage.model, usage)
+    if cost is not None:
+        update["cost_details"] = cost
+    if usage.reasoning_tokens is not None:
+        # Deliberately metadata, NOT a usage key. It is a SUBSET of `output`
+        # and already paid for there; sending it as `output_reasoning_tokens`
+        # would add it to the token counts Langfuse displays and derives, and
+        # token counts are the one thing the two ledgers already agree on.
+        #
+        # The trade-off is real and worth stating: metadata goes through the
+        # same content mask as input/output, so on a trace outside the content
+        # sample this split is redacted. The COST is unaffected - the thinking
+        # tokens are inside `output` and inside `cost_details` either way -
+        # so what is lost is visibility, not accuracy.
+        update["metadata"] = {
+            **(metadata or {}),
+            "reasoning_tokens": usage.reasoning_tokens,
+        }
+    return update
+
+
+def _has_live_span() -> bool:
+    """Whether an OpenTelemetry span is currently recording.
+
+    The question is "is there a trace to inherit", and only OTel can answer it -
+    `client()` being non-None says tracing is configured, not that a span is
+    open. Any failure answers True, because inheriting is the safe direction:
+    the worst case is an observation nested under the wrong parent, where the
+    alternative rewrites a live trace's tags.
+    """
+    try:
+        from opentelemetry import trace
+
+        return trace.get_current_span().is_recording()
+    except Exception:  # pragma: no cover - defensive
+        return True
+
+
+def record_embedding_spend(
+    by_model: dict[str, int],
+    *,
+    owner_id=None,
+    project_id=None,
+    api_key_id=None,
+) -> None:
+    """Emit one observation per embedding model whose tokens we just billed.
+
+    WHY THIS EXISTS. Langfuse held no embedding observation of any kind, while
+    the Usage page adds embedding dollars into its headline total. So the two
+    numbers were summing DIFFERENT SETS OF CALLS - measured on this account,
+    $0.005371 of the app's spend had no counterpart in Langfuse at all. That is
+    most of the gap a user sees when they put the two side by side, and no
+    amount of price-table agreement could ever have closed it.
+
+    WHY IT CARRIES ITS OWN ATTRIBUTION, AND ONLY SOMETIMES. This is called from
+    `record_usage`, which on the BUFFERED routes runs after `query_trace` has
+    closed - and on `/files`, `/memory` and background ingest there was never a
+    trace at all. An observation opened with no active span becomes a new root
+    trace, and the SDK is explicit that Langfuse's aggregations "only include
+    observations that have the attribute set", so such a trace would land in
+    the account-wide total while vanishing from cost-per-project and
+    cost-per-key - the two questions `query_trace` exists to answer - and would
+    be invisible to `forget_user`, which finds traces by userId.
+
+    But the STREAMED routes call `record_usage` while the trace is still open
+    (rag_v1.py and playground.py both do it in a `finally` inside the `with`).
+    Re-entering `propagate_attributes` there does not create a scope - it
+    merges onto whatever span is current, so it wrote `embedding` into the
+    ROOT span's tags and stamped this function's metadata over the query's.
+    A streamed query and a buffered one then produced structurally different
+    traces for the same product event, which is the very thing this change set
+    out to stop.
+
+    So: inherit when there is a live span, re-establish only when there is not.
+
+    One observation per model per call, not per `embed_texts`: an ingest embeds
+    hundreds of chunks, and the tally is what the bill is made of.
+
+    Never raises - tracing is not allowed to break the request it describes.
+    """
+    if not by_model:
+        return
+    lf = client()
+    if lf is None:
+        return
+    from ..providers.registry import embedding_cost_for
+
+    try:
+        from langfuse import propagate_attributes
+    except Exception:  # pragma: no cover - defensive
+        return
+
+    def _emit() -> None:
+        for model, tokens in by_model.items():
+            with lf.start_as_current_observation(
+                as_type="generation", name="embed", model=model
+            ) as span:
+                # An embedding has no completion side, so `input` and `total`
+                # are the same number. Langfuse prices several embedders off a
+                # `total` key rather than `input`, so both are sent.
+                update: dict = {"usage_details": {"input": tokens, "total": tokens}}
+                cost = embedding_cost_for(model, tokens)
+                if cost is not None:
+                    update["cost_details"] = {"input": cost, "total": cost}
+                span.update(**update)
+
+    try:
+        if owner_id is None or _has_live_span():
+            # Inherit. A live span already carries the trace's user/project
+            # attribution, and the observation nests under it as a child.
+            _emit()
+            return
+        # None-valued entries are dropped rather than sent: the SDK coerces
+        # metadata values with str(), so `None` arrives as the four-character
+        # string "None" and a Langfuse filter on api_key_id matches it.
+        attribution = {
+            key: str(value)
+            for key, value in (
+                ("project_id", project_id),
+                ("api_key_id", api_key_id),
+            )
+            if value is not None
+        }
+        with propagate_attributes(
+            user_id=str(owner_id), tags=["embedding"], metadata=attribution
+        ):
+            _emit()
+    except Exception:
+        # WARNING, not debug: this is the branch production always takes, and
+        # at debug level a failure here is silent in every real deployment.
+        logger.warning("Could not record embedding spend", exc_info=True)
+
+
 def observed_generate(llm, system_prompt: str, user_prompt: str, *, name: str,
                       metadata: dict | None = None):
     """Call an LLM and record it as a Langfuse `generation`.
@@ -200,22 +393,11 @@ def observed_generate(llm, system_prompt: str, user_prompt: str, *, name: str,
     with observation as span:
         text, usage = call_llm(llm, system_prompt, user_prompt)
         try:
-            update: dict = {"output": text}
-            # Omitted entirely when the provider reported nothing, rather than
-            # sent as zeros. Zeros would be indistinguishable from a real empty
-            # completion and would make Langfuse compute a cost of $0 for a call
-            # that actually cost money.
-            if usage.known:
-                update["usage_details"] = {
-                    "input": usage.prompt_tokens or 0,
-                    "output": usage.completion_tokens or 0,
-                }
-            else:
-                update.setdefault("metadata", {})
-                update["metadata"] = {
-                    **(metadata or {}),
-                    "token_usage": "not reported by this provider",
-                }
+            # Usage and cost are omitted entirely unless BOTH counts exist,
+            # rather than sent as zeros: a zero is indistinguishable from a
+            # real empty completion and would make Langfuse price a call that
+            # actually cost money at $0.
+            update: dict = {"output": text, **_usage_fields(usage, metadata)}
             span.update(**update)
         except Exception:
             logger.debug("Could not annotate a generation span", exc_info=True)
@@ -331,17 +513,10 @@ def observed_stream(llm, streamer, system_prompt: str, user_prompt: str, *,
                 yield delta
         finally:
             try:
-                update: dict = {"output": "".join(chunks)}
-                if usage.known:
-                    update["usage_details"] = {
-                        "input": usage.prompt_tokens or 0,
-                        "output": usage.completion_tokens or 0,
-                    }
-                else:
-                    update["metadata"] = {
-                        **(metadata or {}),
-                        "token_usage": "not reported for this streamed call",
-                    }
+                update: dict = {
+                    "output": "".join(chunks),
+                    **_usage_fields(usage, metadata),
+                }
                 span.update(**update)
             except Exception:
                 logger.debug("Could not annotate a streamed span", exc_info=True)

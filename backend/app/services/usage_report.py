@@ -26,9 +26,20 @@ that all the way to the response; COALESCE would forge a measurement out of
 thin air, so it is reserved for request COUNTs, which genuinely are 0 when
 empty. What was NOT measured is reported explicitly in ``caveats`` instead of
 being hidden: the rows with no token counts, the models that produced them,
-and the standing fact that ingestion-time embedding, image captioning and
-audio transcription bypass the LLM factory and are not metered at all - for a
-document-heavy project that is plausibly the largest real cost.
+and the models that reported their tokens perfectly and still have no dollar
+figure because nothing lists a price for them.
+
+That last caveat exists because NULL-is-not-zero has a second edge. A model
+with no entry in ``MODEL_PRICES_USD_PER_MTOK`` contributes its TOKENS to the
+volume totals and nothing at all to the cost totals, so the spend figure is
+not merely imprecise, it is short by an amount the page could not otherwise
+admit to. Naming those models is the only honest way to show a total that is
+knowingly partial.
+
+Ingestion-time embedding, image captioning and audio transcription ARE metered
+- see services/ingestion, which routes all three through the request-scoped
+accumulator. The docstring used to claim the opposite, and the caveat flag
+used to assert it to every user.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -37,6 +48,10 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from ..models import ApiKey, Project, QueryLog, UsageEvent
+from ..providers.registry import (
+    EMBEDDING_PRICES_USD_PER_MTOK,
+    MODEL_PRICES_USD_PER_MTOK,
+)
 from ..schemas import (
     UsageByApiKey,
     UsageByEndpoint,
@@ -369,6 +384,57 @@ def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
         if row.unmeasured and row.uncached
     ]
 
+    # "Unpriced" is the OTHER way a dollar figure goes missing, and until now
+    # nothing reported it. The model ran, reported its tokens perfectly, and
+    # `cost_for` returned NULL because that id has no entry in the price table
+    # - true for every local model and for a good part of the hosted catalog.
+    # `_nsum` then skips those NULLs, so the tokens appear in the volume totals
+    # while their dollars silently do not appear in the spend. A BYOK user on
+    # Groq or Together sees a real bill from their provider and a total here
+    # that never mentions them.
+    #
+    # ASKED OF THE PRICE TABLE, NOT INFERRED FROM A NULL COST. A NULL cost has
+    # two causes, and only one of them is "no listed price": `cost_for` also
+    # returns None when either token count is missing, so a half-measured call
+    # on a perfectly priced model (a vendor that reports `prompt_tokens` and no
+    # `completion_tokens`) would otherwise be reported to the user as "no
+    # published rate for gpt-4o-mini", which is simply false. Membership of the
+    # table is the only thing that actually answers the question.
+    #
+    # DELIBERATELY NOT GATED ON `uncached`. That term is right two lines above -
+    # a cache hit has NULL tokens because no model ran, so counting it as
+    # unmeasured would be nonsense - and wrong here, where the predicate
+    # already requires `not row.unmeasured`, which is itself proof a model ran.
+    # Condense-question runs BEFORE both caches (services/query.py says so), so
+    # a cache HIT still carries real prompt/completion tokens and a real bill.
+    # Gating on `uncached` hid exactly those rows: tokens counted, dollars
+    # dropped by `_nsum`, and no caveat to explain the gap.
+    #
+    # Embedders are asked separately, of their own table. They cannot share the
+    # `not row.unmeasured` guard - that keys off prompt_tokens IS NULL, which is
+    # precisely NULL on the embedding-only rows (/retrieve, file_ingest,
+    # matryoshka_restore) an embedding caveat most needs to cover - so the
+    # guard is "we measured embedding tokens" instead. Only three of the
+    # catalog's embedders have a listed price, so this is the common case, not
+    # an edge: without it the page said "this embedder has no published rate"
+    # while the list that would name it stayed empty.
+    unpriced_models = sorted(
+        {
+            row.model
+            for row in cube
+            if row.model
+            and not row.unmeasured
+            and row.model not in MODEL_PRICES_USD_PER_MTOK
+        }
+        | {
+            row.embedding_model
+            for row in cube
+            if row.embedding_model
+            and row.embedding_tokens is not None
+            and row.embedding_model not in EMBEDDING_PRICES_USD_PER_MTOK
+        }
+    )
+
     # -- assemble ------------------------------------------------------------
     by_project: list[UsageByProject] = []
     log_by_id = {row.project_id: row for row in project_log_rows}
@@ -499,6 +565,23 @@ def build_report(db: Session, owner_id: uuid.UUID, *, days: int) -> UsageReport:
         caveats=UsageCaveats(
             unmeasured_requests=sum(count for _, count in unmeasured),
             unmeasured_models=sorted({m for m, _ in unmeasured if m}),
-            vision_and_audio_excluded=True,
+            unpriced_models=unpriced_models,
+            # Was hardcoded True, which made the page tell every account
+            # "image captioning and audio transcription are not counted" -
+            # false since ingestion.py:369-384 meters both through
+            # `embedding.llm_total`. The schema's own comment already said this
+            # flag is "now normally False"; the code had simply never caught up.
+            #
+            # It is a constant for now, and deliberately so rather than
+            # accidentally: the one case that would justify True - a
+            # transcriber that reports no usage, like whisper-1 - writes a row
+            # with a NULL model, and `unmeasured_models` drops NULL models, so
+            # there is no signal in this table to compute it from. Those
+            # requests still reach the user through `unmeasured_requests`.
+            # Making the flag real means teaching the accumulator to count
+            # unmeasured LLM calls the way it already counts unmeasured
+            # embeddings; until then, asserting False is the honest answer and
+            # asserting True was not.
+            vision_and_audio_excluded=False,
         ),
     )

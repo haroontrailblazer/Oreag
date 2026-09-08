@@ -228,11 +228,94 @@ class TestCaveats:
         caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
         assert caveats.unmeasured_requests == 4
         assert caveats.unmeasured_models == ["ollama-x", "sarvam-m"]
-        assert caveats.vision_and_audio_excluded is True
 
-    def test_vision_and_audio_excluded_is_true_even_when_empty(self, db):
+    def test_captioning_and_transcription_are_no_longer_declared_excluded(self, db):
+        """This flag was hardcoded True, so the page told every account that
+        image captioning and audio transcription were not counted. They are -
+        `ingestion.py` meters both through `embedding.llm_total`. A caveat box
+        whose job is to stop the numbers misleading must not itself mislead."""
         caveats = usage_report.build_report(db, uuid.uuid4(), days=30).caveats
-        assert caveats.vision_and_audio_excluded is True
+        assert caveats.vision_and_audio_excluded is False
+
+    def test_a_model_that_reports_tokens_but_has_no_price_is_named(self, db):
+        """The other way spend goes missing: measured perfectly, priced not at
+        all. Those tokens land in the volume totals while their dollars are
+        skipped by `_nsum`, so the headline understates and nothing said why."""
+        from app.providers.base import TokenUsage
+        from app.providers.registry import cost_for
+
+        # Guards the fixture itself: this test is worthless if the id it calls
+        # unpriced ever gains a price. The first draft used
+        # llama-3.3-70b-versatile, which IS priced at (0.59, 0.79) - the row
+        # only looked unpriced because the fixture hand-wrote a NULL cost.
+        assert cost_for("grok-3-mini", TokenUsage(100, 20, "grok-3-mini")) is None
+
+        project = _project(db, uuid.uuid4())
+        _event(db, project, model="grok-3-mini", prompt_tokens=100,
+               completion_tokens=20)                    # measured, no price
+        _event(db, project, model="gpt-4o-mini", prompt_tokens=5,
+               completion_tokens=2, cost_usd=0.001)     # measured and priced
+
+        caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
+        assert caveats.unpriced_models == ["grok-3-mini"]
+
+    def test_an_unpriced_model_is_named_even_on_a_cache_hit(self, db):
+        """Condense runs BEFORE the caches (services/query.py says so in a
+        comment), so a cache hit still carries real prompt/completion tokens
+        and a real bill. Copying `uncached` from the unmeasured rollup above
+        made those rows invisible: tokens counted, dollars dropped, and no
+        caveat explaining the gap - the exact silent understatement this
+        caveat exists to expose."""
+        project = _project(db, uuid.uuid4())
+        _event(db, project, model="grok-3-mini", prompt_tokens=800,
+               completion_tokens=40, cache_layer="l1")
+
+        report = usage_report.build_report(db, project.owner_id, days=30)
+        assert report.totals.prompt_tokens == 800
+        assert report.caveats.unpriced_models == ["grok-3-mini"]
+
+    def test_an_unpriced_embedder_is_named_too(self, db):
+        """Only 3 of the catalog's 20 embedders have a listed price, so an
+        unpriced EMBEDDER is the steady state for Gemini/Cohere/Voyage/local
+        projects - and the tile says 'this embedder has no published rate'
+        while the caveat that would name it stayed empty."""
+        project = _project(db, uuid.uuid4())
+        _event(db, project, model="gpt-4o-mini", prompt_tokens=5,
+               completion_tokens=2, cost_usd=0.001,
+               embedding_model="nomic-embed-text", embedding_tokens=500)
+
+        caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
+        assert caveats.unpriced_models == ["nomic-embed-text"]
+
+    def test_a_priced_embedder_is_not_named(self, db):
+        project = _project(db, uuid.uuid4())
+        _event(db, project, embedding_model="text-embedding-3-small",
+               embedding_tokens=500, embedding_cost_usd=0.00001)
+
+        caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
+        assert caveats.unpriced_models == []
+
+    def test_a_half_measured_call_is_not_called_unpriced(self, db):
+        """A NULL cost has two causes and only one is "no listed price".
+        `cost_for` also returns None when either token count is missing, so
+        inferring the price table from a NULL cost told the user there was
+        "no published rate for gpt-4o-mini" - which is false."""
+        project = _project(db, uuid.uuid4())
+        _event(db, project, model="gpt-4o-mini", prompt_tokens=1000,
+               completion_tokens=None)                  # stream lost its tally
+
+        caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
+        assert caveats.unpriced_models == []
+
+    def test_an_unmeasured_model_is_not_also_called_unpriced(self, db):
+        """The two caveats answer different questions and must not overlap:
+        a model that reported nothing was never priceable in the first place."""
+        project = _project(db, uuid.uuid4())
+        _event(db, project, model="sarvam-m")
+
+        caveats = usage_report.build_report(db, project.owner_id, days=30).caveats
+        assert caveats.unmeasured_models == ["sarvam-m"]
+        assert caveats.unpriced_models == []
 
 
 # ── breakdowns ──────────────────────────────────────────────────────────────
@@ -480,7 +563,8 @@ class TestEndpoint:
             "caveats": {
                 "unmeasured_requests": 0,
                 "unmeasured_models": [],
-                "vision_and_audio_excluded": True,
+                "unpriced_models": [],
+                "vision_and_audio_excluded": False,
             },
         }
 

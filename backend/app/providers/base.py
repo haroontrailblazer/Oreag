@@ -99,10 +99,31 @@ class TokenUsage:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     model: str = ""
+    # The reasoning/thinking share of `completion_tokens`, when the vendor
+    # breaks it out. A SUBSET of the completion count, never an addition to it:
+    # every provider that reports it bills it at the output rate, so it is
+    # already paid for by `completion_tokens`. Carried only so the split stays
+    # visible - dropping it is what hid Gemini's thinking spend for months.
+    # Appended last, with a default, so the many `TokenUsage(a, b, c)` literals
+    # in the suite keep working.
+    reasoning_tokens: int | None = None
 
     @property
     def known(self) -> bool:
         return self.prompt_tokens is not None or self.completion_tokens is not None
+
+    @property
+    def priceable(self) -> bool:
+        """Whether this call can be turned into a dollar figure.
+
+        Stricter than `known`, and the difference is a real bug it used to
+        hide: `known` is an OR, so a call reporting a prompt count and no
+        completion count passed the gate and was sent to Langfuse as
+        `output: 0`. Langfuse priced the input side and displayed a real
+        number, while `cost_for` - which requires both counts - stored NULL.
+        One call, dollars in one ledger and nothing in the other.
+        """
+        return self.prompt_tokens is not None and self.completion_tokens is not None
 
     def __add__(self, other: "TokenUsage") -> "TokenUsage":
         """Sum across the several model calls one request can make.
@@ -120,6 +141,7 @@ class TokenUsage:
             prompt_tokens=add(self.prompt_tokens, other.prompt_tokens),
             completion_tokens=add(self.completion_tokens, other.completion_tokens),
             model=self.model or other.model,
+            reasoning_tokens=add(self.reasoning_tokens, other.reasoning_tokens),
         )
 
 
@@ -170,12 +192,33 @@ def usage_from_anthropic(resp, model: str) -> TokenUsage:
 
 def usage_from_gemini(resp, model: str) -> TokenUsage:
     """Gemini reports on `usage_metadata`, and counts the ANSWER as
-    `candidates_token_count`."""
+    `candidates_token_count`.
+
+    THINKING TOKENS ARE NOT IN THAT COUNT. The SDK documents
+    `total_token_count` as the sum of `prompt_token_count`,
+    `candidates_token_count`, `tool_use_prompt_token_count` AND
+    `thoughts_token_count` - four disjoint fields. Google bills thoughts at the
+    full output rate (Langfuse's managed table independently prices
+    `thoughts_token_count` identically to `output` on every Gemini id we
+    price), and nothing in this codebase ever sets a `thinking_config`, so every
+    Gemini call runs with the model's default thinking budget and pays for it.
+
+    Reading only `candidates` therefore understated Gemini's output side - in
+    BOTH ledgers at once, since the same truncated number was sent to Langfuse.
+    That is why it produced no token discrepancy anyone could notice, and why
+    it was the largest gap against the actual invoice in the whole audit.
+    """
     usage = getattr(resp, "usage_metadata", None)
+    candidates = _int_or_none(getattr(usage, "candidates_token_count", None))
+    thoughts = _int_or_none(getattr(usage, "thoughts_token_count", None))
+    completion = candidates
+    if thoughts is not None:
+        completion = (candidates or 0) + thoughts
     return TokenUsage(
         prompt_tokens=_int_or_none(getattr(usage, "prompt_token_count", None)),
-        completion_tokens=_int_or_none(getattr(usage, "candidates_token_count", None)),
+        completion_tokens=completion,
         model=model,
+        reasoning_tokens=thoughts,
     )
 
 

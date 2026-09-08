@@ -377,9 +377,17 @@ export interface UsageCaveats {
   /** Requests whose provider reported no token usage - excluded from token/cost sums. */
   unmeasured_requests: number
   unmeasured_models: string[]
-  /** Image captioning and audio transcription build their SDK clients directly
-   *  rather than going through the provider factory, so no wrapper sees them.
-   *  Ingestion-time embedding IS now counted. */
+  /** Models that reported their tokens and still have no dollar figure, because
+   *  no price table has an entry for them - 27 of the 56 catalog LLM ids, local
+   *  models included, and every embedder outside the three OpenAI ones. Their
+   *  volume is in the token totals while their spend is not in the cost totals,
+   *  so the headline understates by exactly these. Names both LLMs and
+   *  embedders; a locally run model is listed here too, where the shortfall is
+   *  genuinely nothing. */
+  unpriced_models?: string[]
+  /** Now normally false: ingestion meters image captioning and audio
+   *  transcription through the same accumulator as embedding. Kept in the
+   *  contract for the case where a vendor reports no usage for those calls. */
   vision_and_audio_excluded: boolean
 }
 

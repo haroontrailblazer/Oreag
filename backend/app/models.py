@@ -433,7 +433,7 @@ class UsageEvent(Base):
     model: Mapped[str | None] = mapped_column(Text)
     # Priced at WRITE time. Deriving cost at read time would let a price change
     # silently rewrite every past invoice.
-    cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(18, 10))
     # Tokens NOT spent because the cache answered. Set only on a hit - NULL on a
     # miss, which is a different fact from 0.
     saved_prompt_tokens: Mapped[int | None] = mapped_column(Integer)
@@ -441,18 +441,18 @@ class UsageEvent(Base):
     # What those saved tokens were worth, priced from the ORIGINAL run's model
     # at write time - not blended from the window, which made a fixed set of
     # cache hits report a different saving as unrelated traffic arrived.
-    saved_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    saved_cost_usd: Mapped[float | None] = mapped_column(Numeric(18, 10))
     # The EMBEDDER's side of the same request, kept apart from the LLM's
     # because embedding tokens are 10-100x cheaper and pricing them together
     # would be wrong for both. Ingestion rows carry only these.
     embedding_tokens: Mapped[int | None] = mapped_column(Integer)
     embedding_model: Mapped[str | None] = mapped_column(Text)
-    embedding_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    embedding_cost_usd: Mapped[float | None] = mapped_column(Numeric(18, 10))
     # Embedding NOT spent because a Matryoshka grow-back restored the vectors
     # from the archive instead of calling the provider. Replayed from what the
     # files originally cost, so it is a measurement like every other saving.
     saved_embedding_tokens: Mapped[int | None] = mapped_column(Integer)
-    saved_embedding_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    saved_embedding_cost_usd: Mapped[float | None] = mapped_column(Numeric(18, 10))
     cache_layer: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

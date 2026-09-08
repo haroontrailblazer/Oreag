@@ -106,6 +106,22 @@ const compactFmt = new Intl.NumberFormat("en-US", {
 /** $12.34 normally; four decimals for sub-cent amounts so they don't read $0.00. */
 function formatCost(value: number): string {
   const abs = Math.abs(value)
+  // A real charge must never PRINT as zero. Four fixed places was not enough:
+  // a 200-token gpt-4o-mini call costs $0.0000366 and rendered as "$0.0000",
+  // and a small embedding as "$0.0000" too - the same misleading zero the
+  // backend's NULL-is-not-zero rule exists to prevent, reintroduced in the
+  // formatter. Below $0.0001 the precision follows the magnitude instead, so
+  // the first two significant digits always survive.
+  if (abs > 0 && abs < 0.0001) {
+    // Below ~5e-11 no fixed-point rendering keeps a significant digit, so the
+    // representation changes rather than the precision - a capped toFixed(10)
+    // printed "$0.0000000000", the very thing the paragraph above forbids.
+    // Unreachable from a stored cost (quantised to 1e-10) but not from a
+    // derived one such as cost-per-request.
+    if (abs < 1e-9) return `${value < 0 ? "-" : ""}<$0.000000001`
+    const places = Math.ceil(-Math.log10(abs)) + 2
+    return `$${value.toFixed(places)}`
+  }
   if (abs > 0 && abs < 0.01) return `$${value.toFixed(4)}`
   return `$${value.toFixed(2)}`
 }
@@ -119,6 +135,51 @@ function formatPercent(value: number): string {
 function measuredSum(values: (number | null)[]): number | null {
   if (values.some((value) => value == null)) return null
   return values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+}
+
+/** What one side of the spend split actually is.
+ *
+ * A NULL cost has four causes and they are not interchangeable: nothing of this
+ * kind ran; it ran and the provider reported no tokens; it ran and was measured
+ * but no price is listed; or it ran, was measured and was priced. The backend
+ * spends eight lines of comment keeping those apart (services/usage_report.py)
+ * and the dashboard used to collapse them again in four places at once - the
+ * headline tile, both legend rows, the donut geometry and its aria-label -
+ * which is how one card came to say "(partial)", "Not measured" and "this LLM
+ * has no published rate" simultaneously.
+ *
+ * Derived once here and passed down, so the four places cannot drift apart. */
+type SideSpend =
+  | { kind: "priced"; cost: number }
+  | { kind: "unpriced" }
+  | { kind: "unmeasured" }
+  | { kind: "absent" }
+
+function sideSpend(
+  cost: number | null,
+  tokens: (number | null)[],
+  ranUnmeasured: boolean
+): SideSpend {
+  if (cost != null) return { kind: "priced", cost }
+  // Any measured token count proves it ran, so `??  0` is safe here in a way
+  // measuredSum is not: measuredSum returns null when EITHER input is null,
+  // which turned "half measured" into "did not happen".
+  if (tokens.some((value) => (value ?? 0) > 0)) return { kind: "unpriced" }
+  return ranUnmeasured ? { kind: "unmeasured" } : { kind: "absent" }
+}
+
+/** Why a side contributes no dollars. Empty for a priced side, which the
+ *  callers below never ask about - but TypeScript cannot know that a priced
+ *  LLM implies an unpriced embedder, so the narrowing is made explicit here
+ *  rather than asserted at four call sites. */
+function sideReason(side: SideSpend): string {
+  return side.kind === "priced" ? "" : SIDE_LABEL[side.kind][1]
+}
+
+const SIDE_LABEL: Record<Exclude<SideSpend["kind"], "priced">, [string, string]> = {
+  unpriced: ["Not priced", "no public rate for this model"],
+  unmeasured: ["Not measured", "the provider reported no usage"],
+  absent: ["None", "nothing of this kind ran"],
 }
 
 function shareOf(value: number | null, total: number | null): number | null {
@@ -343,17 +404,62 @@ function HitRateMeter({
 function TotalsRow({
   totals,
   days,
+  caveats,
 }: {
   totals: UsageTotals
   days: number
+  caveats: UsageCaveats
 }) {
   // Total spend is the two sides added, but only where BOTH are known -
   // adding a measured number to an unmeasured one would silently present a
   // partial figure as a total.
-  const totalCost =
-    totals.cost_usd == null && totals.embedding_cost_usd == null
-      ? null
-      : (totals.cost_usd ?? 0) + (totals.embedding_cost_usd ?? 0)
+  //
+  // The guard used to be an AND, which meant it only fired when BOTH sides
+  // were unmeasured - so exactly the case it was written to prevent, one side
+  // known and one NULL, fell through to `?? 0` and rendered a partial figure
+  // as the total.
+  //
+  // But blanking the tile is the wrong correction, because only three OpenAI
+  // embedding models have a listed price: an account on Gemini, Cohere or a
+  // local embedder has a NULL embedding cost permanently, and would have seen
+  // "Not measured" in place of a fully measured LLM bill - while the card
+  // directly below still rendered that same figure. So: show the combined
+  // number when both sides are priced, otherwise show the side that IS
+  // measured and say which one it is. Never add a measured number to an
+  // unmeasured one and call the result a total.
+  const ranUnmeasured = (caveats.unmeasured_models ?? []).length > 0
+  const llmSpend = sideSpend(
+    totals.cost_usd,
+    [totals.prompt_tokens, totals.completion_tokens],
+    ranUnmeasured
+  )
+  const embedSpend = sideSpend(
+    totals.embedding_cost_usd,
+    [totals.embedding_tokens],
+    false
+  )
+  const spendComplete =
+    llmSpend.kind === "priced" && embedSpend.kind === "priced"
+  // Only a side that is priced contributes. Never add a measured number to an
+  // unmeasured one and call the result a total - but never blank a measured
+  // side either, which is what routing both through measuredSum did: only 3 of
+  // the catalog's 22 embedders have a listed price, so "embedding is unpriced"
+  // is the ordinary state, not an edge, and it was hiding real LLM spend.
+  const pricedSides = [llmSpend, embedSpend].filter(
+    (side): side is { kind: "priced"; cost: number } => side.kind === "priced"
+  )
+  const totalCost = pricedSides.length
+    ? pricedSides.reduce((sum, side) => sum + side.cost, 0)
+    : null
+  // Says what is missing and WHY, without asserting a price gap for a side
+  // that never ran.
+  const partialSpendNote = spendComplete
+    ? null
+    : totalCost == null
+      ? "Nothing in this window has a published rate"
+      : llmSpend.kind === "priced"
+        ? `Generation only - embedding ${sideReason(embedSpend)}`
+        : `Embedding only - generation ${sideReason(llmSpend)}`
 
   const generationTokens = measuredSum([
     totals.prompt_tokens,
@@ -426,12 +532,25 @@ function TotalsRow({
         accent="var(--chart-4)"
       />
       <MetricTile
-        label="Total cost"
+        // "Estimated", not "Total". Every key here is the customer's own, so
+        // this figure is tokens x the PUBLIC LIST PRICE recorded in
+        // providers/registry.py - it cannot know their actual rate, which
+        // moves with free tiers, committed-use discounts, Azure deployment
+        // types and OpenRouter's markup. Calling a list-price estimate the
+        // "total cost" is what made the number read as a bill it never was.
+        label={
+          spendComplete
+            ? "Estimated cost"
+            : totalCost == null
+              ? "Estimated cost"
+              : "Estimated cost (partial)"
+        }
         value={totalCost}
         detail={
-          costPerRequest == null
+          partialSpendNote ??
+          (costPerRequest == null
             ? "Per-request cost not measured"
-            : `${formatCost(costPerRequest)} average per request`
+            : `${formatCost(costPerRequest)} per request, at list prices`)
         }
         icon={<Receipt className="size-4" weight="bold" />}
         accent="var(--chart-5)"
@@ -453,13 +572,29 @@ function TotalsRow({
   )
 }
 
-function SpendSplit({ totals }: { totals: UsageTotals }) {
+function SpendSplit({
+  totals,
+  caveats,
+}: {
+  totals: UsageTotals
+  caveats: UsageCaveats
+}) {
+  const llmSpend = sideSpend(
+    totals.cost_usd,
+    [totals.prompt_tokens, totals.completion_tokens],
+    (caveats.unmeasured_models ?? []).length > 0
+  )
+  const embedSpend = sideSpend(
+    totals.embedding_cost_usd,
+    [totals.embedding_tokens],
+    false
+  )
   const llm = totals.cost_usd ?? 0
   const embedding = totals.embedding_cost_usd ?? 0
   const total = llm + embedding
   if (total <= 0) return null
   const hasCompleteSpend =
-    totals.cost_usd != null && totals.embedding_cost_usd != null
+    llmSpend.kind === "priced" && embedSpend.kind === "priced"
   const llmPct = (llm / total) * 100
   const embeddingPct = 100 - llmPct
   const measuredTokens = measuredSum([
@@ -509,14 +644,35 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
             <div
               className="usage-donut-in relative flex size-40 items-center justify-center rounded-full"
               style={{
-                background: `conic-gradient(var(--chart-1) 0 ${llmPct}%, var(--chart-2) ${llmPct}% 100%)`,
+                background: hasCompleteSpend
+                  ? `conic-gradient(var(--chart-1) 0 ${llmPct}%, var(--chart-2) ${llmPct}% 100%)`
+                  // One side unpriced: paint the measured side only rather
+                  // than a 100/0 ring that reads as a real split.
+                  : `conic-gradient(${
+                      llmSpend.kind === "priced"
+                        ? "var(--chart-1)"
+                        : "var(--chart-2)"
+                    } 0 100%)`,
               }}
               role="img"
-              aria-label={`Generation ${formatCost(llm)}, embedding ${formatCost(embedding)}`}
+              // Built from the nullable values, not the `?? 0` coercions: the
+              // ring is the only thing a screen-reader user gets from this
+              // chart, and it read "Generation $0.00" for a model with no
+              // listed price - the measured-zero this whole change exists to
+              // eliminate, surviving in the one place nobody looks.
+              aria-label={`Generation ${
+                llmSpend.kind === "priced"
+                  ? formatCost(llmSpend.cost)
+                  : SIDE_LABEL[llmSpend.kind][0].toLowerCase()
+              }, embedding ${
+                embedSpend.kind === "priced"
+                  ? formatCost(embedSpend.cost)
+                  : SIDE_LABEL[embedSpend.kind][0].toLowerCase()
+              }`}
             >
               <div className="flex size-28 flex-col items-center justify-center rounded-full bg-card text-center shadow-[0_0_0_1px_var(--border)]">
                 <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Total spent
+                  {hasCompleteSpend ? 'Total spent' : 'Measured spend'}
                 </span>
                 <AnimatedValue
                   value={formatCost(total)}
@@ -532,6 +688,7 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
               cost={llm}
               percent={llmPct}
               color="var(--chart-1)"
+              state={llmSpend}
             />
             <SpendLegendRow
               label="Embedding"
@@ -539,6 +696,7 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
               cost={embedding}
               percent={embeddingPct}
               color="var(--chart-2)"
+              state={embedSpend}
             />
           </div>
         </div>
@@ -557,13 +715,27 @@ function SpendSplit({ totals }: { totals: UsageTotals }) {
       </CardContent>
       <CardFooter className="border-t bg-muted/30 py-4 text-sm text-muted-foreground">
         <ChartBar className="mr-2 size-4 shrink-0" />
-        {embeddingVolumePct != null && hasCompleteSpend ? (
+        {/* Volume is measured from token counts and does not depend on any
+            price, so it is reported whenever it exists. Only the spend-share
+            clause needs both sides priced - gating the whole sentence on
+            `hasCompleteSpend` told every Gemini/Cohere/local-embedder account
+            that a fully measured comparison "is not measured", permanently,
+            because only three embedders have a listed rate. */}
+        {embeddingVolumePct != null ? (
           <span>
             Embedding produced {formatPercent(embeddingVolumePct)} of measured
-            tokens but only {formatPercent(embeddingPct)} of spend
-            {costMultiple != null
-              ? `; generation cost ${costMultiple.toFixed(1)} times as much.`
-              : "."}
+            tokens
+            {hasCompleteSpend ? (
+              <>
+                {" "}
+                but only {formatPercent(embeddingPct)} of spend
+                {costMultiple != null
+                  ? `; generation cost ${costMultiple.toFixed(1)} times as much.`
+                  : "."}
+              </>
+            ) : (
+              "; its share of spend needs both sides to have a published rate."
+            )}
           </span>
         ) : (
           <span>Token-volume comparison is not measured for this window.</span>
@@ -606,13 +778,42 @@ function SpendLegendRow({
   cost,
   percent,
   color,
+  state,
 }: {
   label: string
   description: string
   cost: number
   percent: number
   color: string
+  /** Which of the four states this side is in. Replaces a pair of booleans
+   * that could express "unmeasured" and "did not run" only by collapsing them
+   * into each other - so a window where the provider reported no tokens
+   * rendered as "nothing of this kind ran", directly under a tile counting
+   * the tokens it did report. */
+  state: SideSpend
 }) {
+  if (state.kind !== "priced") {
+    const [headline, detail] = SIDE_LABEL[state.kind]
+    return (
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="mt-1 size-2.5 shrink-0 rounded-full opacity-40"
+            style={{ background: color }}
+          />
+          <div>
+            <div className="font-medium">{label}</div>
+            <div className="text-xs text-muted-foreground">{description}</div>
+          </div>
+        </div>
+        <div className="text-right text-xs text-muted-foreground">
+          <div className="font-medium">{headline}</div>
+          <div>{detail}</div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-start justify-between gap-4">
@@ -835,12 +1036,25 @@ function CaveatsNote({ caveats }: { caveats: UsageCaveats }) {
       <Info />
       <AlertTitle>What these numbers leave out</AlertTitle>
       <AlertDescription>
+        <p>
+          Costs are your token counts priced at each provider&rsquo;s{" "}
+          <em>public list rate</em>. Because the keys are yours, your real
+          invoice can differ - free tiers, committed-use discounts, Azure
+          deployment types and OpenRouter&rsquo;s markup all move the rate, and
+          none of them is visible from the response.
+        </p>
+        {(caveats.unpriced_models ?? []).length > 0 && (
+          <p>
+            No published rate for {(caveats.unpriced_models ?? []).join(", ")},
+            so their tokens are counted but their spend is not. For a model
+            you run locally that is nothing; for a hosted one the cost figures
+            above understate by whatever those calls cost you.
+          </p>
+        )}
         {caveats.vision_and_audio_excluded && (
           <p>
-            Image captioning and audio transcription are not counted: they
-            build their provider clients directly rather than going through the
-            factory this meter wraps. Embedding while indexing documents{" "}
-            <em>is</em> now counted.
+            Image captioning and audio transcription are not counted for this
+            window: the provider returned no usage for them.
           </p>
         )}
         {n > 0 && (
@@ -1693,8 +1907,9 @@ function EmptyState({ days }: { days: number }) {
             model, key and project - along with what the cache saved you.
           </p>
           <p className="mx-auto max-w-md text-xs text-muted-foreground">
-            Document ingestion (embedding, captioning, transcription) is not
-            metered here, so ingest-only activity does not appear.
+            Document ingestion - embedding, captioning and transcription - is
+            metered here, so indexing spend appears as soon as a file is
+            uploaded.
           </p>
         </CardContent>
       </Card>
@@ -1714,11 +1929,15 @@ export function UsageView({ data }: { data: AccountUsage }) {
   return (
     <div className="usage-dashboard-content usage-motion flex min-h-full flex-col gap-6 sm:gap-8">
       <MotionReveal>
-        <TotalsRow totals={data.totals} days={data.window_days} />
+        <TotalsRow
+          totals={data.totals}
+          days={data.window_days}
+          caveats={data.caveats}
+        />
       </MotionReveal>
       <MotionReveal delay={60}>
         <div className="grid gap-4 lg:grid-cols-2">
-          <SpendSplit totals={data.totals} />
+          <SpendSplit totals={data.totals} caveats={data.caveats} />
           <CacheSavingsCard totals={data.totals} />
         </div>
       </MotionReveal>

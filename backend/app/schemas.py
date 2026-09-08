@@ -647,10 +647,20 @@ class UsageCaveats(BaseModel):
 
     unmeasured_requests: int  # rows whose provider reported no token usage
     unmeasured_models: list[str]  # distinct models on those rows
-    # Kept in the contract, now normally False: embedding, image captioning and
-    # audio transcription are all metered. It stays True only where a vendor
-    # reports no usage for those calls (Whisper and Sarvam STT return none), so
-    # the page can still say what it could not see rather than implying free.
+    # Models that reported their tokens perfectly and still have no dollar
+    # figure, because `MODEL_PRICES_USD_PER_MTOK` has no entry for them. Their
+    # tokens are inside the volume totals while their spend is not inside the
+    # cost totals - so the headline understates by an amount the page could
+    # not otherwise admit to. Defaulted only so fixtures and tests need not
+    # spell it out; every real construction sets it.
+    unpriced_models: list[str] = []
+    # ALWAYS False today, and kept in the contract rather than removed. Ingest
+    # meters embedding, captioning and transcription alike, and the one case
+    # that would justify True - a transcriber that reports no usage, like
+    # whisper-1 - writes a row with a NULL model, which `unmeasured_models`
+    # drops. So there is no signal in usage_events to compute it from; those
+    # requests reach the user through `unmeasured_requests` instead. See the
+    # matching note in services/usage_report.py.
     vision_and_audio_excluded: bool
 
 

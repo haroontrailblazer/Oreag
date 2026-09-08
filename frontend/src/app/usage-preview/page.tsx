@@ -193,6 +193,7 @@ const fixture: AccountUsage = {
   caveats: {
     unmeasured_requests: 0,
     unmeasured_models: [],
+    unpriced_models: [],
     vision_and_audio_excluded: false,
   },
 }
