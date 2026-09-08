@@ -925,3 +925,135 @@ class TestMigration0042Shape:
         assert column.nullable is True
         assert column.default is None and column.server_default is None
         assert "cross_lingual_floor" in self._sql()
+
+
+# ── romanized Indic: Hinglish, Tanglish and friends ─────────────────────────
+#
+# CASE B, and the one case no script table can reach: "refund policy kya hai"
+# is Latin script, so `scripts()` returns the empty set exactly as it does for
+# English, and every gate built on the script table is blind to it.
+#
+# WHY IT MATTERS rather than being an edge case: HEALTH-PARIKSHA logged 749
+# real questions to a deployed Indian health chatbot and lists code-mixing as
+# one of five recurring themes ("Agar operation ke baad pain ho raha hai, to
+# kya karna hai?"). Indian users type on QWERTY.
+#
+# WHY LEAVING IT ALONE IS NOT SAFE: measured romanized-query collapse on a
+# dense retriever, MRR@10 0.2342 -> 0.0078 and R@1000 0.894 -> 0.055. The
+# embedding half contributes almost nothing on a romanized query.
+
+HINGLISH = "refund policy kya hai"
+TANGLISH = "refund policy enna"
+PLAIN_ENGLISH = "what is the refund policy"
+
+
+class TestRomanizedDetection:
+    """A free, high-precision trigger - not a language classifier.
+
+    The literature is blunt that the cheap statistical detectors CANNOT do this:
+    OpenLID has zero romanized Indic labels, CLD3 has hi-Latn only and silently
+    returns `en` for Tanglish, and langid.py on 10-character strings scores
+    61.73% with "a strong bias towards English" - which is the exact failure
+    mode, because defaulting a short Latin string to English is what makes
+    Hinglish invisible.
+
+    So this is deliberately NOT a classifier. It is a list of function words
+    that do not exist in English, used only to decide whether asking the model
+    is worth it. Missing a query costs today's behaviour; firing on English
+    would cost a model call, so precision is what matters and recall is not.
+    """
+
+    def test_hinglish_is_detected(self):
+        assert cross_lingual.looks_romanized(HINGLISH) is True
+
+    def test_tanglish_is_detected(self):
+        assert cross_lingual.looks_romanized(TANGLISH) is True
+
+    def test_plain_english_is_not(self):
+        assert cross_lingual.looks_romanized(PLAIN_ENGLISH) is False
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "What is the penalty for filing the annual return late?",
+            "How do I reset my password?",
+            "Show me the invoice for March",
+            "who is the authorised signatory",
+            "refund",
+            "",
+        ],
+    )
+    def test_ordinary_english_never_fires(self, question):
+        """Precision is the whole design. A false positive spends a model call
+        on the common case, which is the one thing this must not do."""
+        assert cross_lingual.looks_romanized(question) is False
+
+    def test_devanagari_hindi_is_not_romanized(self):
+        """Native script is the script gate's job, not this one."""
+        assert cross_lingual.looks_romanized("वार्षिक विवरणी कब दाखिल करनी है?") is False
+
+    def test_markers_match_whole_words_only(self):
+        """"hai" inside "Shanghai" or "chair" is not Hindi.
+
+        Substring matching would fire on ordinary English text and put a model
+        call on the hot path for every query containing a common bigram.
+        """
+        assert cross_lingual.looks_romanized("what is the Shanghai office address") is False
+        assert cross_lingual.looks_romanized("who sits in that chair") is False
+        assert cross_lingual.looks_romanized("what is the kyaneite process") is False
+
+
+class TestRomanizedGate:
+    """Reaching the cross-lingual path from a Latin-script question."""
+
+    def test_hinglish_over_an_english_corpus_is_considered(
+        self, db_session, project, english_corpus
+    ):
+        project.document_language = "English"
+        assert cross_lingual.should_consider(db_session, project, HINGLISH) is True
+
+    def test_plain_english_over_an_english_corpus_is_still_free(
+        self, db_session, project, english_corpus
+    ):
+        """The regression that matters. English over English must cost nothing:
+        no marker, no model call, no database read beyond the cached profile."""
+        project.document_language = "English"
+        assert cross_lingual.should_consider(db_session, project, PLAIN_ENGLISH) is False
+
+    def test_a_weak_hinglish_search_is_translated_into_the_corpus_language(
+        self, db_session, project, english_corpus
+    ):
+        project.document_language = "English"
+        llm = _StubLLM(reply="what is the refund policy", language="English")
+        out = cross_lingual.retrieval_query(
+            db_session, project, HINGLISH, rows=rows_at(0.09, 0.05), llm=llm
+        )
+        assert out == "what is the refund policy"
+        assert len(llm.calls) == 1
+
+    def test_a_strong_hinglish_search_is_left_alone(
+        self, db_session, project, english_corpus
+    ):
+        """The loanword property is why this case exists.
+
+        "refund policy kya hai" already carries the literal English tokens
+        `refund` and `policy` - romanized Indic keeps English spelling for
+        loanwords - so the lexical half often finds the passage unaided. When
+        the first search already worked, translating can only lose nuance and
+        spend a call.
+        """
+        llm = _StubLLM(language="English")
+        out = cross_lingual.retrieval_query(
+            db_session, project, HINGLISH, rows=rows_at(0.62, 0.41), llm=llm
+        )
+        assert out == HINGLISH
+        assert llm.calls == []
+
+    def test_hinglish_over_a_hindi_corpus_is_left_alone(
+        self, db_session, project, devanagari_corpus
+    ):
+        """A romanized Hindi question against a Hindi corpus is the same
+        language on both sides. Translating it to Hindi would be a no-op at
+        best; the real repair there is transliteration, which is measured lossy
+        (Dakshina single-word WER 50-53%) and is deliberately not attempted."""
+        assert cross_lingual.should_consider(db_session, project, HINGLISH) is False

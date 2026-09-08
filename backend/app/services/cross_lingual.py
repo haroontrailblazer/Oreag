@@ -71,11 +71,39 @@ costs nothing to detect. An UNDECLARED project therefore still misses it; that
 is the behaviour that shipped before, preserved, and projects created since
 schemas.ProjectCreate began asking at creation have the field set.
 
+ROMANIZED QUESTIONS, the third case. "refund policy kya hai" is Latin script,
+so `scripts()` returns the empty set for it exactly as it does for English and
+no script table can reach it. Indian users type on QWERTY, so this is ordinary
+input rather than an edge case - HEALTH-PARIKSHA logged 749 real questions to a
+deployed Indian health chatbot and lists code-mixing as one of five recurring
+themes.
+
+Leaving it alone is not safe: measured on a dense retriever a romanized query
+collapses MRR@10 from 0.2342 to 0.0078. What partly rescues it today is the
+LEXICAL half, because romanized Indic keeps English spelling for loanwords -
+"refund policy kya hai" carries the literal tokens `refund` and `policy`, and
+BM25 against English documents scores 10.07 on a native-script query against
+36.29 on a mixed one. So the first search half-works rather than failing
+outright, which is why the similarity floor is a sound second gate here too.
+
+`looks_romanized()` is a TRIGGER, not a classifier - a short list of function
+words carrying no English meaning, deciding only whether asking the model is
+worth a call. The cheap detectors cannot do this job: OpenLID has zero
+romanized Indic labels, CLD3 silently returns `en` for Tanglish, and langid.py
+on short strings scores 61.73% with a documented bias towards English, which is
+the exact failure that makes Hinglish invisible.
+
+Translating is the action, and the evidence is unusually clean. NOT
+transliterating to Devanagari - wrong direction against an English corpus, and
+lossy anyway at 50-53% single-word WER. NOT blending both variants, measured at
+-0.04 nDCG@10.
+
 WHAT IS STILL OPEN, stated rather than hidden:
 
-  * A ROMANIZED question - "refund policy kya hai" - is Latin script, so no
-    script table can tell it from English. It needs a language judgement on the
-    question itself, which is a model call, and it is not made here yet.
+  * A single romanized word inside an otherwise-English question ("the kanna
+    operation") reads as English to a whole-sentence trigger. Catching it needs
+    token-level tagging, which scores lower than the sentence-level judgement
+    even in the literature, and it is deliberately out of scope.
   * A corpus MIXING scripts satisfies the first gate for both, so a Hindi
     question there is left alone. Measured (see architecture.c4): an English
     question reached the Hindi half at rank 1 or 2 of 8 across 7 cases, and
@@ -177,6 +205,72 @@ _NON_LATIN_LANGUAGES: frozenset[str] = frozenset(
         "korean", "japanese", "chinese", "mandarin", "cantonese",
     }
 )
+
+
+# Function words of romanized Indic languages, used to notice a question like
+# "refund policy kya hai" that no script table can see - it is Latin script, so
+# `scripts()` returns the empty set for it exactly as it does for English.
+#
+# THIS IS A TRIGGER, NOT A CLASSIFIER, and the distinction is the whole design.
+# It decides one thing: is asking the model worth a call. Missing a query costs
+# the behaviour that shipped before; firing on plain English costs a model call
+# on the commonest path in the product. So precision is what matters here and
+# recall is explicitly not, which is why the list is short, hand-checked against
+# English, and made only of words that carry no English meaning.
+#
+# WHY NOT A REAL DETECTOR. The cheap ones cannot do this job. OpenLID has ZERO
+# romanized Indic labels - all 126 of its Latin-script labels are non-Indic.
+# CLD3 has hi-Latn only and silently returns `en` for Tanglish and romanized
+# Bengali, Telugu and Marathi. langid.py on 10-character strings scores 61.73%
+# with a documented "strong bias towards English", which is precisely the
+# failure that makes Hinglish invisible. GlotLID does carry hin_Latn and friends
+# but ships a 1.69 GB model and scores 5 of 253 on real code-switched Hinglish,
+# and its own FAQ says to avoid it on short sentences. The one thing measured to
+# do this well is a frontier LLM asked for the MATRIX language - gpt-4o 98.1 F1
+# - which is the call this trigger decides whether to make.
+#
+# Every entry was checked not to be an English word. Short and ambiguous forms
+# (ka, ki, ke, kay, so, me) are deliberately absent: one false positive on
+# ordinary English costs more than several missed Hinglish queries.
+_ROMANIZED_MARKERS: frozenset[str] = frozenset(
+    {
+        # Hindi / Urdu / Marathi / Nepali
+        "kya", "kyaa", "hai", "hain", "nahi", "nahin", "kaise", "kaisa", "kaisi",
+        "kaun", "kyun", "kyon", "kahan", "kahaan", "kitna", "kitne", "kitni",
+        "mera", "meri", "mere", "tera", "teri", "aapka", "aapki", "hamara",
+        "humara", "chahiye", "karna", "karne", "karta", "karti", "karein",
+        "hota", "hoti", "hote", "batao", "bataye", "bataiye", "kripya",
+        "dhanyavad", "sakta", "sakte", "sakti", "jaldi", "abhi", "kuch",
+        "koi", "yeh", "woh", "iska", "uska", "agar", "lekin", "aur",
+        # Tamil
+        "enna", "eppadi", "engey", "enge", "yaar", "venum", "irukku", "irukkum",
+        "panna", "pannanum", "seiya", "eppo", "evlo",
+        # Telugu
+        "emi", "ela", "ekkada", "evaru", "kavali", "cheyyali", "endhuku",
+        # Bengali
+        "kothay", "kemon", "korbo", "korte", "amar", "tomar",
+        # Kannada / Malayalam
+        "hegge", "yaake", "elli", "entha", "engane", "evide",
+    }
+)
+
+# Whole words only. Substring matching would fire on "Shanghai" and "chair",
+# putting a model call on the hot path for ordinary English text.
+_ROMANIZED_RE = re.compile(
+    r"\b(?:" + "|".join(sorted(_ROMANIZED_MARKERS)) + r")\b", re.IGNORECASE
+)
+
+
+def looks_romanized(value: str) -> bool:
+    """Is this Latin-script text probably an Indic language written in ASCII?
+
+    True for "refund policy kya hai" and "refund policy enna", False for
+    ordinary English. False for native-script text, which the script table
+    already handles and which must not take this path.
+    """
+    if not value:
+        return False
+    return bool(_ROMANIZED_RE.search(value))
 
 
 def scripts(value: str) -> frozenset[str]:
@@ -401,8 +495,31 @@ def should_consider(db: Session, project: Project, question: str) -> bool:
     # answer that question at creation (schemas.ProjectCreate), it is normally
     # set; when it is not, this returns False and the behaviour is exactly what
     # shipped before - a silent miss, not a new failure.
+    romanized = looks_romanized(question)
     declared = (getattr(project, "document_language", None) or "").strip().lower()
-    return declared in _NON_LATIN_LANGUAGES
+    if declared in _NON_LATIN_LANGUAGES:
+        # The reverse direction - but NOT when the question is itself romanized
+        # Indic. "refund policy kya hai" against a Hindi corpus is the same
+        # language on both sides written two ways, and translating it INTO
+        # Hindi is a no-op at best. The repair there would be transliteration,
+        # which is measured lossy - Dakshina single-word WER 50-53%, IndicXlit
+        # top-1 60.58% - so compounding it into a model call is worse than
+        # leaving the question alone. Deliberately not attempted.
+        return not romanized
+    # Latin question AND Latin corpus. English over English must cost nothing,
+    # so this fires only on the romanized case, which no script table can see:
+    # "refund policy kya hai" is Latin script exactly as English is.
+    #
+    # Leaving it alone is not the safe option it looks like. Measured on a dense
+    # retriever, a romanized query collapses MRR@10 from 0.2342 to 0.0078 and
+    # R@1000 from 0.894 to 0.055 - the embedding half contributes almost
+    # nothing. What partly rescues it today is the LEXICAL half, because
+    # romanized Indic keeps English spelling for loanwords: "refund policy kya
+    # hai" carries the literal tokens `refund` and `policy`, and BM25 against
+    # English documents scores 10.07 on a native-script query against 36.29 on
+    # a mixed one. That is also why the similarity floor is a sound second gate
+    # here - the first search often half-works rather than failing outright.
+    return romanized
 
 
 def floor_for(project) -> float:
