@@ -10,7 +10,7 @@ import {
   WarningOctagonIcon as WarningOctagon,
 } from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
-import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react"
+import { type ComponentProps, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Switch as SwitchPrimitive } from "radix-ui"
 import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
@@ -18,6 +18,7 @@ import useSWR, { mutate as globalMutate } from "swr"
 import { ProviderKeyField } from "@/components/project/provider-key-field"
 import { PolicyKnob } from "@/components/project/policy-knob"
 import policySwitchStyles from "@/components/project/policy-switch.module.css"
+import styles from "@/components/project/settings-tab.module.css"
 import { BestPractices } from "@/components/ui/best-practices"
 import { BoxLoader } from "@/components/ui/box-loader"
 import { Button } from "@/components/ui/button"
@@ -227,6 +228,31 @@ export function SettingsTab({
   // General
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description ?? "")
+  const descriptionInput = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const input = descriptionInput.current
+    if (!input) return
+    let lastWidth = 0
+    let active = true
+    function fitDescription() {
+      if (!active || !input || input.clientWidth === 0) return
+      lastWidth = input.clientWidth
+      input.style.height = "auto"
+      const borderHeight = input.offsetHeight - input.clientHeight
+      input.style.height = `${input.scrollHeight + borderHeight}px`
+    }
+    fitDescription()
+    // Also reflow after a hidden settings tab opens or its column narrows.
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth !== lastWidth) fitDescription()
+    })
+    observer.observe(input)
+    void document.fonts.ready.then(fitDescription)
+    return () => {
+      active = false
+      observer.disconnect()
+    }
+  }, [description])
   const [topK, setTopK] = useState(project.top_k)
   const [saving, setSaving] = useState(false)
 
@@ -444,6 +470,25 @@ export function SettingsTab({
     availability,
     project
   )
+
+  // Presentation only: compare the form to the latest saved project without
+  // changing validation, save handlers, or the project revalidation flow.
+  const selectedCrossLingualFloor = crossLingualPreset === "custom"
+    ? Number(crossLingualFloor)
+    : CROSS_LINGUAL_PRESETS.find((preset) => preset.value === crossLingualPreset)?.floor
+  const policyChanged = Number(minSimilarity) !== project.min_similarity
+    || Number(minStrong) !== project.min_strong
+    || selectedCrossLingualFloor !== project.cross_lingual_floor
+    || answerLanguage.trim() !== (project.answer_language ?? "")
+    || answerDisclaimer.trim() !== (project.answer_disclaimer ?? "")
+    || documentLanguage.trim() !== (project.document_language ?? "")
+    || languageStrict !== (project.answer_language_strict ?? true)
+    || versionTracking !== project.version_tracking
+  const generalChanged = name !== project.name
+    || description.trim() !== (project.description ?? "")
+    || topK !== project.top_k
+  const hasUnsavedChanges = policyChanged || generalChanged || llmChanged
+    || reindexNeeded || Boolean(llmKeyInput.trim()) || Boolean(embKeyInput.trim())
 
   function changeLlm(value: string) {
     setLlm(value)
@@ -757,7 +802,29 @@ export function SettingsTab({
   ]
 
   return (
-    <div className="space-y-4">
+    <div className={styles.page}>
+      <header>
+        <div className={styles.heading}>
+          <div className={styles.identity}>
+            <div className={styles.emblem} aria-hidden="true"><GearSix className="size-6" /></div>
+            <div className="min-w-0">
+              <p className={styles.eyebrow} title={project.name}>{project.name}</p>
+              <h2 className={styles.title}>Project settings</h2>
+            </div>
+          </div>
+          <span className={styles.status} data-pending={hasUnsavedChanges} role="status">
+            {hasUnsavedChanges ? "Unsaved changes" : "Settings up to date"}
+          </span>
+        </div>
+        <p className={styles.subtitle}>Tune your answers, choose your models, and shape how your knowledge is indexed.</p>
+      </header>
+      <nav className={styles.navigation} aria-label="Settings sections">
+        <a href="#project-settings-policy"><Scales />Answer policy</a>
+        <a href="#project-settings-general"><GearSix />General</a>
+        <a href="#project-settings-model"><ChatCircle />Answer model</a>
+        <a href="#project-settings-indexing"><Cube />Indexing</a>
+        <a href="#project-settings-danger"><WarningOctagon />Danger zone</a>
+      </nav>
       {/* At-a-glance summary of the project's live configuration. */}
       <Card>
         <CardHeader>
@@ -773,13 +840,13 @@ export function SettingsTab({
           {overview.map((item) => (
             <div
               key={item.label}
-              className="rounded-lg border bg-muted/30 px-3 py-2.5"
+              className={styles.metric}
             >
-              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div className={styles.metricLabel}>
                 {item.label}
               </div>
               <div
-                className="mt-0.5 truncate text-sm font-medium capitalize"
+                className={styles.metricValue}
                 title={item.value}
               >
                 {item.value}
@@ -789,7 +856,7 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden">
+      <Card id="project-settings-policy">
         <CardHeader className="pb-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-1.5">
@@ -847,8 +914,8 @@ export function SettingsTab({
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-            <section className="@container min-w-0 space-y-4 rounded-xl border bg-muted/20 p-3 sm:p-4">
+          <div className={styles.policyGrid}>
+            <section className={cn(styles.panel, styles.grounding, "space-y-4")}>
               <div className="space-y-1 border-b pb-3">
                 <h3 className="text-sm font-medium">Grounding</h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -858,7 +925,7 @@ export function SettingsTab({
               </div>
               <div className="grid min-w-0 grid-cols-3 gap-1 sm:gap-3">
                 <div className="flex min-w-0 flex-col items-center gap-2">
-                  <div className="flex min-h-10 items-center justify-center gap-0.5 text-center">
+                  <div className={styles.knobLabel}>
                     <Label className="text-[10px] leading-tight sm:text-xs" htmlFor="settings-minsim-knob">Minimum similarity</Label>
                     <PolicyHelp label="Minimum similarity">
                       Match score from 0 to 1. Lower-scoring chunks are ignored;
@@ -876,7 +943,7 @@ export function SettingsTab({
                   />
                 </div>
                 <div className="flex min-w-0 flex-col items-center gap-2">
-                  <div className="flex min-h-10 items-center justify-center gap-0.5 text-center">
+                  <div className={styles.knobLabel}>
                     <Label className="text-[10px] leading-tight sm:text-xs" htmlFor="settings-minstrong-knob">Required sources</Label>
                     <PolicyHelp label="Required sources">
                       Ask for clarification when fewer sources qualify. Set 0 to
@@ -894,7 +961,7 @@ export function SettingsTab({
                   />
                 </div>
                 <div className="flex min-w-0 flex-col items-center gap-2">
-                  <div className="flex min-h-10 items-center justify-center gap-0.5 text-center">
+                  <div className={styles.knobLabel}>
                     <Label className="text-[10px] leading-tight sm:text-xs" htmlFor="settings-crosslingual-knob">
                       Cross-lingual sensitivity
                     </Label>
@@ -927,7 +994,7 @@ export function SettingsTab({
 
                 </div>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+              <div className={styles.modeRow}>
                 <span className="text-[10px] text-muted-foreground">Sensitivity mode</span>
                   <Select
                     value={crossLingualPreset}
@@ -949,7 +1016,7 @@ export function SettingsTab({
               <p className="text-center text-[10px] text-muted-foreground">Drag to turn · Use arrow keys</p>
             </section>
 
-            <section className="min-w-0 space-y-4 rounded-xl border p-3 sm:p-4">
+            <section className={cn(styles.panel, "space-y-4")}>
               <div className="space-y-1 border-b pb-3">
                 <h3 className="text-sm font-medium">Language &amp; format</h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -1078,7 +1145,7 @@ export function SettingsTab({
           </div>
 
           <div className="border-t pt-6">
-            <div className="flex min-w-0 flex-col gap-4 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
+            <div className={styles.tracking}>
               <div className="min-w-0 space-y-1.5">
                 <div className="flex items-center gap-1.5">
                   <Label
@@ -1122,25 +1189,26 @@ export function SettingsTab({
               </div>
             </div>
 
-            <div className="mt-4 flex justify-end">
+            <div className={styles.saveRow}>
+              <p className={styles.saveNote} data-pending={policyChanged}>
+                {policyChanged ? "Answer policy has unsaved changes." : "Changes apply when you save this section."}
+              </p>
               <Button
                 className="w-full sm:w-auto sm:min-w-28"
                 onClick={handleSavePolicy}
                 disabled={savingPolicy}
               >
-                {savingPolicy ? <Spin /> : "Save policy"}
+                {savingPolicy ? <><Spin /> Saving…</> : "Save answer policy"}
               </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Two cards per row from lg+; stretch so each row's cards share a height.
-          grid-cols-1 is load-bearing on mobile: without a template the implicit
-          auto track sizes to the widest card's min-content (long model labels),
-          overflowing the viewport - minmax(0,1fr) clamps it. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <Card>
+      {/* The grid follows the panel width. Explicit minmax tracks keep long
+          model names from expanding the mobile layout. */}
+      <div className={styles.cardGrid}>
+      <Card id="project-settings-general">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-1.5">
@@ -1148,7 +1216,7 @@ export function SettingsTab({
                 <GearSix className="size-4 text-muted-foreground" />
                 General
               </CardTitle>
-              <CardDescription>These take effect immediately.</CardDescription>
+              <CardDescription>Name your project and set how many results each query retrieves.</CardDescription>
             </div>
             <BestPractices
               className="ml-auto"
@@ -1210,7 +1278,9 @@ export function SettingsTab({
             <Label htmlFor="settings-description">Description (optional)</Label>
             <Textarea
               id="settings-description"
-              rows={2}
+              ref={descriptionInput}
+              rows={4}
+              className={styles.descriptionEditor}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -1229,13 +1299,18 @@ export function SettingsTab({
               onChange={(e) => setTopK(Number(e.target.value))}
             />
           </div>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? <Spin /> : "Save"}
-          </Button>
+          <div className={styles.saveRow}>
+            <p className={styles.saveNote} data-pending={generalChanged}>
+              {generalChanged ? "General settings have unsaved changes." : "Applies when you save."}
+            </p>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <><Spin /> Saving…</> : "Save general settings"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="project-settings-model">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ChatCircle className="size-4 text-muted-foreground" />
@@ -1337,10 +1412,31 @@ export function SettingsTab({
               </Button>
             </div>
           )}
+          <figure className={styles.answerFlow}>
+            <figcaption>From context to answer</figcaption>
+            <div className={styles.flowSteps}>
+              <div className={styles.flowStep}>
+                <div className={styles.flowIcon} aria-hidden="true"><Cube /></div>
+                <strong>Retrieve</strong>
+                <span>Up to {topK} chunks</span>
+              </div>
+              <div className={styles.flowStep}>
+                <div className={styles.flowIcon} aria-hidden="true"><ChatCircle /></div>
+                <strong>Generate</strong>
+                <span title={llm}>{llm.slice(llm.indexOf("/") + 1)}</span>
+              </div>
+              <div className={styles.flowStep}>
+                <div className={styles.flowIcon} aria-hidden="true"><Scales /></div>
+                <strong>Respond</strong>
+                <span title={answerLanguage || "Match the question"}>{answerLanguage || "Match question"}</span>
+              </div>
+            </div>
+            <p className={styles.flowDescription}>Retrieval finds relevant passages. Your answer model turns that context into a response.</p>
+          </figure>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="project-settings-indexing">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Cube className="size-4 text-muted-foreground" />
@@ -1538,7 +1634,7 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
-      <Card className="border-destructive/40 bg-destructive/[0.02]">
+      <Card id="project-settings-danger" className={styles.dangerCard}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-destructive">
             <WarningOctagon className="size-4" />
