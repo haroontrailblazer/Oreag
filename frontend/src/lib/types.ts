@@ -20,6 +20,12 @@ export interface Project {
   // default, whatever that currently is".
   min_similarity: number
   min_strong: number
+  // How weak a search has to look before the cross-lingual path re-searches
+  // with a translation of the question (migration 0042). null = Auto, i.e. the
+  // server default. Nullable UNLIKE the two fields above, and deliberately: a
+  // cosine is not comparable across embedding models, so there is no single
+  // concrete number the form could honestly show for every project.
+  cross_lingual_floor: number | null
   // null = mirror the question's language / no disclaimer.
   answer_language: string | null
   // true = write every answer in answer_language. false = use it only

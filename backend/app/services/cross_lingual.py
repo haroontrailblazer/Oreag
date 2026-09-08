@@ -53,11 +53,35 @@ the gate is a real gate, and it fires only when the question's script is
 ABSENT from the corpus - the exact case measured above, and a no-op for every
 project whose users write in the language their documents are written in.
 
-KNOWN LIMIT, stated rather than hidden: a corpus mixing scripts (English and
-Hindi files in one project) satisfies the gate for both, so a Hindi question
-there is left alone and reaches only the Hindi half. That is today's
-behaviour preserved, not a new failure - fixing it needs per-language sub-
-searches, which is a larger change than this one.
+BOTH DIRECTIONS, NOT ONE. The gate above was written for a non-Latin question
+over a Latin corpus, and it was one-directional BY ACCIDENT rather than by
+design: `scripts()` encodes Latin as the ABSENCE of a script, so an English
+question yielded the empty set and `should_consider` returned False before it
+ever looked at the corpus. A Hindi or Tamil corpus asked a question in English
+- the exact mirror of the case this file exists for - never reached the
+cross-lingual path at all.
+
+The reverse direction fires on the language the project DECLARES, not on the
+corpus, and that is a deliberate cost decision rather than a shortcut. Deciding
+it from the corpus would mean sampling chunks on every English question over
+every English corpus, and tests/test_vector_index.py pins the retrieval path at
+exactly two statements - semantic and lexical, nothing extra. The declared
+language is already in memory on the Project row, so the reverse direction
+costs nothing to detect. An UNDECLARED project therefore still misses it; that
+is the behaviour that shipped before, preserved, and projects created since
+schemas.ProjectCreate began asking at creation have the field set.
+
+WHAT IS STILL OPEN, stated rather than hidden:
+
+  * A ROMANIZED question - "refund policy kya hai" - is Latin script, so no
+    script table can tell it from English. It needs a language judgement on the
+    question itself, which is a model call, and it is not made here yet.
+  * A corpus MIXING scripts satisfies the first gate for both, so a Hindi
+    question there is left alone. Measured (see architecture.c4): an English
+    question reached the Hindi half at rank 1 or 2 of 8 across 7 cases, and
+    searching with a translation as WELL and fusing was built and measured at
+    identical ranks, 5/7 either way, so it was not shipped. Closing it properly
+    needs per-chunk language tags and per-language sub-searches.
 """
 
 from __future__ import annotations
@@ -111,6 +135,47 @@ _SCRIPTS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Han and kana together: Japanese mixes them in one sentence, and telling
     # Chinese from Japanese is not something this gate needs to do.
     ("cjk",        re.compile(r"[一-鿿㐀-䶿぀-ヿ]")),
+)
+
+
+# Languages whose writing system is NOT Latin, keyed exactly as
+# services/text_search.py keys its stemmer table: a lowercased display name, the
+# same vocabulary `projects.document_language` stores and the Settings picker
+# offers.
+#
+# READ ONLY BY THE REVERSE DIRECTION, and that is the whole reason it exists as
+# a name table rather than being derived from the corpus. Deciding "is this
+# Latin-script question crossing a boundary" from the corpus itself would cost a
+# database round trip on the hot path; the declared language is already in
+# memory on the Project row.
+#
+# An unlisted name reads as Latin and the gate stays shut, which is precisely
+# the behaviour that shipped before the reverse direction existed - so a missing
+# entry costs a silent miss rather than a wrong translation. The entries are the
+# languages behind the scripts in `_SCRIPTS` above, plus the common alternate
+# names a user might type.
+_NON_LATIN_LANGUAGES: frozenset[str] = frozenset(
+    {
+        # devanagari
+        "hindi", "marathi", "nepali", "sanskrit", "konkani", "maithili",
+        # other brahmic
+        "bengali", "bangla", "assamese", "punjabi", "gujarati", "odia", "oriya",
+        "tamil", "telugu", "kannada", "malayalam", "sinhala", "sinhalese",
+        # southeast asian
+        "thai", "lao", "tibetan", "burmese", "myanmar", "khmer", "cambodian",
+        # caucasus and horn of africa
+        "georgian", "armenian", "amharic", "tigrinya",
+        # semitic
+        "hebrew", "yiddish", "arabic", "persian", "farsi", "dari", "urdu",
+        "pashto", "sindhi", "uyghur", "kurdish",
+        # cyrillic
+        "russian", "ukrainian", "belarusian", "bulgarian", "serbian",
+        "macedonian", "kazakh", "kyrgyz", "tajik", "mongolian",
+        # greek
+        "greek",
+        # east asian
+        "korean", "japanese", "chinese", "mandarin", "cantonese",
+    }
 )
 
 
@@ -304,15 +369,68 @@ def should_consider(db: Session, project: Project, question: str) -> bool:
     if not settings.cross_lingual_retrieval_enabled or not question.strip():
         return False
     asked = scripts(question)
-    if not asked:
-        return False
-    corpus_scripts, sample = corpus_profile(db, project)
-    if not sample:
-        return False
-    return not (asked & corpus_scripts)
+    if asked:
+        # The original case: a non-Latin question. Fire when the corpus does
+        # not use that writing system - a Hindi corpus asked in Hindi already
+        # works and is left alone.
+        corpus_scripts, sample = corpus_profile(db, project)
+        if not sample:
+            return False
+        return not (asked & corpus_scripts)
+    # THE REVERSE DIRECTION. A Latin-script question has no entry in the script
+    # table, and this used to return False right here - so a Hindi or Tamil
+    # corpus asked a question in English never reached the cross-lingual path
+    # at all. That is the exact mirror of the case the feature was built for,
+    # and it stayed invisible because `scripts()` encodes Latin as "no script"
+    # rather than as a script, so the absence read as "nothing to cross".
+    #
+    # Detecting it costs NOTHING. The corpus profile is already in hand and
+    # already cached per content_version; a corpus written in a script the
+    # question does not use is a language boundary by construction, and no
+    # language identification and no model call is needed to see it.
+    #
+    # ...but it must cost NO QUERY. `corpus_profile` samples chunks, and while
+    # it is cached per content_version, reaching it here would put a database
+    # round trip on the hot path for every English question over every English
+    # corpus - the overwhelmingly common case, and one this feature must stay
+    # free for. tests/test_vector_index.py pins that: the retrieval path issues
+    # exactly two statements, semantic and lexical, nothing extra.
+    #
+    # So the reverse direction reads the language the project DECLARES, which
+    # is a column already loaded on the Project in hand. Since projects now
+    # answer that question at creation (schemas.ProjectCreate), it is normally
+    # set; when it is not, this returns False and the behaviour is exactly what
+    # shipped before - a silent miss, not a new failure.
+    declared = (getattr(project, "document_language", None) or "").strip().lower()
+    return declared in _NON_LATIN_LANGUAGES
 
 
-def looks_weak(rows) -> bool:
+def floor_for(project) -> float:
+    """The similarity below which this project counts a search as failed.
+
+    ONE GLOBAL CONSTANT WAS THE WRONG SHAPE, and the reason is the same BYOK
+    trap that bites everywhere else in this product: a cosine of 0.40 does not
+    mean the same thing on two different embedders. Models differ in where they
+    place their score distribution - some compress every score into 0.7-0.9,
+    others spread 0.0-0.6 - so a floor tuned against `text-embedding-3-small`
+    is simply a different question when asked of `gemini-embedding-001`. With
+    22 selectable models there is no single number that is right for all of
+    them, and no vendor publishes what would make one derivable.
+
+    NULL means "use the global default", so every project that predates the
+    column behaves exactly as it did. Read explicitly against None rather than
+    with `or`, because 0.0 is a REAL setting - "never translate, the embedder
+    is fine" - and `or` would silently restore the default while the UI showed
+    the zero the user chose. models.py documents the same trap on
+    min_similarity, and it is the same bug both times.
+    """
+    value = getattr(project, "cross_lingual_floor", None) if project is not None else None
+    if value is None:
+        return settings.cross_lingual_similarity_floor
+    return float(value)
+
+
+def looks_weak(rows, project=None) -> bool:
     """Did searching with the question as asked land anywhere useful?
 
     The SECOND gate, and the one that decides whether a model call is worth
@@ -329,7 +447,7 @@ def looks_weak(rows) -> bool:
         value = row.get("similarity") if isinstance(row, dict) else None
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             best = max(best, float(value))
-    return best < settings.cross_lingual_similarity_floor
+    return best < floor_for(project)
 
 
 def retrieval_query(
@@ -368,13 +486,13 @@ def retrieval_query(
     """
     if not should_consider(db, project, question):
         return question
-    if rows is not None and not looks_weak(rows):
+    if rows is not None and not looks_weak(rows, project):
         # The search already landed somewhere solid, so the embedder does
         # understand this language and a translation can only lose nuance.
         return question
 
     asked = scripts(question)
-    _corpus_scripts, sample = corpus_profile(db, project)
+    corpus_scripts, sample = corpus_profile(db, project)
 
     cache_key = (question, sample[:64])
     with _translations_lock:
@@ -428,9 +546,23 @@ def retrieval_query(
         return question
     # A model that echoed the question back, or answered in the wrong script,
     # has given us nothing - and embedding its commentary would be worse than
-    # embedding the question. Require that it actually left the asked script.
-    if scripts(translated) & asked:
-        logger.info("Translation stayed in the question's script; using the question")
+    # embedding the question. What "it moved" MEANS depends on the direction.
+    produced = scripts(translated)
+    if asked:
+        # Non-Latin question: it must have LEFT the asked script.
+        if produced & asked:
+            logger.info(
+                "Translation stayed in the question's script; using the question"
+            )
+            return question
+    elif corpus_scripts and not (produced & corpus_scripts):
+        # Reverse direction. `asked` is empty here, so the test above can never
+        # fail and an echoed English question would sail straight through and
+        # be embedded as though it were a translation. The corpus's own script
+        # has to be PRESENT instead.
+        logger.info(
+            "Translation never reached the corpus script; using the question"
+        )
         return question
 
     with _translations_lock:

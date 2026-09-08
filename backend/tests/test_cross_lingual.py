@@ -7,6 +7,7 @@ is pinned here is everything around it: when the gate fires, what is sent, what
 is NOT sent, that a failure degrades to the old behaviour, and that the answer
 cache notices.
 """
+import pathlib
 import re
 import uuid
 
@@ -681,3 +682,246 @@ class TestPinnedLanguageIsActuallyEnforced:
         ).read_text(encoding="utf-8")
         assert source.count("if pinned_always:\n") == 2
         assert source.count("user_prompt = enforce_language(user_prompt, language)") == 2
+
+
+# ── the reverse direction: a Latin-script question, a non-Latin corpus ──────
+#
+# CASE A. The gate was one-directional by construction: `scripts()` returns the
+# empty set for English, and `should_consider` bailed on `if not asked`. So a
+# Hindi corpus asked a question in English never reached the cross-lingual path
+# at all - the exact mirror of the case the feature was built for, and invisible
+# because no test asked for it.
+#
+# Detecting it costs NOTHING. The question carries no non-Latin script and the
+# corpus carries one, which is already known from `corpus_profile`; no language
+# identification and no model call is needed to see that they differ.
+
+ENGLISH_Q = "What is the penalty for filing the annual return late?"
+
+
+@pytest.fixture
+def devanagari_corpus(monkeypatch, project):
+    """A Hindi project, DECLARED as such.
+
+    The declaration is what the reverse direction reads. Deriving it from the
+    corpus instead would cost a database round trip on the hot path for every
+    English question over every English corpus - see should_consider.
+    """
+    project.document_language = "Hindi"
+    monkeypatch.setattr(
+        cross_lingual,
+        "corpus_profile",
+        lambda db, p: (
+            frozenset({"devanagari"}),
+            "वार्षिक विवरणी 30 नवंबर तक दाखिल करनी होती है।",
+        ),
+    )
+
+
+def test_an_english_question_against_a_devanagari_corpus_is_considered(
+    db_session, project, devanagari_corpus
+):
+    assert cross_lingual.should_consider(db_session, project, ENGLISH_Q) is True
+
+
+def test_the_reverse_direction_still_costs_no_model_call_to_detect(
+    db_session, project, devanagari_corpus
+):
+    """The whole point of the first gate: decide without spending anything."""
+    cross_lingual.should_consider(db_session, project, ENGLISH_Q)
+    # db_session raises if corpus_profile was not stubbed; a model was never
+    # passed, so reaching here at all proves no model call was attempted.
+
+
+def test_an_english_question_against_an_english_corpus_is_still_left_alone(
+    db_session, project, english_corpus
+):
+    """The regression guard. Latin question, Latin corpus - nothing to cross."""
+    assert cross_lingual.should_consider(db_session, project, ENGLISH_Q) is False
+
+
+def test_a_weak_english_search_over_a_hindi_corpus_is_translated(
+    db_session, project, devanagari_corpus
+):
+    llm = _StubLLM(reply="वार्षिक विवरणी देर से दाखिल करने पर क्या जुर्माना है?",
+                   language="Hindi")
+    out = cross_lingual.retrieval_query(
+        db_session, project, ENGLISH_Q, rows=rows_at(0.08, 0.05), llm=llm
+    )
+    assert out == "वार्षिक विवरणी देर से दाखिल करने पर क्या जुर्माना है?"
+    assert len(llm.calls) == 1
+
+
+def test_a_strong_english_search_over_a_hindi_corpus_is_left_alone(
+    db_session, project, devanagari_corpus
+):
+    """The second gate is direction-agnostic: where the embedder already
+    bridged the gap, replacing the user's words can only lose nuance."""
+    llm = _StubLLM(language="Hindi")
+    out = cross_lingual.retrieval_query(
+        db_session, project, ENGLISH_Q, rows=rows_at(0.61, 0.4), llm=llm
+    )
+    assert out == ENGLISH_Q
+    assert llm.calls == []
+
+
+def test_a_translation_that_never_left_english_is_discarded(
+    db_session, project, devanagari_corpus
+):
+    """The echo guard has to work in this direction too.
+
+    Going the other way it was enough to check the translation LEFT the asked
+    script. Here the asked script is the empty set, so that test can never
+    fail - an echoed English question would sail through and be embedded as if
+    it were a translation. The corpus script is what must be present.
+    """
+    llm = _StubLLM(reply=ENGLISH_Q, language="Hindi")
+    out = cross_lingual.retrieval_query(
+        db_session, project, ENGLISH_Q, rows=rows_at(0.08), llm=llm
+    )
+    assert out == ENGLISH_Q
+
+
+def test_the_reverse_direction_needs_a_declared_language(
+    db_session, project, monkeypatch
+):
+    """Stated as a limit rather than hidden.
+
+    An undeclared project cannot be told from an English one without sampling
+    the corpus, and sampling it here would cost a query on the hot path. So an
+    English question over an UNDECLARED Hindi corpus is still left alone - the
+    behaviour that shipped before, not a new failure. Projects created since
+    schemas.ProjectCreate started asking will have the field set.
+    """
+    project.document_language = None
+    monkeypatch.setattr(
+        cross_lingual, "corpus_profile", lambda db, p: (frozenset({"devanagari"}), "x")
+    )
+    assert cross_lingual.should_consider(db_session, project, ENGLISH_Q) is False
+
+
+def test_an_unknown_declared_language_reads_as_latin(db_session, project):
+    """A name the table has never heard of must not fire the gate."""
+    project.document_language = "Klingon"
+    assert cross_lingual.should_consider(db_session, project, ENGLISH_Q) is False
+
+
+# ── the per-project floor ───────────────────────────────────────────────────
+#
+# The floor decides when a search counts as "the embedder found nothing", and
+# it was ONE global constant shared by every project on every model. That is
+# the BYOK trap: a cosine of 0.40 does not mean the same thing on
+# text-embedding-3-small as on gemini-embedding-001, because the models place
+# their score distributions differently. One number cannot be right for both.
+#
+# NULL means "use the global default", so every project that existed before
+# this is byte-identical and nothing needs backfilling.
+
+
+def test_the_global_floor_is_used_when_the_project_sets_none(project):
+    project.cross_lingual_floor = None
+    assert cross_lingual.looks_weak(rows_at(0.10), project) is True
+    assert cross_lingual.looks_weak(rows_at(0.99), project) is False
+
+
+def test_a_project_can_demand_more_before_translating(project):
+    """A HIGHER floor translates more often - more of the range reads as weak."""
+    project.cross_lingual_floor = 0.80
+    assert cross_lingual.looks_weak(rows_at(0.55), project) is True
+
+
+def test_a_project_can_demand_less(project):
+    """A LOWER floor translates less often, and 0.0 never translates at all."""
+    project.cross_lingual_floor = 0.05
+    assert cross_lingual.looks_weak(rows_at(0.10), project) is False
+
+
+def test_a_zero_floor_is_honoured_and_not_read_as_unset(project):
+    """0.0 is a real setting - "never translate" - and must not fall back.
+
+    The same trap models.py documents for min_similarity: `or` would silently
+    restore the global default while the UI showed 0.
+    """
+    project.cross_lingual_floor = 0.0
+    assert cross_lingual.looks_weak(rows_at(0.001), project) is False
+
+
+def test_looks_weak_without_a_project_still_works(project):
+    """retrieval.py and the existing tests call it with rows alone."""
+    assert cross_lingual.looks_weak(rows_at(0.10)) is True
+
+
+class TestMigration0042Shape:
+    """Same house rules every migration here is held to.
+
+    Worth stating why this class exists at all: the suite builds its schema
+    from `Base.metadata.create_all()`, so models.py is what the 1100-odd tests
+    above actually exercise and THE .sql FILE IS NEVER EXECUTED BY ANYTHING.
+    A migration can be malformed, non-idempotent, or contradict the model it
+    is supposed to create, and every test still passes. This scans the text,
+    which is the only check that exists.
+    """
+
+    @staticmethod
+    def _sql() -> str:
+        return (
+            pathlib.Path(__file__).parent.parent.parent
+            / "supabase/migrations/0042_cross_lingual_floor.sql"
+        ).read_text(encoding="utf-8")
+
+    def test_no_percent_sign_anywhere(self):
+        """psycopg scans the whole statement for placeholders, comments
+        included, so one percent sign makes the file unrunnable by
+        scripts/apply_migration.py."""
+        assert "%" not in self._sql()
+
+    def test_every_statement_is_idempotent(self):
+        sql = self._sql()
+        assert "add column if not exists" in sql
+        # The constraint is dropped-if-exists before being added, which is how
+        # a CHECK is made re-runnable; dropping a COLUMN or TABLE never is.
+        assert "drop constraint if exists" in sql
+        assert "drop column" not in sql and "drop table" not in sql
+
+    @staticmethod
+    def _statements() -> str:
+        """The SQL with `--` comment lines stripped.
+
+        Needed because this file's comments discuss defaults and nullability at
+        length - the words appear a dozen times in prose - so a naive scan of
+        the whole text asserts nothing about the DDL.
+        """
+        return "\n".join(
+            line
+            for line in TestMigration0042Shape._sql().splitlines()
+            if not line.lstrip().startswith("--")
+        ).lower()
+
+    def test_the_column_is_nullable_with_no_default(self):
+        """NULL is the "use the server default" value, so a DEFAULT here would
+        silently assert the old global 0.40 is right for every project on every
+        embedding model - the exact claim this migration exists to retract."""
+        ddl = self._statements()
+        assert "cross_lingual_floor double precision" in ddl
+        assert "not null" not in ddl
+        # `default` must not appear as a column clause. The CHECK constraint and
+        # the comment are both allowed to exist; neither contains the word.
+        assert "default" not in ddl.split("comment on")[0]
+
+    def test_the_range_check_admits_zero_and_null(self):
+        """0 is a real setting - never translate - and NULL means auto. A
+        constraint that rejected either would make the feature unusable in
+        exactly the two states that are not "some number in the middle"."""
+        sql = self._sql().lower()
+        assert "cross_lingual_floor is null" in sql
+        assert ">= 0" in sql and "<= 1" in sql
+
+    def test_it_matches_the_column_the_model_declares(self):
+        """The .sql and models.py are two independent spellings of one column,
+        and nothing at runtime compares them."""
+        from app.models import Project
+
+        column = Project.__table__.c.cross_lingual_floor
+        assert column.nullable is True
+        assert column.default is None and column.server_default is None
+        assert "cross_lingual_floor" in self._sql()

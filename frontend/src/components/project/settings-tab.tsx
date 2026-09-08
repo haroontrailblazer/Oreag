@@ -175,6 +175,32 @@ const DOCUMENT_LANGUAGES = [
   "Swedish", "Tamil", "Turkish", "Yiddish",
 ]
 
+// Cross-lingual sensitivity presets (migration 0042).
+//
+// The stored value is a raw cosine, but a raw cosine is the WRONG THING TO ASK
+// A USER FOR in a BYOK product: 0.40 does not mean the same thing on
+// text-embedding-3-small as on gemini-embedding-001, because the models place
+// their score distributions differently, and no vendor publishes what would
+// make the right number derivable. Presets name the INTENT - how eagerly should
+// we re-search with a translation - and leave the number an implementation
+// detail. Custom keeps the raw value reachable for anyone who has measured
+// their own corpus and knows better than these three.
+const CROSS_LINGUAL_PRESETS: { value: string; label: string; floor: number | null }[] = [
+  { value: "auto", label: "Auto (recommended)", floor: null },
+  { value: "strict", label: "Strict - translate rarely", floor: 0.2 },
+  { value: "balanced", label: "Balanced", floor: 0.4 },
+  { value: "permissive", label: "Permissive - translate often", floor: 0.6 },
+]
+
+// Which preset a stored floor corresponds to. An exact match shows the preset;
+// anything else is a number someone chose deliberately and must come back as
+// Custom rather than being silently rounded to the nearest band.
+function presetForFloor(floor: number | null): string {
+  if (floor === null) return "auto"
+  const hit = CROSS_LINGUAL_PRESETS.find((p) => p.floor === floor)
+  return hit ? hit.value : "custom"
+}
+
 export function SettingsTab({
   project,
   onChanged,
@@ -219,6 +245,17 @@ export function SettingsTab({
   // half-typed ("0." is not a number yet); parsed once, on save.
   const [minSimilarity, setMinSimilarity] = useState(String(project.min_similarity))
   const [minStrong, setMinStrong] = useState(String(project.min_strong))
+  // Cross-lingual threshold (0042). Two pieces of state rather than one,
+  // because "Auto" is not a number: the preset carries the CHOICE and the
+  // string carries the value only while Custom is selected. Collapsing them
+  // into a nullable number would make Auto and 0 the same state in the form,
+  // and 0 is a real setting - never translate.
+  const [crossLingualPreset, setCrossLingualPreset] = useState(
+    presetForFloor(project.cross_lingual_floor)
+  )
+  const [crossLingualFloor, setCrossLingualFloor] = useState(
+    project.cross_lingual_floor === null ? "" : String(project.cross_lingual_floor)
+  )
   const [answerLanguage, setAnswerLanguage] = useState(project.answer_language ?? "")
   const [answerDisclaimer, setAnswerDisclaimer] = useState(
     project.answer_disclaimer ?? ""
@@ -285,6 +322,23 @@ export function SettingsTab({
     )
     setMinStrong((v) =>
       v === String(synced.min_strong) ? String(project.min_strong) : v
+    )
+    // Both halves of the cross-lingual control, or a refetch would leave the
+    // preset and the number disagreeing - Custom still selected while the
+    // value underneath had snapped back to a preset's.
+    setCrossLingualPreset((v) =>
+      v === presetForFloor(synced.cross_lingual_floor)
+        ? presetForFloor(project.cross_lingual_floor)
+        : v
+    )
+    setCrossLingualFloor((v) =>
+      v === (synced.cross_lingual_floor === null
+        ? ""
+        : String(synced.cross_lingual_floor))
+        ? project.cross_lingual_floor === null
+          ? ""
+          : String(project.cross_lingual_floor)
+        : v
     )
     setAnswerLanguage((v) =>
       v === (synced.answer_language ?? "") ? project.answer_language ?? "" : v
@@ -431,6 +485,17 @@ export function SettingsTab({
       toast.error("Sources required must be a whole number from 0 to 20")
       return
     }
+    // Resolved here rather than in the body so an unparseable Custom value is
+    // caught before the request, like the two checks above.
+    const preset = CROSS_LINGUAL_PRESETS.find((p) => p.value === crossLingualPreset)
+    const floor = preset ? preset.floor : Number(crossLingualFloor)
+    if (
+      crossLingualPreset === "custom" &&
+      (!Number.isFinite(floor as number) || (floor as number) < 0 || (floor as number) > 1)
+    ) {
+      toast.error("Cross-lingual sensitivity must be between 0 and 1")
+      return
+    }
     setSavingPolicy(true)
     try {
       await api(`/api/projects/${project.id}`, {
@@ -445,6 +510,10 @@ export function SettingsTab({
           document_language: documentLanguage.trim(),
           answer_language_strict: languageStrict,
           version_tracking: versionTracking,
+          // Auto is the only way back to NULL: null on the value field already
+          // means "unchanged", so it cannot double as the clear signal.
+          cross_lingual_floor_auto: crossLingualPreset === "auto",
+          ...(crossLingualPreset === "auto" ? {} : { cross_lingual_floor: floor }),
         }),
       })
       toast.success("Answer policy saved")
@@ -811,6 +880,50 @@ export function SettingsTab({
                     value={minStrong}
                     onChange={(e) => setMinStrong(e.target.value)}
                   />
+                </div>
+                <div className="min-w-0 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="settings-crosslingual">
+                      Cross-lingual sensitivity
+                    </Label>
+                    <PolicyHelp label="Cross-lingual sensitivity">
+                      When a question is asked in a language your documents are
+                      not written in, Oreag searches again using a translation
+                      of it - and this decides how badly the first search has to
+                      go before that happens. Your answer still comes back in
+                      the language you asked in either way. Auto uses a default
+                      tuned for most projects; there is no single right number,
+                      because the same score means different things on different
+                      embedding models.
+                    </PolicyHelp>
+                  </div>
+                  <Select
+                    value={crossLingualPreset}
+                    onValueChange={setCrossLingualPreset}
+                  >
+                    <SelectTrigger id="settings-crosslingual" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CROSS_LINGUAL_PRESETS.map((preset) => (
+                        <SelectItem key={preset.value} value={preset.value}>
+                          {preset.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="custom">Custom…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {crossLingualPreset === "custom" ? (
+                    <Input
+                      aria-label="Cross-lingual sensitivity value"
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={crossLingualFloor}
+                      onChange={(e) => setCrossLingualFloor(e.target.value)}
+                    />
+                  ) : null}
                 </div>
               </div>
             </section>

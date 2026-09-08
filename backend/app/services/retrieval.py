@@ -701,7 +701,7 @@ def retrieve(
     #
     # The re-run costs one extra vector query, and only on the queries that
     # were failing anyway.
-    if consider_translating and cross_lingual.looks_weak(semantic):
+    if consider_translating and cross_lingual.looks_weak(semantic, project):
         translated = cross_lingual.retrieval_query(
             db, project, question, rows=semantic, llm=llm, on_usage=on_usage
         )

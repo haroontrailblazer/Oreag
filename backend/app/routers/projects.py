@@ -208,6 +208,14 @@ def update_project(
     # join the answer-cache signature, which is where staleness is handled.
     if body.answer_language_strict is not None:
         project.answer_language_strict = body.answer_language_strict
+    # Cross-lingual threshold (0042). Changes WHEN a translation is made, never
+    # what is indexed, so like every answer-policy field above it must not bump
+    # content_version. The auto flag is checked FIRST and wins: it is the only
+    # way back to NULL, since None on the value field already means "unchanged".
+    if body.cross_lingual_floor_auto:
+        project.cross_lingual_floor = None
+    elif body.cross_lingual_floor is not None:
+        project.cross_lingual_floor = body.cross_lingual_floor
     if body.document_language is not None:
         wanted = body.document_language.strip() or None
         if text_search.config_for_language(wanted) != text_search.config_for(project):

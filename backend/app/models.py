@@ -61,6 +61,19 @@ class Project(Base):
     min_strong: Mapped[int] = mapped_column(
         Integer, default=lambda: settings.agentic_min_strong, server_default="1"
     )
+    # When a search scores below this, the cross-lingual path treats it as "the
+    # embedder found nothing" and searches with a translation instead.
+    #
+    # NULL = use settings.cross_lingual_similarity_floor. Nullable ON PURPOSE,
+    # and not defaulted to the global number: a cosine is not comparable across
+    # embedding models - some compress every score into 0.7-0.9, others spread
+    # 0.0-0.6 - so with 22 selectable models there is no single value that is
+    # correct for all of them. NULL means "we have not been told", which is a
+    # different fact from any particular number and the only honest default.
+    #
+    # 0.0 is a REAL setting - never translate - so every read must test against
+    # None rather than falsiness. services/cross_lingual.py::floor_for does.
+    cross_lingual_floor: Mapped[float | None] = mapped_column(Float, nullable=True)
     # NULL = mirror the question's language / no disclaimer. Both are read at
     # the single generation chokepoint, so they cost nothing when unset.
     answer_language: Mapped[str | None] = mapped_column(Text)

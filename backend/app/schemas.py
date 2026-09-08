@@ -2,9 +2,10 @@ import uuid
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config import settings
+from .services import embedder_advice
 
 # Per-project BYOK key override fields. None = leave unchanged; "" = clear
 # (fall back to the account-level key); any other value = set for this project.
@@ -15,8 +16,20 @@ class ProjectCreate(BaseModel):
     description: str | None = None
     chunk_size: int = Field(default=1000, ge=100, le=8000)
     chunk_overlap: int = Field(default=200, ge=0)
-    embedding_provider: str = "openai"
-    embedding_model: str = "text-embedding-3-small"
+    # The language the project's DOCUMENTS are written in. Asked at creation
+    # because it decides two things that are expensive to change later: the
+    # Postgres stemmer keyword search uses (0039), and - through
+    # services/embedder_advice.py - which embedding model this project defaults
+    # to. Optional: a call that omits it gets exactly today's behaviour.
+    document_language: str | None = Field(default=None, max_length=60)
+    # None means "not chosen", NOT "openai". The validator below fills these in
+    # from document_language, so both are guaranteed non-None afterwards and the
+    # router can read them as plain strings. They cannot default to "openai" /
+    # "text-embedding-3-small" here, because then an omitted model would be
+    # indistinguishable from a deliberately chosen one and the recommendation
+    # could never fire.
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
     # None = the model's default size; MRL models also accept smaller prefixes.
     embedding_dimensions: int | None = None
     llm_provider: str = "openai"
@@ -24,6 +37,38 @@ class ProjectCreate(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     embedding_api_key: str | None = None
     llm_api_key: str | None = None
+
+    @model_validator(mode="after")
+    def _default_embedder_from_language(self):
+        """Fill an unchosen embedding model from the document language.
+
+        WHY THIS EXISTS. The hardcoded default was
+        `openai/text-embedding-3-small`, whose IndicCrosslingualSTS 12-language
+        mean is 0.041 with several NEGATIVE pairs. Every project created for a
+        Hindi or Tamil corpus started on a model measured not to work for it,
+        and nothing anywhere said so.
+
+        ONLY fills what the caller left unset. An explicit model is honoured
+        however poor the choice - this is BYOK, the key and the decision are the
+        user's, and a silent substitution would spend their metered key on a
+        model they did not ask for. The warning path is
+        `embedder_advice.is_risky`, which is advice rather than override.
+
+        A call that names no language is unchanged, which is the common case.
+        """
+        chose_model = self.embedding_provider is not None or self.embedding_model is not None
+        if not chose_model:
+            rec = embedder_advice.recommend(self.document_language)
+            self.embedding_provider = rec.provider
+            self.embedding_model = rec.model
+            if self.embedding_dimensions is None:
+                self.embedding_dimensions = rec.dimensions
+        else:
+            # A half-specified pair keeps the incumbent for the missing half,
+            # rather than mixing a recommended provider with a chosen model.
+            self.embedding_provider = self.embedding_provider or "openai"
+            self.embedding_model = self.embedding_model or "text-embedding-3-small"
+        return self
 
 
 class ProjectUpdate(BaseModel):
@@ -38,6 +83,16 @@ class ProjectUpdate(BaseModel):
     # the API and the database reject the same values.
     min_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
     min_strong: int | None = Field(default=None, ge=0, le=20)
+    # Cross-lingual translation threshold. Nullable all the way down and
+    # DELIBERATELY not clearable-by-"": unlike the text fields below, this is a
+    # number, so None already means "leave it alone" and there is no second
+    # sentinel available. Clearing back to Auto is a separate explicit action -
+    # see the `cross_lingual_floor_auto` flag.
+    cross_lingual_floor: float | None = Field(default=None, ge=0.0, le=1.0)
+    # True resets the project to the global default. Needed because None on the
+    # field above already means "unchanged", so without this there would be no
+    # way to get BACK to Auto once a number had been set.
+    cross_lingual_floor_auto: bool | None = None
     # "" clears back to NULL, exactly as description does - null means "leave
     # it alone", so it cannot double as the clear signal.
     answer_language: str | None = Field(default=None, max_length=60)
@@ -107,6 +162,12 @@ class ProjectOut(BaseModel):
     # never shows a blank where a policy is in force.
     min_similarity: float = 0.2
     min_strong: int = 1
+    # NULL = Auto (the global default). Nullable, so unlike min_similarity and
+    # min_strong above it needs no @field_validator guard for the rolling-deploy
+    # window: a database without migration 0042 loads the attribute as None,
+    # which is already this field's "use the default" value rather than a
+    # serialisation error that would 500 the whole settings screen.
+    cross_lingual_floor: float | None = None
     answer_language: str | None = None
     answer_disclaimer: str | None = None
     document_language: str | None = None
