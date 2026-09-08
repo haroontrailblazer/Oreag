@@ -49,6 +49,7 @@
 .codeHeader { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px 8px 16px; border-bottom: 1px solid #35363a; background: linear-gradient(160deg, #292a2f, #1d1e22); box-shadow: inset 0 1px 0 #ffffff12; }
 .codeHeader > span { color: #c4c4cb; }
 .codePanel pre { max-height: 380px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #52525b #17181b; padding: 18px; color: #e4e4e7; font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.8; tab-size: 2; }
+.examples [data-slot="tabs-content"] .codePanel pre { height: 380px; }
 .codePanel pre:focus-visible { outline: 2px solid #7dd3fc; outline-offset: -3px; }
 .page [data-slot="tabs-list"] { height: 40px; padding: 4px; border: 1px solid var(--border); border-radius: 11px; background: var(--muted); box-shadow: inset 0 2px 3px var(--surface-shadow); }
 .page [data-slot="tabs-trigger"] { border-radius: 7px; padding: 4px 12px; font-size: 12px; }

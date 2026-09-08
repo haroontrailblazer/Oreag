@@ -13,7 +13,7 @@ import {
   WarningIcon as Warning,
 } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useId, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
 
@@ -26,7 +26,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { LoaderOne } from "@/components/ui/loader"
+import { LoaderOne, Spin } from "@/components/ui/loader"
 import {
   Select,
   SelectContent,
@@ -53,6 +53,7 @@ import type {
   SourceChunk,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import styles from "./playground-tab.module.css"
 
 type Turn = { question: string; result: QueryResponse }
 
@@ -73,20 +74,26 @@ function CopyButton({
   className?: string
 }) {
   const [copied, setCopied] = useState(false)
-  function copy() {
-    navigator.clipboard.writeText(text).then(() => {
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text)
       setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
+      clearTimeout(timer.current)
+      timer.current = setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error("Couldn't copy. Select the text and copy it manually.")
+    }
   }
   return (
     <button
       type="button"
       onClick={copy}
-      aria-label="Copy"
-      title="Copy"
+      aria-label={copied ? "Copied" : "Copy"}
+      title={copied ? "Copied" : "Copy"}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+        styles.copyButton,
         className
       )}
     >
@@ -103,9 +110,11 @@ function CopyButton({
 /** Reference chips: file icon + name; clicking one reveals the chunk text. */
 function SourceChips({ sources }: { sources: SourceChunk[] }) {
   const [open, setOpen] = useState<number | null>(null)
+  const passageId = useId()
   const active = open !== null ? sources[open] : null
   return (
     <div className="space-y-2 pt-1">
+      <p className={styles.sourceLabel}>Sources <span>{sources.length}</span></p>
       <div className="flex flex-wrap gap-1.5">
         {sources.map((source, i) => {
           const isMemory = source.filename === "memory"
@@ -116,18 +125,19 @@ function SourceChips({ sources }: { sources: SourceChunk[] }) {
               type="button"
               onClick={() => setOpen(open === i ? null : i)}
               aria-expanded={open === i}
+              aria-controls={open === i ? passageId : undefined}
               title={
                 isMemory
                   ? "Agent memory - click to read"
                   : `${source.filename} - click to read this passage`
               }
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted",
+                styles.sourceChip,
                 open === i && "border-foreground/40 bg-muted"
               )}
             >
               <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="max-w-40 truncate">
+              <span className="min-w-0 max-w-40 truncate">
                 {isMemory ? "Memory" : source.filename}
               </span>
               {source.page_number != null ? (
@@ -148,7 +158,7 @@ function SourceChips({ sources }: { sources: SourceChunk[] }) {
         })}
       </div>
       {active ? (
-        <div className="rounded-lg border bg-muted/40 p-3">
+        <div id={passageId} className={styles.passage} role="region" aria-label="Source passage">
           <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
             <span className="flex min-w-0 items-center gap-1.5 font-medium">
               {active.filename === "memory" ? (
@@ -201,22 +211,22 @@ function CacheBadge({ result }: { result: QueryResponse }) {
 }
 
 /** One question + its grounded answer (depth badge, search plan, references). */
-function TurnView({ question, result }: Turn) {
+const TurnView = memo(function TurnView({ question, result }: Turn) {
   return (
-    <div className="space-y-2">
+    <div className={styles.turn}>
       {/* Question, right-aligned, with a copy button that appears on hover. */}
       <div className="group flex items-start justify-end gap-1">
         <CopyButton
           text={question}
-          className="mt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          className="mt-0.5"
         />
-        <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
+        <div className={styles.question}>
           {question}
         </div>
       </div>
-      <div className="group max-w-3xl space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+      <div className={styles.answer}>
+        <div className={styles.answerHeader}>
+          <div className="flex flex-wrap items-center gap-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {result.needs_clarification ? "Needs a bit more detail" : "Answer"}
             </div>
@@ -227,7 +237,7 @@ function TurnView({ question, result }: Turn) {
             ) : null}
             <CacheBadge result={result} />
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className={styles.answerMeta}>
             {result.model} / {result.latency_ms} ms
           </div>
         </div>
@@ -265,7 +275,7 @@ function TurnView({ question, result }: Turn) {
       </div>
     </div>
   )
-}
+})
 
 export function PlaygroundTab({ project }: { project: Project }) {
   const [question, setQuestion] = useState("")
@@ -513,14 +523,13 @@ export function PlaygroundTab({ project }: { project: Project }) {
     // Fixed frame: header (title) and the input row stay put; only the
     // conversation in the middle scrolls - the same on mobile and desktop.
     // Tighter padding + hidden description on mobile give the answers more room.
-    <Card className="flex h-full min-h-0 flex-col gap-3 py-3 sm:gap-6 sm:py-6">
+    <Card className={styles.page}>
       <CardHeader className="shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1 space-y-1.5">
-            <CardTitle>Test your RAG</CardTitle>
+            <CardTitle className={styles.title}>Test your RAG</CardTitle>
             <CardDescription className="hidden sm:block">
-              Ask a question with the same pipeline your API consumers will use.
-              Follow-ups remember the conversation.
+              Try your project&apos;s answers, inspect sources, and ask follow-up questions.
             </CardDescription>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -565,6 +574,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 variant="outline"
                 size="sm"
                 onClick={handleNewChat}
+                disabled={loading}
                 aria-label="New chat"
                 title="New chat"
                 className="gap-1.5"
@@ -576,17 +586,19 @@ export function PlaygroundTab({ project }: { project: Project }) {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 pb-4">
+      <CardContent className={styles.content}>
         <div className="relative min-h-0 flex-1">
           <div
             ref={scrollRef}
             onScroll={refreshScrollDown}
-            className="h-full space-y-5 overflow-y-auto rounded-2xl border bg-background px-4 py-4 sm:px-6"
+            className={styles.conversation}
+            role="region"
+            aria-label="Conversation"
+            tabIndex={0}
           >
             {turns.length === 0 && !loading ? (
-              <div className="flex min-h-20 items-center justify-center text-center text-sm text-muted-foreground">
-                Ask a question to test retrieval, the agentic loop, and grounded
-                answers. Follow-ups like “summarize that” keep context.
+              <div className={styles.empty}>
+                <p>Ask a question about your documents and memories.</p>
               </div>
             ) : null}
             {turns.map((turn, i) => (
@@ -595,13 +607,13 @@ export function PlaygroundTab({ project }: { project: Project }) {
             {streaming ? (
               <div ref={streamTopRef} className="space-y-2 scroll-mt-4">
                 <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-1.5 text-sm break-words">
+                  <div className={styles.question}>
                     {streaming.question}
                   </div>
                 </div>
                 {streaming.text ? (
                   // Answer grows in place; the caret marks the live cursor.
-                  <div className="max-w-3xl">
+                  <div className={styles.answer}>
                     <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Answer
                     </div>
@@ -610,7 +622,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className={styles.thinking} role="status">
                     <LoaderOne />
                     Thinking
                   </div>
@@ -619,13 +631,13 @@ export function PlaygroundTab({ project }: { project: Project }) {
             ) : null}
             <div ref={bottomRef} />
           </div>
-          {showScrollDown ? (
+          {showScrollDown && (turns.length > 0 || streaming) ? (
             <button
               type="button"
               onClick={scrollToLatest}
               aria-label="Scroll to latest"
               title="Scroll to latest"
-              className="absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground"
+              className={styles.scrollButton}
             >
               <CaretDown className="size-4" />
             </button>
@@ -633,12 +645,13 @@ export function PlaygroundTab({ project }: { project: Project }) {
         </div>
 
         {/* Static footer: cache rate, any key warning, and the input row. */}
-        <div className="shrink-0 space-y-3">
+        <div className={styles.footer}>
         {cacheStats && cacheStats.queries > 0 ? (
-          <div
-            className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground"
+          <details
+            className={styles.cacheStats}
             title="Project-wide cache performance across the playground and the /v1 API. Cached answers skip retrieval and the LLM."
           >
+            <summary>
             <Lightning
               className={cn(
                 "size-3.5",
@@ -646,10 +659,10 @@ export function PlaygroundTab({ project }: { project: Project }) {
               )}
               weight={cacheStats.cache_hits > 0 ? "fill" : "regular"}
             />
-            Cache hit rate {Math.round(cacheStats.hit_rate * 100)}% (
-            {cacheStats.cache_hits}/{cacheStats.queries} queries · {cacheStats.l1}{" "}
-            exact, {cacheStats.l2} similar)
-          </div>
+            Project cache <strong>{Math.round(cacheStats.hit_rate * 100)}% hit rate</strong><CaretDown aria-hidden="true" className="size-3" />
+            </summary>
+            <p>{cacheStats.cache_hits}/{cacheStats.queries} queries cached · {cacheStats.l1} exact, {cacheStats.l2} similar. Includes Playground and API requests.</p>
+          </details>
         ) : null}
 
         {!currentModelUsable ? (
@@ -684,14 +697,15 @@ export function PlaygroundTab({ project }: { project: Project }) {
           </div>
         ) : null}
 
-        <div className="rounded-xl border bg-background p-1.5 shadow-xs focus-within:border-foreground">
+        <div className={styles.composer}>
           <Textarea
+            aria-label="Your question"
             rows={1}
             placeholder="Ask anything about this knowledge base"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
                 if (loading) {
                   handleStop()
@@ -702,19 +716,19 @@ export function PlaygroundTab({ project }: { project: Project }) {
             }}
             className="styled-scrollbar max-h-32 min-h-10 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
           />
-          <div className="flex items-center justify-between gap-2 px-1 pt-1">
-            <div className="flex min-w-0 items-center gap-2">
+          <div className={styles.composerControls}>
+            <div className={styles.modelControls}>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                className="shrink-0 rounded-full"
+                className={styles.attachButton}
                 title="Add files"
                 aria-label="Add files"
                 disabled={uploading}
                 onClick={() => fileInput.current?.click()}
               >
-                <Plus className="size-4" />
+                {uploading ? <Spin /> : <Plus className="size-4" />}
               </Button>
               <input
                 ref={fileInput}
@@ -723,12 +737,12 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 hidden
                 onChange={(event) => handleUpload(event.target.files)}
               />
-              <Select value={model} onValueChange={handleModelChange}>
+              <Select value={model} onValueChange={handleModelChange} disabled={loading}>
                 <SelectTrigger
                   size="sm"
                   aria-label="Answer model"
                   className={cn(
-                    "h-8 max-w-44 rounded-full border-0 bg-muted px-3 shadow-none focus:ring-0",
+                    styles.modelSelect,
                     !currentModelUsable && "text-muted-foreground"
                   )}
                 >
@@ -773,7 +787,8 @@ export function PlaygroundTab({ project }: { project: Project }) {
             </div>
             <Button
               size="icon"
-              className="size-8 shrink-0 rounded-full"
+              className={styles.sendButton}
+              data-stopping={loading}
               onClick={loading ? handleStop : handleAsk}
               disabled={!loading && !question.trim()}
               aria-label={loading ? "Stop" : "Ask"}
