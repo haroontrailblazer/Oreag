@@ -117,12 +117,13 @@ class TestProviderScoping:
         entry = table.lookup("openai/gpt-oss-20b", "groq")
         assert entry is not None and entry.input == 0.075
 
-    def test_the_free_local_twin_of_a_paid_id_stays_unpriced(self, table):
+    def test_the_free_local_twin_of_a_paid_id_is_free_not_borrowed(self, table):
         """`openai/gpt-oss-20b` is served by groq (paid) AND lmstudio (free)
         under one id. registry.py leaves it unpriced for exactly that reason;
-        provider scoping is what lets groq be priced without pricing lmstudio.
-        """
-        assert table.lookup("openai/gpt-oss-20b", "lmstudio") is None
+        provider scoping gives each the right answer - groq's rate for groq,
+        and a real zero for the copy running on your own machine."""
+        entry = table.lookup("openai/gpt-oss-20b", "lmstudio")
+        assert entry is not None and entry.input == 0.0
 
     def test_an_unknown_provider_gets_nothing(self, table):
         assert table.lookup("gpt-4o-mini", "not-a-provider") is None
@@ -131,31 +132,32 @@ class TestProviderScoping:
         assert table.lookup("whatever-no-price", "openai") is None
 
 
-class TestPerRequestFeesAreNotPriceable:
-    def test_a_provider_that_always_searches_is_refused(self, table):
-        """Perplexity bills a per-query search fee that dwarfs the tokens -
-        $0.008 against ~$0.001. Pricing the token half alone would replace an
-        honest gap with a number that is confidently ~8x low, which is the one
-        thing the NULL-is-not-zero rule exists to prevent."""
-        assert table.lookup("sonar", "perplexity") is None
+class TestPerRequestFees:
+    def test_the_fee_is_read_at_the_size_we_actually_request(self, table):
+        """Oreag sets no search_context_size, so the vendor default (medium)
+        is what gets billed. Pinned to that rather than the cheapest tier,
+        because understating is the failure this module exists to stop."""
+        entry = table.lookup("sonar", "perplexity")
+        assert entry is not None and entry.per_request == 0.008
 
-    def test_a_duplicate_listing_without_the_fee_field_does_not_smuggle_it_in(self):
+    def test_a_duplicate_listing_without_the_fee_cannot_shadow_one_with_it(self):
         """The feed carries BOTH `perplexity/sonar` (with the fee) and
-        `perplexity/perplexity/sonar` (without it). A field sniff refused the
-        first and priced the second under the same name - which is why the rule
-        is keyed on the provider instead."""
+        `perplexity/perplexity/sonar` (without it), and the fee-less duplicate
+        sorts FIRST - so first-writer-wins registered the incomplete entry and
+        silently dropped a charge that dominates the call."""
         t = pricing.build_table({
+            "perplexity/perplexity/sonar": {
+                "litellm_provider": "perplexity",
+                "input_cost_per_token": 2.5e-07, "output_cost_per_token": 2.5e-06,
+            },
             "perplexity/sonar": {
                 "litellm_provider": "perplexity",
                 "input_cost_per_token": 1e-06, "output_cost_per_token": 1e-06,
                 "search_context_cost_per_query": {"search_context_size_medium": 0.008},
             },
-            "perplexity/perplexity/sonar": {
-                "litellm_provider": "perplexity",
-                "input_cost_per_token": 2.5e-07, "output_cost_per_token": 2.5e-06,
-            },
         })
-        assert t.lookup("sonar", "perplexity") is None
+        entry = t.lookup("sonar", "perplexity")
+        assert entry is not None and entry.per_request == 0.008
 
     def test_an_OPTIONAL_fee_does_not_block_pricing(self):
         """Gemini models carry `search_context_cost_per_query` because they CAN
@@ -310,3 +312,77 @@ class TestRegistryPrefersTheFeed:
 
         assert cost_breakdown("sarvam-105b", TokenUsage(10, 1, "sarvam-105b"),
                               provider="sarvam") is None
+
+
+class TestLocalModelsCostZero:
+    """A model on your own hardware has no per-token charge, and that is a
+    MEASURED zero, not an unknown.
+
+    registry.py's NULL-is-not-zero rule is about prices we cannot look up. It
+    was being applied to ollama, lmstudio and sentence-transformers, where the
+    answer is known exactly - so the Usage page listed them under "no published
+    rate ... the cost figures above understate by whatever those calls cost
+    you", which is false: they cost nothing.
+    """
+
+    def test_a_local_chat_model_is_free_not_unknown(self):
+        from app.providers.base import TokenUsage
+        from app.providers.registry import cost_breakdown
+
+        got = cost_breakdown("llama3.3", TokenUsage(1_000_000, 500_000, "llama3.3"),
+                             provider="ollama")
+        assert got == {"input": 0.0, "output": 0.0, "total": 0.0}
+
+    def test_a_local_embedder_is_free_not_unknown(self):
+        from app.providers.registry import embedding_cost_for
+
+        assert embedding_cost_for("nomic-embed-text", 1_000_000,
+                                  provider="ollama") == 0.0
+
+    def test_the_paid_twin_of_a_local_id_is_still_paid(self):
+        """`openai/gpt-oss-20b` runs free on lmstudio and costs money on groq.
+        Zeroing the local one must not zero the hosted one."""
+        from app.providers.base import TokenUsage
+        from app.providers.registry import cost_breakdown
+
+        local = cost_breakdown("openai/gpt-oss-20b",
+                               TokenUsage(1_000_000, 0, "openai/gpt-oss-20b"),
+                               provider="lmstudio")
+        hosted = cost_breakdown("openai/gpt-oss-20b",
+                                TokenUsage(1_000_000, 0, "openai/gpt-oss-20b"),
+                                provider="groq")
+        assert local["total"] == 0.0
+        assert hosted["total"] > 0
+
+    def test_a_hosted_model_never_becomes_free_by_accident(self):
+        from app.providers.base import TokenUsage
+        from app.providers.registry import cost_breakdown
+
+        got = cost_breakdown("gpt-4o-mini", TokenUsage(1_000_000, 0, "gpt-4o-mini"),
+                             provider="openai")
+        assert got["input"] > 0
+
+
+class TestPerRequestFeesArePriced:
+    """Perplexity is priceable after all - the feed carries the search fee."""
+
+    def test_the_search_fee_is_added_once_per_call(self):
+        from app.providers.base import TokenUsage
+        from app.providers.registry import cost_breakdown
+
+        # sonar: $1/Mtok both ways, $0.008 per query at the default context size.
+        got = cost_breakdown("sonar", TokenUsage(1000, 500, "sonar"),
+                             provider="perplexity")
+        assert got is not None
+        assert got["request"] == 0.008
+        # tokens are 1500 * 1.0/1e6 = 0.0015, and the fee dominates - which is
+        # exactly why pricing the tokens alone was refused.
+        assert got["total"] == pytest.approx(0.0015 + 0.008)
+
+    def test_a_model_without_a_fee_has_no_request_component(self):
+        from app.providers.base import TokenUsage
+        from app.providers.registry import cost_breakdown
+
+        got = cost_breakdown("gpt-4o-mini", TokenUsage(1000, 100, "gpt-4o-mini"),
+                             provider="openai")
+        assert "request" not in got

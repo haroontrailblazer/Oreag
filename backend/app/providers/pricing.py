@@ -59,14 +59,13 @@ PROVIDER_ALIASES: dict[str, tuple[str, ...]] = {
     "deepseek": ("deepseek",),
     "cohere": ("cohere", "cohere_chat"),
     "together": ("together_ai",),
-    "fireworks": ("fireworks_ai",),
+    # Chat and embedding models sit under DIFFERENT litellm_provider values;
+    # missing the second left nomic-embed-text-v1.5 unpriced.
+    "fireworks": ("fireworks_ai", "fireworks_ai-embedding-models"),
     "openrouter": ("openrouter",),
     "voyage": ("voyage",),
     "jina": ("jina_ai",),
-    # Local runtimes have no vendor in the feed and no price anywhere, which is
-    # correct rather than missing. Mapped to nothing so a lookup returns None
-    # and the cost stays NULL instead of borrowing a hosted rate for a model
-    # the user is running on their own hardware.
+    # Local runtimes are handled by LOCAL_PROVIDERS below, not by the feed.
     "ollama": (),
     "lmstudio": (),
     "sentence_transformers": (),
@@ -100,7 +99,31 @@ class PriceEntry:
     # a second pass over the feed when TokenUsage learns to.
     cached_input: float | None = None
     cache_write: float | None = None
+    # USD charged once per CALL, on top of the tokens. Perplexity's search fee
+    # is the only one today and it dominates - ~$0.008 against ~$0.001 of
+    # tokens - which is why pricing the token half alone was refused before
+    # this field existed.
+    per_request: float | None = None
     source: str = "feed"
+
+
+def _per_request(entry: dict) -> float | None:
+    """The unavoidable per-call fee, at the size Oreag actually requests.
+
+    Perplexity prices its search at low/medium/high context sizes. Oreag sets
+    none, so the vendor default - medium - is what gets billed. Pinned to that
+    rather than the cheapest, because understating is the failure this whole
+    subsystem exists to stop.
+    """
+    fee = entry.get("search_context_cost_per_query")
+    if not isinstance(fee, dict):
+        return None
+    for tier in ("search_context_size_medium", "search_context_size_high",
+                 "search_context_size_low"):
+        value = fee.get(tier)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
 
 
 def _per_mtok(value) -> float | None:
@@ -128,7 +151,25 @@ def _per_mtok(value) -> float | None:
 #
 # Removing perplexity from this set means modelling a per-request cost
 # component, not deleting the set.
-UNAVOIDABLE_FEE_PROVIDERS = frozenset({"perplexity"})
+UNAVOIDABLE_FEE_PROVIDERS = frozenset()
+
+# Runtimes on the user's own hardware. There is no per-token charge, so the
+# answer is 0.00 - and that is a MEASURED zero, not an unknown.
+#
+# registry.py's NULL-is-not-zero rule exists for prices we cannot look up
+# ("claiming a measured $0.00 for a model with no price entry would make the
+# two indistinguishable"). It was being applied here too, where the price IS
+# known, so the Usage page listed every local model under "no published rate -
+# the cost figures above understate by whatever those calls cost you". They
+# cost nothing. Saying so is the honest answer and removes them from a caveat
+# that was telling local users their spend was understated when it was not.
+#
+# Scoped to the PROVIDER, so `openai/gpt-oss-20b` is free on lmstudio and still
+# $0.075/Mtok on groq - the same id, two answers, which is what provider
+# scoping was built for.
+LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio", "sentence_transformers"})
+
+FREE = PriceEntry(input=0.0, output=0.0, source="local")
 
 
 class PriceTable:
@@ -149,6 +190,8 @@ class PriceTable:
         """
         if not model or not provider:
             return None
+        if provider in LOCAL_PROVIDERS:
+            return FREE
         entries = self._by_provider.get(provider)
         if not entries:
             return None
@@ -191,6 +234,7 @@ def build_table(payload: dict) -> PriceTable:
             output=_per_mtok(entry.get("output_cost_per_token")),
             cached_input=_per_mtok(entry.get("cache_read_input_token_cost")),
             cache_write=_per_mtok(entry.get("cache_creation_input_token_cost")),
+            per_request=_per_request(entry),
         )
         size += 1
         # Longest form first so a more specific key is never shadowed.
@@ -198,7 +242,21 @@ def build_table(payload: dict) -> PriceTable:
         for owner in owners:
             slot = by_provider.setdefault(owner, {})
             for name in names:
-                slot.setdefault(name, price)
+                existing = slot.get(name)
+                # First writer wins, EXCEPT that an entry carrying a
+                # per-request fee must never be shadowed by one without.
+                #
+                # The feed lists Perplexity's sonar twice - `perplexity/sonar`
+                # with the search fee, and `perplexity/perplexity/sonar`
+                # without it - and the fee-less duplicate sorts first, so
+                # setdefault alone registered the cheaper, incomplete entry
+                # under the same name and dropped an $0.008 charge that
+                # dominates the call. Understating is the failure this module
+                # exists to prevent, so more information wins.
+                if existing is None or (
+                    price.per_request is not None and existing.per_request is None
+                ):
+                    slot[name] = price
     return PriceTable(by_provider, size)
 
 

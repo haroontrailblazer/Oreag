@@ -636,11 +636,16 @@ def cost_breakdown(
     input_per_mtok, output_per_mtok = prices
     input_cost = round(prompt * input_per_mtok / 1_000_000, _COST_DP)
     output_cost = round(completion * output_per_mtok / 1_000_000, _COST_DP)
-    return {
-        "input": input_cost,
-        "output": output_cost,
-        "total": round(input_cost + output_cost, _COST_DP),
-    }
+    breakdown = {"input": input_cost, "output": output_cost}
+    # A fee charged once per CALL, not per token. Perplexity's search fee is
+    # the only one, and it dominates: ~$0.008 against ~$0.001 of tokens on a
+    # typical query, so a token-only figure was ~8x low. One generation is one
+    # request, so it is added exactly once.
+    per_request = getattr(entry, "per_request", None) if entry is not None else None
+    if per_request:
+        breakdown["request"] = round(per_request, _COST_DP)
+    breakdown["total"] = round(sum(breakdown.values()), _COST_DP)
+    return breakdown
 
 
 def cost_for(model: str, usage, provider: str | None = None) -> float | None:

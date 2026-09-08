@@ -1446,6 +1446,15 @@
     "supports_tool_choice": true,
     "supports_vision": false
   },
+  "fireworks_ai/nomic-ai/nomic-embed-text-v1.5": {
+    "input_cost_per_token": 8e-09,
+    "litellm_provider": "fireworks_ai-embedding-models",
+    "max_input_tokens": 8192,
+    "max_tokens": 8192,
+    "mode": "embedding",
+    "output_cost_per_token": 0.0,
+    "source": "https://fireworks.ai/pricing"
+  },
   "gemini-flash-latest": {
     "cache_read_input_token_cost": 3e-08,
     "input_cost_per_audio_token": 1e-06,
