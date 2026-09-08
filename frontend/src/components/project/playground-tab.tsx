@@ -22,7 +22,6 @@ import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -523,16 +522,36 @@ export function PlaygroundTab({ project }: { project: Project }) {
     // Fixed frame: header (title) and the input row stay put; only the
     // conversation in the middle scrolls - the same on mobile and desktop.
     // Tighter padding + hidden description on mobile give the answers more room.
-    <Card className={styles.page}>
+    <Card className={styles.page} data-empty={turns.length === 0 && !loading}>
       <CardHeader className="shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1 space-y-1.5">
-            <CardTitle className={styles.title}>Test your RAG</CardTitle>
-            <CardDescription className="hidden sm:block">
-              Try your project&apos;s answers, inspect sources, and ask follow-up questions.
-            </CardDescription>
+            <CardTitle className={styles.title}>Conversation</CardTitle>
+            <div className={styles.sessionStatus} role="status" data-busy={loading}>
+              <span aria-hidden="true" />{loading ? "Answering" : currentModelUsable ? "Ready to chat" : "Model unavailable"}
+            </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+        {cacheStats && cacheStats.queries > 0 ? (
+          <details
+            className={styles.cacheStats}
+            title="Project-wide cache performance across the playground and the /v1 API. Cached answers skip retrieval and the LLM."
+          >
+            <summary>
+            <Lightning
+              className={cn(
+                "size-3.5",
+                cacheStats.cache_hits > 0 && "text-emerald-500"
+              )}
+              weight={cacheStats.cache_hits > 0 ? "fill" : "regular"}
+            />
+            Project cache <strong>{Math.round(cacheStats.hit_rate * 100)}% hit rate</strong><CaretDown aria-hidden="true" className="size-3" />
+            </summary>
+            <p>{cacheStats.cache_hits}/{cacheStats.queries} queries cached · {cacheStats.l1} exact, {cacheStats.l2} similar. Includes Playground and API requests.</p>
+          </details>
+        ) : null}
+
+
             <BestPractices
               className="order-last ml-auto"
               tips={[
@@ -568,13 +587,12 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 },
               ]}
             />
-            {turns.length > 0 ? (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={handleNewChat}
-                disabled={loading}
+                disabled={loading || turns.length === 0}
                 aria-label="New chat"
                 title="New chat"
                 className="gap-1.5"
@@ -582,12 +600,11 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 <Plus className="size-4" />
                 <span className="hidden sm:inline">New chat</span>
               </Button>
-            ) : null}
           </div>
         </div>
       </CardHeader>
       <CardContent className={styles.content}>
-        <div className="relative min-h-0 flex-1">
+        <div className={styles.conversationArea}>
           <div
             ref={scrollRef}
             onScroll={refreshScrollDown}
@@ -598,6 +615,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
           >
             {turns.length === 0 && !loading ? (
               <div className={styles.empty}>
+                <h2>What would you like to know?</h2>
                 <p>Ask a question about your documents and memories.</p>
               </div>
             ) : null}
@@ -646,25 +664,6 @@ export function PlaygroundTab({ project }: { project: Project }) {
 
         {/* Static footer: cache rate, any key warning, and the input row. */}
         <div className={styles.footer}>
-        {cacheStats && cacheStats.queries > 0 ? (
-          <details
-            className={styles.cacheStats}
-            title="Project-wide cache performance across the playground and the /v1 API. Cached answers skip retrieval and the LLM."
-          >
-            <summary>
-            <Lightning
-              className={cn(
-                "size-3.5",
-                cacheStats.cache_hits > 0 && "text-emerald-500"
-              )}
-              weight={cacheStats.cache_hits > 0 ? "fill" : "regular"}
-            />
-            Project cache <strong>{Math.round(cacheStats.hit_rate * 100)}% hit rate</strong><CaretDown aria-hidden="true" className="size-3" />
-            </summary>
-            <p>{cacheStats.cache_hits}/{cacheStats.queries} queries cached · {cacheStats.l1} exact, {cacheStats.l2} similar. Includes Playground and API requests.</p>
-          </details>
-        ) : null}
-
         {!currentModelUsable ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
             <Warning className="size-4 shrink-0" weight="fill" />
@@ -701,7 +700,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
           <Textarea
             aria-label="Your question"
             rows={1}
-            placeholder="Ask anything about this knowledge base"
+            placeholder="Ask about your knowledge base…"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
@@ -741,6 +740,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 <SelectTrigger
                   size="sm"
                   aria-label="Answer model"
+                  title="Changes the answer model for this project"
                   className={cn(
                     styles.modelSelect,
                     !currentModelUsable && "text-muted-foreground"
