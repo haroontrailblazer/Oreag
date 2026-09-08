@@ -1,4 +1,4 @@
-.switch[data-slot="switch"] {
+.switch[data-slot="policy-switch"] {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -19,12 +19,12 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.switch [data-slot="switch-thumb"] {
-  position: relative;
-  width: 54px;
-  height: 30px;
+.switch [data-slot="policy-switch-face"] {
+  position: absolute;
+  inset: 6px;
   box-sizing: border-box;
   flex-shrink: 0;
+  pointer-events: none;
   border: 1px solid #e4e4e1;
   border-radius: 7px;
   background: linear-gradient(90deg, #d3d4d1, #f3f3ef 48%, #ffffff);
@@ -35,7 +35,7 @@
   transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
 }
 
-.switch[data-state="checked"] [data-slot="switch-thumb"] {
+.switch[data-state="checked"] [data-slot="policy-switch-face"] {
   transform: rotateY(17deg);
   background: linear-gradient(90deg, #ffffff, #f3f3ef 52%, #d3d4d1);
   box-shadow: inset 0 1px 1px #ffffff, inset 0 -2px 2px #8a8c8630,
@@ -43,7 +43,7 @@
 }
 
 /* Engraved power marks are decorative; Radix announces the actual state. */
-.switch [data-slot="switch-thumb"]::before {
+.switch [data-slot="policy-switch-face"]::before {
   content: "";
   position: absolute;
   left: 14px;
@@ -55,7 +55,7 @@
   box-shadow: 1px 1px 0 #ffffff;
 }
 
-.switch [data-slot="switch-thumb"]::after {
+.switch [data-slot="policy-switch-face"]::after {
   content: "";
   position: absolute;
   right: 10px;
@@ -67,12 +67,13 @@
   box-shadow: 1px 1px 0 #ffffff, inset 1px 1px 0 #ffffff;
 }
 
-.switch[data-state="checked"] [data-slot="switch-thumb"]::before { background: #454843; }
-.switch[data-state="checked"] [data-slot="switch-thumb"]::after { border-color: #777a75; }
-.switch:active:not(:disabled) [data-slot="switch-thumb"] { transform: rotateY(0); }
-.switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.switch[data-state="checked"] [data-slot="policy-switch-face"]::before { background: #454843; }
+.switch[data-state="checked"] [data-slot="policy-switch-face"]::after { border-color: #777a75; }
+.switch:active:not(:disabled) [data-slot="policy-switch-face"] { transform: rotateY(0); }
+.switch:focus-visible { outline: none; }
+.switch:focus-visible [data-slot="policy-switch-face"] { outline: 1px dashed #777a75; outline-offset: -4px; }
 .switch:disabled { cursor: not-allowed; opacity: 0.5; }
 
 @media (prefers-reduced-motion: reduce) {
-  .switch [data-slot="switch-thumb"] { transition: none; }
+  .switch [data-slot="policy-switch-face"] { transition: none; }
 }

@@ -10,7 +10,8 @@ import {
   WarningOctagonIcon as WarningOctagon,
 } from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react"
+import { Switch as SwitchPrimitive } from "radix-ui"
 import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
 
@@ -76,6 +77,15 @@ import type { ModelsResponse, Project } from "@/lib/types"
 // by "mirror each question". A sentinel stands in for it in the widget only -
 // what gets saved is still "" or a language name.
 const MATCH_QUESTION = "__match__"
+
+// Keep the rocker independent of the shared slider's translation utilities.
+function PolicySwitch(props: Omit<ComponentProps<typeof SwitchPrimitive.Root>, "className" | "children">) {
+  return (
+    <SwitchPrimitive.Root {...props} data-slot="policy-switch" className={policySwitchStyles.switch}>
+      <SwitchPrimitive.Thumb data-slot="policy-switch-face" />
+    </SwitchPrimitive.Root>
+  )
+}
 
 function PolicyHelp({
   label,
@@ -1103,12 +1113,11 @@ export function SettingsTab({
                 <span className="text-xs font-medium text-muted-foreground">
                   {versionTracking ? "On" : "Off"}
                 </span>
-                <Switch
+                <PolicySwitch
                   id="version-tracking"
                   checked={versionTracking}
                   disabled={!project.version_extraction_available}
                   onCheckedChange={setVersionTracking}
-                    className={policySwitchStyles.switch}
                 />
               </div>
             </div>
