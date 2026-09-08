@@ -49,10 +49,11 @@
 .page [data-slot="input"], .page [data-slot="select-trigger"] { min-height: 40px; }
 .page .descriptionEditor {
   field-sizing: fixed;
+  height: 112px;
   min-height: 112px;
-  max-height: none;
+  max-height: 112px;
   resize: none;
-  overflow: hidden;
+  overflow-y: auto;
   overflow-wrap: anywhere;
 }
 .page [data-slot="select-value"] { overflow: hidden; text-overflow: ellipsis; }

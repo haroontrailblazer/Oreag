@@ -10,7 +10,7 @@ import {
   WarningOctagonIcon as WarningOctagon,
 } from "@phosphor-icons/react/dist/ssr"
 import { useRouter } from "next/navigation"
-import { type ComponentProps, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react"
 import { Switch as SwitchPrimitive } from "radix-ui"
 import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
@@ -228,31 +228,6 @@ export function SettingsTab({
   // General
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description ?? "")
-  const descriptionInput = useRef<HTMLTextAreaElement>(null)
-  useLayoutEffect(() => {
-    const input = descriptionInput.current
-    if (!input) return
-    let lastWidth = 0
-    let active = true
-    function fitDescription() {
-      if (!active || !input || input.clientWidth === 0) return
-      lastWidth = input.clientWidth
-      input.style.height = "auto"
-      const borderHeight = input.offsetHeight - input.clientHeight
-      input.style.height = `${input.scrollHeight + borderHeight}px`
-    }
-    fitDescription()
-    // Also reflow after a hidden settings tab opens or its column narrows.
-    const observer = new ResizeObserver(() => {
-      if (input.clientWidth !== lastWidth) fitDescription()
-    })
-    observer.observe(input)
-    void document.fonts.ready.then(fitDescription)
-    return () => {
-      active = false
-      observer.disconnect()
-    }
-  }, [description])
   const [topK, setTopK] = useState(project.top_k)
   const [saving, setSaving] = useState(false)
 
@@ -1266,7 +1241,6 @@ export function SettingsTab({
             <Label htmlFor="settings-description">Description (optional)</Label>
             <Textarea
               id="settings-description"
-              ref={descriptionInput}
               rows={4}
               className={styles.descriptionEditor}
               value={description}
