@@ -9,6 +9,8 @@ import {
   HandIcon as Hand,
   MinusIcon as Minus,
   PlusIcon as Plus,
+  MagnifyingGlassIcon as Search,
+  GraphIcon as Graph,
   XIcon as X,
 } from "@phosphor-icons/react/dist/ssr"
 import {
@@ -47,6 +49,7 @@ import {
   PointerViz,
 } from "@/components/ui/best-practice-visuals"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Card,
   CardContent,
@@ -62,6 +65,7 @@ import type {
   Project,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import styles from "./visualize-tab.module.css"
 
 /* The canvas is pitch black in BOTH app themes - it is a viewing surface, not
    a page, and a single constant backdrop is what keeps the graph looking the
@@ -265,10 +269,7 @@ function ToolButton({
       aria-label={label}
       aria-pressed={active}
       onClick={onClick}
-      className={cn(
-        "size-8 rounded-full text-muted-foreground hover:text-foreground",
-        active && "bg-foreground/10 text-foreground"
-      )}
+      className={styles.toolButton}
     >
       {children}
     </Button>
@@ -753,7 +754,7 @@ export function VisualizeTab({
   project: Project
   onViewFile: (fileId: string) => void
 }) {
-  const { data, isLoading } = useSWR<MemoryGraphResponse>(
+  const { data, isLoading, error, mutate } = useSWR<MemoryGraphResponse>(
     `/api/projects/${project.id}/memory-graph`,
     fetcher
   )
@@ -763,18 +764,40 @@ export function VisualizeTab({
   const [ForceGraph3D, setForceGraph3D] = useState<
     typeof ForceGraph3DComponent | null
   >(null)
+  const [rendererError, setRendererError] = useState(false)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   useEffect(() => {
     let alive = true
     import("react-force-graph-3d").then((mod) => {
       if (alive) setForceGraph3D(() => mod.default)
+    }).catch(() => {
+      if (alive) setRendererError(true)
     })
     return () => {
       alive = false
     }
-  }, [])
+  }, [loadAttempt])
 
   const fgRef = useRef<ForceGraphMethods<MemoryGraphNode> | undefined>(undefined)
   const [selected, setSelected] = useState<MemoryGraphNode | null>(null)
+  const [search, setSearch] = useState("")
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const nodeCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const node of data?.nodes ?? []) counts[node.type] = (counts[node.type] ?? 0) + 1
+    return counts
+  }, [data])
+  const searchResults = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase()
+    if (!query) return []
+    const matches: MemoryGraphNode[] = []
+    for (const node of data?.nodes ?? []) {
+      if (node.label.toLocaleLowerCase().includes(query)) matches.push(node)
+      if (matches.length === 8) break
+    }
+    return matches
+  }, [data, search])
   // Auto-rotate follows the OS motion preference until the user overrides it
   // from the toolbar, so "reduce motion" gets a still canvas without taking
   // the control away.
@@ -806,7 +829,9 @@ export function VisualizeTab({
     const el = boxRef.current
     if (!el) return
     const observer = new ResizeObserver(() => {
-      setSize({ width: el.clientWidth, height: el.clientHeight })
+      const width = el.clientWidth
+      const height = el.clientHeight
+      setSize(previous => previous.width === width && previous.height === height ? previous : { width, height })
     })
     observer.observe(el)
     return () => observer.disconnect()
@@ -818,12 +843,14 @@ export function VisualizeTab({
   // mouseButtons map. Retries briefly because the graph (and its controls)
   // mount asynchronously after the module loads.
   useEffect(() => {
+    if (!ForceGraph3D || graphData.nodes.length <= 1) return
     let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
     const apply = () => {
       if (cancelled) return
       const fg = fgRef.current
       if (!fg) {
-        setTimeout(apply, 200)
+        timer = setTimeout(apply, 200)
         return
       }
       const controls = fg.controls() as {
@@ -856,6 +883,7 @@ export function VisualizeTab({
     apply()
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
   }, [rotating, panning, ForceGraph3D, graphData])
 
@@ -869,10 +897,12 @@ export function VisualizeTab({
         !!el &&
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
+          !!el.closest("button, a, select, [role='button']") ||
           el.isContentEditable)
       )
     }
     const down = (e: KeyboardEvent) => {
+      if (!boxRef.current?.getClientRects().length) return
       if (e.code !== "Space" || e.repeat || isTyping(e.target)) return
       e.preventDefault() // Space scrolls the page otherwise
       setSpaceHeld(true)
@@ -943,6 +973,7 @@ export function VisualizeTab({
   }, [])
 
   function focusNode(node: GNode) {
+    setLocating(false)
     setSelected({
       id: node.id,
       type: node.type,
@@ -981,15 +1012,13 @@ export function VisualizeTab({
     : null
 
   return (
-    <Card>
+    <Card className={styles.page}>
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <CardTitle>Knowledge graph</CardTitle>
+            <CardTitle className={styles.title}><span className={styles.emblem}><Graph aria-hidden="true" /></span>Knowledge graph</CardTitle>
             <CardDescription>
-              Your project&apos;s brain in 3D - files, sections, chunks and
-              agent memories, linked by meaning. Drag to rotate, scroll to
-              zoom, click a node to inspect it.
+              Explore how your files and memories connect. Select a node to see what&apos;s inside.
             </CardDescription>
           </div>
           {/* View controls live on the canvas itself now (see the toolbar
@@ -1013,22 +1042,52 @@ export function VisualizeTab({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <CardContent className={styles.content}>
+        <div className={styles.explorerBar}>
+          <div className={styles.search} onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false)
+          }} onKeyDown={(event) => {
+            if (event.key === "Escape") { searchRef.current?.focus(); setSearchOpen(false) }
+          }}>
+            <Search aria-hidden="true" className={styles.searchIcon} />
+            <Input ref={searchRef} aria-label="Find a node" placeholder="Find a file, section or memory…" value={search}
+              onChange={event => { setSearch(event.target.value); setSearchOpen(true) }}
+              onFocus={() => setSearchOpen(true)}
+              onKeyDown={event => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault()
+                  event.currentTarget.parentElement?.querySelector<HTMLButtonElement>("[data-search-result]")?.focus()
+                }
+              }} />
+            {searchOpen && search.trim() && <div className={styles.results}>
+              <p role="status">{searchResults.length === 8 ? "First 8 matches · Type more to narrow your search" : searchResults.length ? "Select a node to inspect" : "No matching nodes"}</p>
+              {searchResults.map(node => <button type="button" key={node.id} data-search-result onClick={() => {
+                const positioned = graphData.nodes.find(candidate => candidate.id === node.id)
+                focusNode((positioned ?? node) as GNode)
+                searchRef.current?.focus()
+                setSearchOpen(false)
+              }}>
+                <span className={styles.nodeDot} style={{ backgroundColor: NODE_COLORS[node.type] ?? "#64748b" }} />
+                <span>{node.label}<small>{typeLabel(node.type)}</small></span>
+              </button>)}
+            </div>}
+          </div>
+          <div className={styles.totals} aria-live="polite">
+            <span><strong>{data ? data.nodes.length.toLocaleString() : "—"}</strong> nodes</span>
+            <span><strong>{data ? data.edges.length.toLocaleString() : "—"}</strong> connections</span>
+          </div>
+        </div>
+        <div className={styles.legend} aria-label="Node types">
           {LEGEND.map((entry) => (
-            <span key={entry.type} className="inline-flex items-center gap-1.5">
+            <span key={entry.type} className={styles.legendItem}>
               <span
-                className="size-2.5 rounded-full"
+                className={styles.nodeDot}
                 style={{ backgroundColor: NODE_COLORS[entry.type] }}
               />
               {entry.label}
+              <strong>{data ? nodeCounts[entry.type] ?? 0 : "—"}</strong>
             </span>
           ))}
-          {data && (
-            <span className="ml-auto font-mono">
-              {data.nodes.length} nodes · {data.edges.length} edges
-            </span>
-          )}
         </div>
 
         {fullscreen && (
@@ -1049,25 +1108,36 @@ export function VisualizeTab({
             // inside the panel - loader, toolbar, details popup - render dark
             // whatever the app theme is. Without it a light-theme user gets a
             // white popup and a light loader floating on a black canvas.
-            "dark relative overflow-hidden border border-zinc-800 bg-black",
+            "dark",
+            styles.canvas,
             fullscreen
               ? // Half an inch of blurred page on every side, per the design.
                 // Only the CSS changes here - the element is never re-parented,
                 // so the WebGL context and the settled layout survive.
-                "fixed inset-[0.5in] z-50 rounded-2xl shadow-2xl"
+                styles.fullscreen
               : // Desktop: size the canvas to the space left under the page
                 // header, tabs and card chrome (~22.5rem) so the whole tab fits
                 // the viewport with no page scroll; phones keep a fixed height
                 // and scroll as usual.
-                "h-[52dvh] min-h-[320px] rounded-2xl sm:h-[420px] lg:h-[calc(100dvh-26rem)] lg:min-h-[380px]",
+                styles.embedded,
             // Only a hint - the canvas child sets its own cursor while dragging.
             panning && "cursor-grab active:cursor-grabbing"
           )}
         >
-          {(isLoading || !ForceGraph3D) && <GraphLoader />}
+          {!error && !rendererError && (isLoading || !ForceGraph3D) && <GraphLoader />}
+          {(error || rendererError) && <div className={styles.empty} role="alert">
+            <span className={styles.emptyIcon}><Graph aria-hidden="true" /></span>
+            <p>Couldn&apos;t load the graph</p>
+            <span>Your project is safe. Try loading this view again.</span>
+            <Button variant="outline" onClick={() => {
+              if (rendererError) { setRendererError(false); setLoadAttempt(attempt => attempt + 1) }
+              void mutate()
+            }}>Try again</Button>
+          </div>}
 
-          {isEmpty && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
+          {isEmpty && !error && !rendererError && ForceGraph3D && (
+            <div className={styles.empty}>
+              <span className={styles.emptyIcon}><Graph aria-hidden="true" /></span>
               <p className="text-sm text-foreground">Nothing to visualize yet</p>
               <p className="max-w-sm text-xs text-muted-foreground">
                 Upload and index documents (or save agent memories) and the
@@ -1076,7 +1146,7 @@ export function VisualizeTab({
             </div>
           )}
 
-          {ForceGraph3D && data && !isEmpty && size.width > 0 && (
+          {ForceGraph3D && data && !isEmpty && !error && size.width > 0 && (
             <ForceGraph3D
               ref={fgRef}
               width={size.width}
@@ -1130,8 +1200,8 @@ export function VisualizeTab({
           )}
 
           {/* Canvas toolbar. Hidden while there is nothing to steer. */}
-          {ForceGraph3D && data && !isEmpty && (
-            <div className="absolute bottom-3 left-3 z-20 flex items-center gap-0.5 rounded-full border bg-background/80 p-1 shadow-lg backdrop-blur-md">
+          {ForceGraph3D && data && !isEmpty && !error && (
+            <div className={styles.dock} role="group" aria-label="Graph controls">
               <ToolButton label="Zoom out" onClick={() => dolly(ZOOM_STEP_OUT)}>
                 <Minus className="size-4" />
               </ToolButton>
@@ -1174,6 +1244,7 @@ export function VisualizeTab({
                   <ArrowsOut className="size-4" />
                 )}
               </ToolButton>
+              <span className={styles.mode}>{panning ? "Pan" : "Orbit"}<span>{rotating ? "Auto rotation" : "Manual"}</span></span>
             </div>
           )}
 
@@ -1183,7 +1254,9 @@ export function VisualizeTab({
             // node popup (file, section, chunk, memory) behaves the same when
             // its text or metadata is long.
             <div
-              className="absolute right-3 top-3 flex max-h-[calc(100%-1.5rem)] w-72 max-w-[calc(100%-1.5rem)] flex-col rounded-xl border bg-background/95 p-4 text-foreground shadow-xl backdrop-blur"
+              className={styles.details}
+              role="region"
+              aria-label="Node details"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
             >
@@ -1234,7 +1307,7 @@ export function VisualizeTab({
                         <dt className="shrink-0 capitalize">
                           {k.replaceAll("_", " ")}
                         </dt>
-                        <dd className="truncate font-mono text-foreground/80">
+                        <dd className="min-w-0 break-words text-right font-mono text-foreground/80">
                           {Array.isArray(v) ? v.join(", ") : String(v)}
                         </dd>
                       </div>
@@ -1271,6 +1344,10 @@ export function VisualizeTab({
               )}
             </div>
           )}
+        </div>
+        <div className={styles.hints}>
+          <span><Hand aria-hidden="true" /> Drag to orbit · Pinch or scroll to zoom</span>
+          <span>Hold <kbd>Space</kbd> to pan · Select a node to inspect</span>
         </div>
       </CardContent>
     </Card>
