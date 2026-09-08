@@ -437,11 +437,7 @@
 }
 
 .usage-feature-card {
-  height: 100%;
-}
-
-.usage-feature-card > [data-slot="card-footer"] {
-  margin-top: auto;
+  min-height: 25.5rem;
 }
 
 .usage-spend-card {
@@ -528,22 +524,7 @@
   scrollbar-gutter: stable;
 }
 
-@media (min-width: 48rem) {
-  .usage-summary-grid .usage-metric-card:nth-child(n) {
-    border-left: 0;
-    border-top: 0;
-  }
-
-  .usage-summary-grid .usage-metric-card:not(:nth-child(3n + 1)) {
-    border-left: 1px solid color-mix(in oklab, var(--border) 74%, var(--chart-1) 26%);
-  }
-
-  .usage-summary-grid .usage-metric-card:nth-child(n + 4) {
-    border-top: 1px solid color-mix(in oklab, var(--border) 74%, var(--chart-1) 26%);
-  }
-}
-
-@media (min-width: 96rem) {
+@media (min-width: 80rem) {
   .usage-summary-grid .usage-metric-card:nth-child(n) {
     border-top: 0;
   }

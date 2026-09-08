@@ -89,8 +89,9 @@ export function RetrievalQuality({ daily }: { daily: UsageDaily[] }) {
       <CardHeader>
         <CardTitle className="text-base">Retrieval quality</CardTitle>
         <CardDescription>
-          Average similarity of retrieved chunks each day. A sustained decline
-          can indicate that your content is less relevant to incoming questions.
+          Mean similarity of the chunks retrieval returned each day. A sustained
+          fall means the index is drifting away from what people ask — the one
+          quality signal here that costs nothing to collect.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -253,8 +254,9 @@ export function ModelUsage({ rows }: { rows: UsageByModel[] }) {
       <CardHeader>
         <CardTitle className="text-base">Tokens by model</CardTitle>
         <CardDescription>
-          Token volume by model. Generation and embedding use separate scales
-          so you can compare models within each group.
+          Two charts on purpose: embedding volume runs orders of magnitude above
+          generation, so a shared axis would flatten every chat model to
+          nothing. Each side is scaled to its own kind.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6 sm:flex-row sm:gap-8">
