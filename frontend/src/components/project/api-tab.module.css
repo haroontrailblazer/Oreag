@@ -8,11 +8,6 @@
   --surface-shadow: #00000060;
   --edge-light: color-mix(in oklch, var(--card) 85%, white);
 }
-.navigation { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border-radius: 14px; border: 1px solid var(--border); background: color-mix(in oklch, var(--muted) 65%, var(--card)); box-shadow: inset 0 2px 3px var(--surface-shadow), 0 1px 0 var(--edge-light); }
-.navigation a { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 12px; border: 1px solid transparent; border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
-.navigation a:hover, .navigation a:focus-visible { color: var(--foreground); background: var(--panel); border-color: var(--border); box-shadow: inset 0 1px 0 var(--edge-light), 0 2px 3px var(--surface-shadow); }
-.navigation a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.navigation svg { width: 15px; height: 15px; }
 .page [data-slot="card"], .dialog {
   min-width: 0;
   border-radius: 19px;
@@ -64,8 +59,6 @@
 }
 @container api (max-width: 640px) {
   .page [data-slot="card-header"], .page [data-slot="card-content"]:not(.flush) { padding-left: 16px; padding-right: 16px; }
-  .navigation { gap: 2px; }
-  .navigation a { flex: 1 0 40%; padding: 7px 9px; }
   .baseUrl { margin-left: 16px; margin-right: 16px; gap: 8px; }
   .endpoint { padding: 14px 16px; gap: 8px; }
   .endpoint > [data-slot="badge"] { width: 44px; font-size: 9px; }

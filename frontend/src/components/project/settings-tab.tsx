@@ -778,23 +778,18 @@ export function SettingsTab({
 
   return (
     <div className={styles.page}>
-      <nav className={styles.navigation} aria-label="Settings sections">
-        <a href="#project-settings-policy"><Scales />Answer policy</a>
-        <a href="#project-settings-general"><GearSix />General</a>
-        <a href="#project-settings-model"><ChatCircle />Answer model</a>
-        <a href="#project-settings-indexing"><Cube />Indexing</a>
-        <a href="#project-settings-danger"><WarningOctagon />Danger zone</a>
-        <span className={styles.status} data-pending={hasUnsavedChanges} role="status">
-          {hasUnsavedChanges ? "Unsaved changes" : "Settings up to date"}
-        </span>
-      </nav>
       {/* At-a-glance summary of the project's live configuration. */}
       <Card>
         <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2">
             <Gauge className="size-4 text-muted-foreground" />
             Overview
           </CardTitle>
+          <span className={styles.status} data-pending={hasUnsavedChanges} role="status">
+            {hasUnsavedChanges ? "Unsaved changes" : "Settings up to date"}
+          </span>
+          </div>
           <CardDescription>
             This project&apos;s current configuration at a glance.
           </CardDescription>

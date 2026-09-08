@@ -476,12 +476,6 @@ print(data["answer"])`
 
   return (
     <div className={styles.page}>
-      <nav className={styles.navigation} aria-label="API sections">
-        <a href="#project-api-keys"><KeyRound />API keys</a>
-        <a href="#project-api-reference"><Code />Reference</a>
-        <a href="#project-api-quickstart"><Terminal />Quickstart</a>
-        <a href="#project-api-mcp"><Plugs />MCP connector</a>
-      </nav>
       <Card id="project-api-keys">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">

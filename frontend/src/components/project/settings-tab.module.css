@@ -17,12 +17,6 @@
 .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .status[data-pending="true"] { color: var(--foreground); }
 
-.navigation { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border-radius: 14px; border: 1px solid var(--border); background: color-mix(in oklch, var(--muted) 65%, var(--card)); box-shadow: inset 0 2px 3px var(--surface-shadow), 0 1px 0 var(--edge-light); }
-.navigation a { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 12px; border: 1px solid transparent; border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); transition: background 140ms, box-shadow 140ms; }
-.navigation a:hover, .navigation a:focus-visible { color: var(--foreground); background: var(--panel); border-color: var(--border); box-shadow: inset 0 1px 0 var(--edge-light), 0 2px 3px var(--surface-shadow); }
-.navigation a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.navigation svg { width: 15px; height: 15px; }
-.navigation .status { margin-left: auto; align-self: center; }
 
 .page [data-slot="card"] {
   min-width: 0;
@@ -102,8 +96,6 @@
 }
 @media (max-width: 640px) {
   .page { gap: 16px; }
-  .navigation { gap: 2px; }
-  .navigation a { flex: 1 0 auto; justify-content: center; padding: 7px 8px; font-size: 11px; }
   .page [data-slot="card"] { padding-block: 18px; gap: 18px; border-radius: 15px; }
   .page [data-slot="card-header"], .page [data-slot="card-content"] { padding-inline: 12px; }
   .panel { padding: 10px; }
@@ -114,5 +106,5 @@
   .metric { padding: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .page [data-slot="button"], .navigation a { transition: none; }
+  .page [data-slot="button"] { transition: none; }
 }
