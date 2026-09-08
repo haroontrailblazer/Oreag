@@ -9,8 +9,11 @@ import {
   PlusIcon as Plus,
   ProhibitIcon as Prohibit,
   TrashIcon as Trash,
+  CodeIcon as Code,
+  TerminalWindowIcon as Terminal,
+  PlugsConnectedIcon as Plugs,
 } from "@phosphor-icons/react/dist/ssr"
-import { useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
@@ -60,6 +63,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getApiBase, api, fetcher } from "@/lib/api"
 import type { ApiKey, ApiKeyCreated, Project } from "@/lib/types"
+import styles from "./api-tab.module.css"
 
 /* ------------------------------------------------------------------ */
 /* Reference / quickstart primitives                                   */
@@ -76,11 +80,18 @@ function CopyButton({
   label?: string
 }) {
   const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
 
   async function copy() {
-    await navigator.clipboard.writeText(value)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      clearTimeout(timer.current)
+      timer.current = setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error("Couldn't copy. Select the text and copy it manually.")
+    }
   }
 
   return (
@@ -89,12 +100,10 @@ function CopyButton({
       variant="ghost"
       size="icon-sm"
       onClick={copy}
-      aria-label={label}
-      className={
-        tone === "dark"
-          ? "size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-          : "size-7 shrink-0 text-muted-foreground hover:text-foreground"
-      }
+      aria-label={copied ? `${label}: copied` : label}
+      title={copied ? "Copied" : label}
+      data-tone={tone}
+      className={styles.copyButton}
     >
       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
     </Button>
@@ -105,15 +114,15 @@ function CopyButton({
  * label + copy action, horizontal scroll for long lines. */
 function CodePanel({ title, code }: { title: string; code: string }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
-      <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/80 py-1.5 pl-4 pr-2">
+    <div className={styles.codePanel}>
+      <div className={styles.codeHeader}>
         <span className="font-mono text-[11px] font-medium tracking-wide text-zinc-400">
           {title}
         </span>
         <CopyButton value={code} tone="dark" label={`Copy ${title}`} />
       </div>
-      <pre className="overflow-x-auto p-4 font-mono text-[12.5px] leading-relaxed text-zinc-100">
-        {code}
+      <pre tabIndex={0} aria-label={`${title} code`}>
+        <code>{code}</code>
       </pre>
     </div>
   )
@@ -122,8 +131,8 @@ function CodePanel({ title, code }: { title: string; code: string }) {
 /** Mono value in a quiet field with a copy action (URLs, keys). */
 function CopyRow({ value, label }: { value: string; label: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border bg-muted/40 py-2 pl-4 pr-2">
-      <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">
+    <div className={styles.copyRow}>
+      <span className="min-w-0 flex-1 break-all font-mono text-[12.5px]">
         {value}
       </span>
       <CopyButton value={value} label={label} />
@@ -149,7 +158,7 @@ function EndpointRow({
   description: string
 }) {
   return (
-    <div className="flex items-center gap-3 border-b px-6 py-3 last:border-b-0">
+    <div className={styles.endpoint}>
       <Badge
         variant="outline"
         className={`w-14 justify-center font-mono text-[10.5px] font-semibold ${METHOD_STYLES[method]}`}
@@ -157,8 +166,8 @@ function EndpointRow({
         {method}
       </Badge>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-mono text-[12.5px] text-foreground">{path}</p>
-        <p className="truncate text-xs text-muted-foreground">{description}</p>
+        <p className="break-all font-mono text-[12.5px] text-foreground">{path}</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
       </div>
       <CopyButton value={url} label={`Copy ${method} ${path} URL`} />
     </div>
@@ -214,7 +223,7 @@ const subscribeNoop = () => () => {}
 const getServerApiBase = () => ""
 
 export function ApiTab({ project }: { project: Project }) {
-  const { data: keys, mutate } = useSWR<ApiKey[]>(
+  const { data: keys, error: keysError, mutate } = useSWR<ApiKey[]>(
     `/api/projects/${project.id}/keys`,
     fetcher
   )
@@ -466,12 +475,18 @@ print(data["answer"])`
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
+    <div className={styles.page}>
+      <nav className={styles.navigation} aria-label="API sections">
+        <a href="#project-api-keys"><KeyRound />API keys</a>
+        <a href="#project-api-reference"><Code />Reference</a>
+        <a href="#project-api-quickstart"><Terminal />Quickstart</a>
+        <a href="#project-api-mcp"><Plugs />MCP connector</a>
+      </nav>
+      <Card id="project-api-keys">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <CardTitle>API keys</CardTitle>
+              <CardTitle><KeyRound aria-hidden="true" />API keys{keys && <span className={styles.count}>{keys.filter(key => !key.revoked_at).length} active</span>}</CardTitle>
               <CardDescription>
                 Keys are shown once at creation - store them securely.
               </CardDescription>
@@ -496,8 +511,8 @@ print(data["answer"])`
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
-          <Table>
+        <CardContent className={styles.flush}>
+          <Table className={styles.keysTable}>
             <TableHeader>
               <TableRow>
                 <TableHead className="pl-6">Key</TableHead>
@@ -509,7 +524,12 @@ print(data["answer"])`
               </TableRow>
             </TableHeader>
             <TableBody>
-              {!keys ? (
+              {keysError ? (
+                <TableRow><TableCell colSpan={6} className="py-8 text-center">
+                  <p role="alert" className="mb-3 text-sm text-muted-foreground">Couldn&apos;t load API keys.</p>
+                  <Button variant="outline" size="sm" onClick={() => void mutate()}>Try again</Button>
+                </TableCell></TableRow>
+              ) : !keys ? (
                 [0, 1, 2].map((i) => (
                   <TableRow key={i}>
                     <TableCell className="pl-6">
@@ -542,11 +562,11 @@ print(data["answer"])`
                 </TableRow>
               ) : (
                 sortedKeys.map((key) => (
-                  <TableRow key={key.id}>
-                    <TableCell className="pl-6 font-mono text-xs">
+                  <TableRow key={key.id} className={styles.keyRow}>
+                    <TableCell data-label="Key" className="pl-6 font-mono text-xs">
                       {key.key_prefix}…
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Access">
                       <label
                         className={
                           key.revoked_at
@@ -559,20 +579,20 @@ print(data["answer"])`
                           checked={key.can_upload}
                           disabled={!!key.revoked_at || togglingId === key.id}
                           onChange={(e) => handleToggleUpload(key, e.target.checked)}
-                          className="size-3.5 accent-foreground"
+                          className={styles.uploadCheckbox}
                         />
                         Uploads
                       </label>
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Created">
                       {new Date(key.created_at).toLocaleDateString()}
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Last used">
                       {key.last_used_at
                         ? new Date(key.last_used_at).toLocaleString()
                         : "Never"}
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Status">
                       {key.revoked_at ? (
                         <Badge variant="secondary">Revoked</Badge>
                       ) : (
@@ -581,7 +601,7 @@ print(data["answer"])`
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="w-20 pr-6 text-right">
+                    <TableCell data-label="Manage" className="w-20 pr-6 text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -620,9 +640,9 @@ print(data["answer"])`
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="project-api-reference">
         <CardHeader>
-          <CardTitle>API reference</CardTitle>
+          <CardTitle><Code aria-hidden="true" />API reference</CardTitle>
           <CardDescription>
             Authenticate every request with{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
@@ -630,12 +650,12 @@ print(data["answer"])`
             </code>
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
-          <div className="flex items-center gap-3 border-b bg-muted/40 px-6 py-2.5">
+        <CardContent className={styles.flush}>
+          <div className={styles.baseUrl}>
             <span className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               Base URL
             </span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">
+            <span className="min-w-0 flex-1 break-all font-mono text-[12.5px]">
               {apiBase || "…"}
             </span>
             <CopyButton value={apiBase} label="Copy base URL" />
@@ -650,7 +670,7 @@ print(data["answer"])`
             />
           ))}
           {/* Exact request budgets - enforced server-side in fixed 60s windows. */}
-          <div className="border-t bg-muted/20 px-6 py-4">
+          <div className={styles.rateLimits}>
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               Rate limits
             </p>
@@ -697,9 +717,9 @@ print(data["answer"])`
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="project-api-quickstart">
         <CardHeader>
-          <CardTitle>Quickstart</CardTitle>
+          <CardTitle><Terminal aria-hidden="true" />Quickstart</CardTitle>
           <CardDescription>
             Query this project from your app - swap in an API key and go. Pass
             the same{" "}
@@ -710,6 +730,7 @@ print(data["answer"])`
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          <div className={styles.examples}>
           <Tabs defaultValue="curl">
             <TabsList>
               <TabsTrigger value="curl">cURL</TabsTrigger>
@@ -739,6 +760,7 @@ print(data["answer"])`
             </div>
             <CodePanel title="application/json" code={responseExample} />
           </div>
+          </div>
 
           <div className="space-y-2">
             <span className="text-sm font-medium">Ingest documents</span>
@@ -752,9 +774,9 @@ print(data["answer"])`
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="project-api-mcp">
         <CardHeader>
-          <CardTitle>MCP connector</CardTitle>
+          <CardTitle><Plugs aria-hidden="true" />MCP connector</CardTitle>
           <CardDescription>
             Give coding agents (Claude Code, Codex) persistent memory and
             document search on this project - authenticate with an API key as
@@ -777,7 +799,7 @@ print(data["answer"])`
       </Card>
 
       <Dialog open={newKey !== null} onOpenChange={() => setNewKey(null)}>
-        <DialogContent>
+        <DialogContent className={styles.dialog}>
           <DialogHeader>
             <DialogTitle>API key created</DialogTitle>
             <DialogDescription>
@@ -807,7 +829,7 @@ print(data["answer"])`
           if (!open) setUploadTarget(null)
         }}
       >
-        <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-h-[90dvh]">
+        <DialogContent className={`${styles.dialog} max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-h-[90dvh]`}>
           <DialogHeader>
             <div className="mb-1 flex size-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
               <ShieldWarning className="size-5" weight="fill" />
@@ -897,7 +919,7 @@ print(data["answer"])`
           if (!open && !revoking) setRevokeTarget(null)
         }}
       >
-        <DialogContent>
+        <DialogContent className={styles.dialog}>
           <DialogHeader>
             <DialogTitle>Revoke this API key?</DialogTitle>
             {!revoking && (
@@ -933,7 +955,7 @@ print(data["answer"])`
           if (!open && !deleting) setDeleteTarget(null)
         }}
       >
-        <DialogContent showCloseButton={false}>
+        <DialogContent className={styles.dialog} showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Delete this API key?</DialogTitle>
             {!deleting && (
