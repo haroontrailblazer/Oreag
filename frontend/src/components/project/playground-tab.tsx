@@ -66,10 +66,12 @@ type StreamEvent =
 function CopyButton({
   text,
   label = false,
+  description = "Copy",
   className,
 }: {
   text: string
   label?: boolean
+  description?: string
   className?: string
 }) {
   const [copied, setCopied] = useState(false)
@@ -89,8 +91,8 @@ function CopyButton({
     <button
       type="button"
       onClick={copy}
-      aria-label={copied ? "Copied" : "Copy"}
-      title={copied ? "Copied" : "Copy"}
+      aria-label={copied ? `${description}: copied` : description}
+      title={copied ? "Copied" : description}
       className={cn(
         styles.copyButton,
         className
@@ -175,7 +177,7 @@ function SourceChips({ sources }: { sources: SourceChunk[] }) {
               {(active.similarity * 100).toFixed(0)}% match
             </span>
           </div>
-          <p className="max-h-48 overflow-y-auto break-words whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+          <p tabIndex={0} aria-label="Source text" className="max-h-48 overflow-y-auto break-words whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
             {active.content}
           </p>
         </div>
@@ -217,6 +219,7 @@ const TurnView = memo(function TurnView({ question, result }: Turn) {
       <div className="group flex items-start justify-end gap-1">
         <CopyButton
           text={question}
+          description="Copy question"
           className="mt-0.5"
         />
         <div className={styles.question}>
@@ -266,6 +269,7 @@ const TurnView = memo(function TurnView({ question, result }: Turn) {
           <div className="flex items-center pt-0.5">
             <CopyButton
               text={result.answer}
+              description="Copy answer"
               label
               className="opacity-70 transition-opacity group-hover:opacity-100"
             />
@@ -290,7 +294,8 @@ export function PlaygroundTab({ project }: { project: Project }) {
   const [model, setModel] = useState(`${project.llm_provider}/${project.llm_model}`)
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null) // the scrollable conversation
-  const bottomRef = useRef<HTMLDivElement>(null) // sentinel at the very bottom
+  const questionInput = useRef<HTMLTextAreaElement>(null)
+  const cacheDetails = useRef<HTMLDetailsElement>(null)
   const streamTopRef = useRef<HTMLDivElement>(null) // top of the newest turn
   // Shown when there's more conversation below the fold - lets the user jump to
   // the latest instead of the view auto-yanking to the end of a long answer.
@@ -299,6 +304,25 @@ export function PlaygroundTab({ project }: { project: Project }) {
   // created on the first ask (client only) to avoid an SSR hydration mismatch.
   const conversationId = useRef<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      const details = cacheDetails.current
+      if (details?.open && !details.contains(event.target as Node)) details.open = false
+    }
+    const escape = (event: KeyboardEvent) => {
+      const details = cacheDetails.current
+      if (event.key === "Escape" && details?.open) {
+        details.open = false
+        details.querySelector("summary")?.focus()
+      }
+    }
+    document.addEventListener("pointerdown", dismiss)
+    document.addEventListener("keydown", escape)
+    return () => {
+      document.removeEventListener("pointerdown", dismiss)
+      document.removeEventListener("keydown", escape)
+    }
+  }, [])
   const { data: models } = useSWR<ModelsResponse>("/api/models", fetcher)
   const availability = models?.availability ?? { [project.llm_provider]: true }
   // Project-wide cache performance (playground + /v1 API), not this session -
@@ -322,9 +346,15 @@ export function PlaygroundTab({ project }: { project: Project }) {
   // view chasing the last token. `streaming.question` only changes per ask.
   useEffect(() => {
     if (!streaming) return
-    const raf = requestAnimationFrame(() =>
-      streamTopRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
-    )
+    const raf = requestAnimationFrame(() => {
+      const container = scrollRef.current
+      const turn = streamTopRef.current
+      if (!container || !turn) return
+      container.scrollTo({
+        top: container.scrollTop + turn.getBoundingClientRect().top - container.getBoundingClientRect().top - 16,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+      })
+    })
     return () => cancelAnimationFrame(raf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streaming?.question])
@@ -337,7 +367,11 @@ export function PlaygroundTab({ project }: { project: Project }) {
   }, [streaming?.text, turns.length])
 
   function scrollToLatest() {
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" })
+    const container = scrollRef.current
+    container?.scrollTo({
+      top: container.scrollHeight,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+    })
   }
   // The selected model's provider may have lost its key since it was chosen -
   // flag it (grey trigger + warning) instead of silently letting a query 503.
@@ -374,6 +408,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
     conversationId.current = null
     setTurns([])
     setStreaming(null)
+    questionInput.current?.focus({ preventScroll: true })
   }
 
   async function handleUpload(list: FileList | null) {
@@ -534,6 +569,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
           <div className="ml-auto flex shrink-0 items-center gap-2">
         {cacheStats && cacheStats.queries > 0 ? (
           <details
+            ref={cacheDetails}
             className={styles.cacheStats}
             title="Project-wide cache performance across the playground and the /v1 API. Cached answers skip retrieval and the LLM."
           >
@@ -647,7 +683,6 @@ export function PlaygroundTab({ project }: { project: Project }) {
                 )}
               </div>
             ) : null}
-            <div ref={bottomRef} />
           </div>
           {showScrollDown && (turns.length > 0 || streaming) ? (
             <button
@@ -698,6 +733,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
 
         <div className={styles.composer}>
           <Textarea
+            ref={questionInput}
             aria-label="Your question"
             rows={1}
             placeholder="Ask about your knowledge base…"
@@ -792,6 +828,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
               onClick={loading ? handleStop : handleAsk}
               disabled={!loading && !question.trim()}
               aria-label={loading ? "Stop" : "Ask"}
+              title={loading ? "Stop generating" : "Send question"}
             >
               {loading ? (
                 <Square className="size-3 fill-current" />
