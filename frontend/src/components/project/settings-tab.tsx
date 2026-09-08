@@ -803,27 +803,15 @@ export function SettingsTab({
 
   return (
     <div className={styles.page}>
-      <header>
-        <div className={styles.heading}>
-          <div className={styles.identity}>
-            <div className={styles.emblem} aria-hidden="true"><GearSix className="size-6" /></div>
-            <div className="min-w-0">
-              <p className={styles.eyebrow} title={project.name}>{project.name}</p>
-              <h2 className={styles.title}>Project settings</h2>
-            </div>
-          </div>
-          <span className={styles.status} data-pending={hasUnsavedChanges} role="status">
-            {hasUnsavedChanges ? "Unsaved changes" : "Settings up to date"}
-          </span>
-        </div>
-        <p className={styles.subtitle}>Tune your answers, choose your models, and shape how your knowledge is indexed.</p>
-      </header>
       <nav className={styles.navigation} aria-label="Settings sections">
         <a href="#project-settings-policy"><Scales />Answer policy</a>
         <a href="#project-settings-general"><GearSix />General</a>
         <a href="#project-settings-model"><ChatCircle />Answer model</a>
         <a href="#project-settings-indexing"><Cube />Indexing</a>
         <a href="#project-settings-danger"><WarningOctagon />Danger zone</a>
+        <span className={styles.status} data-pending={hasUnsavedChanges} role="status">
+          {hasUnsavedChanges ? "Unsaved changes" : "Settings up to date"}
+        </span>
       </nav>
       {/* At-a-glance summary of the project's live configuration. */}
       <Card>
