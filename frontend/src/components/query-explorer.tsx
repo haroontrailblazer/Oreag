@@ -7,7 +7,7 @@ import { ArrowClockwiseIcon, ArrowRightIcon, MagnifyingGlassIcon } from "@phosph
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+import { QueryDetailSkeleton, QueryRowsSkeleton } from "@/components/query-explorer-loading"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import { DEFAULT_QUERY_FILTERS, queryCacheLabel, queryExplorerKey, queryLatency, querySimilarity, type QueryFilters, type QueryPage, type QueryRecord } from "@/lib/query-explorer"
@@ -24,16 +24,10 @@ function Filter({ label, value, onChange, children }: { label: string; value: st
 
 function dateLabel(value: string) { return new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) }
 
-export function QueryExplorerLoading() {
-  return <div role="status" aria-label="Loading queries" className="space-y-3 p-4">
-    {Array.from({ length: 6 }, (_, index) => <Skeleton key={index} className="h-16 w-full rounded-lg" />)}
-  </div>
-}
-
 function QueryDetail({ id }: { id: string }) {
   const { data, error, isLoading, mutate } = useSWR<QueryRecord>(`/api/account/queries/${id}`, fetcher)
   if (error && !isSessionExpired(error)) return <div className="p-6 text-sm" role="alert">Could not load this query. It may have been deleted.<Button variant="outline" className="mt-3 block" onClick={() => void mutate()}>Retry</Button></div>
-  if (isLoading || !data) return <QueryExplorerLoading />
+  if (isLoading || !data) return <QueryDetailSkeleton />
   const metrics = [
     ["Latency", queryLatency(data.latency_ms)], ["Cache", queryCacheLabel(data.cache_layer)],
     ["Retrieval similarity", querySimilarity(data.retrieval_similarity)], ["Cache similarity", querySimilarity(data.cache_similarity)],
@@ -96,7 +90,7 @@ export function QueryExplorer() {
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-3"><h2 className="text-sm font-medium">Recent queries</h2><span className="text-xs text-muted-foreground" role="status">{data ? `${data.items.length} on this page · Newest first` : "Loading records…"}</span></div>
         <div className="min-h-0 overflow-y-auto">
         {error && !isSessionExpired(error) ? <div role="alert" className="space-y-3 p-8 text-sm"><p>Could not load query history. Please try again.</p><Button variant="outline" onClick={() => void mutate()}>Retry</Button></div>
-          : !data ? <QueryExplorerLoading />
+          : !data ? <QueryRowsSkeleton />
           : data.items.length === 0 ? <div className="px-6 py-16 text-center"><MagnifyingGlassIcon className="mx-auto mb-4 size-7 text-muted-foreground" /><h3 className="text-sm font-medium">{filtered ? "No queries match these filters" : "No queries in this time range"}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{filtered ? "Try another search, a wider time range, or reset the filters." : "Questions from the playground and query API will appear here once recorded."}</p></div>
           : <ul className="divide-y">{data.items.map(query => <li key={query.id}><button type="button" onClick={event => { triggerRef.current = event.currentTarget; setSelected(query.id) }} className="group flex w-full min-w-0 flex-col gap-3 px-4 py-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:flex-row sm:items-center sm:gap-6">
             <div className="min-w-0 flex-1"><p className="line-clamp-2 break-words text-sm font-medium leading-6">{query.question}</p><p className="mt-1 truncate text-xs text-muted-foreground">{query.project_name} · {dateLabel(query.created_at)}</p></div>

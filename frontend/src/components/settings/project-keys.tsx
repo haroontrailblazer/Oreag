@@ -60,10 +60,9 @@ export function ProjectKeys() {
         <div className="sm:hidden">
           {loading ? (
             [0, 1].map((i) => (
-              <div key={i} className="space-y-2 border-b px-4 py-3 last:border-b-0">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-3 w-24" />
-                <Skeleton className="h-8 w-full" />
+              <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b px-4 py-3 last:border-b-0">
+                <div className="space-y-2"><Skeleton className="h-4 w-32" /><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-36" /><Skeleton className="h-3 w-28" /></div>
+                <Skeleton className="h-8 w-20" />
               </div>
             ))
           ) : overrides.length === 0 ? (
@@ -138,7 +137,7 @@ export function ProjectKeys() {
                   <TableCell>
                     <Skeleton className="h-4 w-24" />
                   </TableCell>
-                  <TableCell className="pr-6" />
+                  <TableCell className="pr-6"><Skeleton className="h-8 w-20" /></TableCell>
                 </TableRow>
               ))
             ) : overrides.length === 0 ? (

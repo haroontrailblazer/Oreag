@@ -525,23 +525,23 @@ print(data["answer"])`
                 </TableCell></TableRow>
               ) : !keys ? (
                 [0, 1, 2].map((i) => (
-                  <TableRow key={i}>
-                    <TableCell className="pl-6">
+                  <TableRow key={i} className={styles.keyRow}>
+                    <TableCell data-label="Key" className="pl-6">
                       <Skeleton className="h-4 w-24" />
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Access">
                       <Skeleton className="h-5 w-20 rounded-full" />
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Created">
                       <Skeleton className="h-4 w-20" />
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Last used">
                       <Skeleton className="h-4 w-28" />
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="Status">
                       <Skeleton className="h-5 w-16 rounded-full" />
                     </TableCell>
-                    <TableCell className="w-20 pr-6 text-right" />
+                    <TableCell data-label="Manage" className="w-20 pr-6 text-right"><Skeleton className="ml-auto size-8" /></TableCell>
                   </TableRow>
                 ))
               ) : keys.length === 0 ? (

@@ -11,7 +11,7 @@ import { PlaygroundTab } from "@/components/project/playground-tab"
 import { SettingsTab } from "@/components/project/settings-tab"
 import { VisualizeTab } from "@/components/project/visualize-tab"
 import { SquaresLoader } from "@/components/ui/squares-loader"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ProjectLoading } from "@/components/dashboard-loading"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import type { Project } from "@/lib/types"
@@ -127,20 +127,7 @@ export default function ProjectPage({
     )
   }
   if (!project) {
-    return (
-      <div className="space-y-6">
-        {/* header: title + meta line */}
-        <div className="space-y-2">
-          <Skeleton className="h-8 w-56" />
-          <Skeleton className="h-4 w-80 max-w-full" />
-        </div>
-        {/* tabs bar + active tab content */}
-        <div className="space-y-4">
-          <Skeleton className="h-9 w-full max-w-sm rounded-lg" />
-          <Skeleton className="h-72 rounded-xl" />
-        </div>
-      </div>
-    )
+    return <ProjectLoading />
   }
 
   return (

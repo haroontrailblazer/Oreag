@@ -448,9 +448,9 @@ export function MemoryTab({ project }: { project: Project }) {
             Could not load memories: {error.message}
           </p>
         ) : loading ? (
-          <div className="space-y-2">
+          <div role="status" aria-label="Loading memories" className="flex flex-col gap-2 bg-muted/20 p-2 sm:p-3">
             {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-16 rounded-md" />
+              <div key={i} className="flex items-start gap-3 rounded-xl border bg-card px-3 py-4 sm:gap-4 sm:px-4"><Skeleton className="mt-0.5 size-10 shrink-0 rounded-xl" /><div className="min-w-0 flex-1 space-y-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /><div className="mt-3 flex gap-3 border-t pt-2.5"><Skeleton className="h-3 w-16" /><Skeleton className="h-4 w-20 rounded-full" /></div></div><Skeleton className="h-8 w-16 shrink-0 rounded-lg" /></div>
             ))}
           </div>
         ) : all.length === 0 ? (

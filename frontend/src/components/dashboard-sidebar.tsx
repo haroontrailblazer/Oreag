@@ -436,8 +436,7 @@ function SidebarBody() {
         <div className="grid gap-1 overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden max-h-[calc(100dvh-22rem)]">
           {(inProject ? filesLoading : projectsLoading) && (
             <>
-              <Skeleton className="h-9" />
-              <Skeleton className="h-9" />
+              {[0, 1].map(index => <div key={index} className="flex h-9 items-center gap-2 rounded-md px-3"><Skeleton className="size-4 shrink-0" /><Skeleton className="h-3 min-w-0 flex-1" /><Skeleton className="size-1.5 shrink-0 rounded-full" /></div>)}
             </>
           )}
 

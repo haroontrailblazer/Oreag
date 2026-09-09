@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { UsageChartSkeleton } from "@/components/settings/usage-loading"
 
 /** Mount chart/table work shortly before it scrolls into view. Once mounted,
  * keep it alive so scrolling and SWR refreshes preserve local UI state. */
@@ -37,8 +38,8 @@ export function DeferredUsagePanel({ children, label, layout }: {
       onFocus={() => setReady(true)}
     >
       {ready ? children : (
-        <div className="usage-panel-placeholder rounded-xl border border-border bg-card p-6" aria-busy="true" aria-label={`Loading ${label.toLowerCase()}`}>
-          <p className="text-sm font-medium text-muted-foreground">{label}</p>
+        <div className="usage-panel-placeholder" aria-busy="true" aria-label={`Loading ${label.toLowerCase()}`}>
+          {layout === "daily" ? <div className="grid gap-3 sm:gap-4 lg:grid-cols-2"><UsageChartSkeleton label="Daily requests" /><UsageChartSkeleton label="Daily tokens" /></div> : <UsageChartSkeleton label={label} kind={label.endsWith("usage") ? "table" : "chart"} />}
         </div>
       )}
     </div>

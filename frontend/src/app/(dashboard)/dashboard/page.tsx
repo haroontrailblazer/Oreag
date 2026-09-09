@@ -1,6 +1,6 @@
 "use client"
 
-import { FileTextIcon as FileText, PlusIcon as Plus} from "@phosphor-icons/react/dist/ssr"
+import { PlusIcon as Plus } from "@phosphor-icons/react/dist/ssr"
 import Link, { useLinkStatus } from "next/link"
 import { type CSSProperties } from "react"
 import useSWR from "swr"
@@ -13,7 +13,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ProjectCardsSkeleton } from "@/components/dashboard-loading"
+import { DashboardEmptyState } from "@/components/dashboard-empty-state"
 import { Spinner } from "@/components/ui/spinner"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import { useProjectNavPending } from "@/lib/nav-pending"
@@ -133,28 +134,14 @@ export default function DashboardPage() {
       )}
 
       {isLoading && (
-        <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-4 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-36" />
-          ))}
-        </div>
+        <ProjectCardsSkeleton />
       )}
 
       {projects && projects.length === 0 && (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {/* my-auto (not justify-center) so the card centers in the free
               space but can still scroll from the top on short viewports. */}
-          <Card className="my-auto py-16 text-center">
-            <CardContent className="space-y-3">
-              <FileText className="mx-auto size-10 text-muted-foreground" />
-              <p className="text-muted-foreground">
-                No projects yet. Create one to turn your documents into an API.
-              </p>
-              <Button asChild>
-                <Link href="/projects/new">Create your first project</Link>
-              </Button>
-            </CardContent>
-          </Card>
+          <DashboardEmptyState />
         </div>
       )}
 
