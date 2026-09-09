@@ -6,7 +6,7 @@ function utcDate(time: number) {
   return new Date(time).toISOString().slice(0, 10)
 }
 
-function summarizeWeek(daily: UsageDaily[], start: string, end: string) {
+function summarizePeriod(daily: UsageDaily[], start: string, end: string) {
   const rows = daily.filter((row) => row.date >= start && row.date <= end)
   const requests = rows.reduce((sum, row) => sum + row.requests, 0)
   const hits = rows.reduce((sum, row) => sum + row.cache_l1 + row.cache_l2, 0)
@@ -23,14 +23,17 @@ function summarizeWeek(daily: UsageDaily[], start: string, end: string) {
     cacheRate: cacheable > 0 ? hits / cacheable * 100 : null }
 }
 
-export function getWeeklyComparison(data: AccountUsage, now = new Date()) {
-  // The rolling cutoff and today are partial days. A 7-day payload cannot
-  // supply two complete weeks; never refetch or compare unequal periods.
-  if (data.window_days < 15) return null
+export function getUsageComparison(data: AccountUsage, now = new Date()) {
+  // Exclude both partial boundary days of the rolling window. Seven days
+  // contains six complete UTC days: compare three against the previous three.
+  // Longer windows retain the existing seven-day comparison, with no refetch.
+  const periodDays = Math.min(7, Math.floor((data.window_days - 1) / 2))
+  if (periodDays < 1) return null
   const today = Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`)
   return {
-    previous: summarizeWeek(data.daily, utcDate(today - 14 * DAY_MS), utcDate(today - 8 * DAY_MS)),
-    current: summarizeWeek(data.daily, utcDate(today - 7 * DAY_MS), utcDate(today - DAY_MS)),
+    periodDays,
+    previous: summarizePeriod(data.daily, utcDate(today - 2 * periodDays * DAY_MS), utcDate(today - (periodDays + 1) * DAY_MS)),
+    current: summarizePeriod(data.daily, utcDate(today - periodDays * DAY_MS), utcDate(today - DAY_MS)),
   }
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { getLargestSpender, getWeeklyComparison, percentChange, usageDailyCsv } from "../src/lib/usage-insights.ts"
+import { getLargestSpender, getUsageComparison, percentChange, usageDailyCsv } from "../src/lib/usage-insights.ts"
 
 const now = new Date("2026-09-09T18:30:00Z")
 const day = (date, overrides = {}) => ({
@@ -21,7 +21,7 @@ test("compares complete UTC weeks, excludes today and the older boundary", () =>
     day("2026-09-09", { requests: 900 }), day("2026-08-25", { requests: 900 }),
     day("2026-08-26"), day("2026-09-01"), day("2026-09-02"), day("2026-09-08", { requests: 30 }),
   ] })
-  const result = getWeeklyComparison(data, now)
+  const result = getUsageComparison(data, now)
   assert.equal(result.previous.start, "2026-08-26")
   assert.equal(result.previous.end, "2026-09-01")
   assert.equal(result.current.start, "2026-09-02")
@@ -31,15 +31,47 @@ test("compares complete UTC weeks, excludes today and the older boundary", () =>
   assert.equal(percentChange(result.current.requests, result.previous.requests), 100)
 })
 
-test("does not compare a seven-day payload or mutate its rows", () => {
-  const data = report({ window_days: 7, daily: [day("2026-09-08")] })
+test("seven-day view compares three complete days against three, excluding partial boundaries", () => {
+  const data = report({ window_days: 7, daily: [
+    day("2026-09-02", { requests: 900 }), day("2026-09-09", { requests: 900 }),
+    ...[3, 4, 5].map(date => day(`2026-09-0${date}`)),
+    ...[6, 7, 8].map(date => day(`2026-09-0${date}`, { requests: 30 })),
+  ] })
   const before = structuredClone(data)
-  assert.equal(getWeeklyComparison(data, now), null)
+  const result = getUsageComparison(data, now)
+  assert.equal(result.periodDays, 3)
+  assert.equal(result.previous.start, "2026-09-03")
+  assert.equal(result.previous.end, "2026-09-05")
+  assert.equal(result.current.start, "2026-09-06")
+  assert.equal(result.current.end, "2026-09-08")
+  assert.equal(result.previous.requests, 30)
+  assert.equal(result.current.requests, 90)
+  assert.equal(percentChange(result.current.requests, result.previous.requests), 200)
   assert.deepEqual(data, before)
 })
 
+test("seven-day view preserves missing cost and handles empty periods", () => {
+  const result = getUsageComparison(report({ window_days: 7, daily: [
+    day("2026-09-08", { cost_usd: null, embedding_cost_usd: null }),
+  ] }), now)
+  assert.equal(result.current.spend, null)
+  assert.equal(result.previous.requests, 0)
+  assert.equal(result.previous.cacheRate, null)
+  assert.equal(percentChange(result.current.requests, result.previous.requests), null)
+})
+
+test("periods follow UTC across month/year boundaries and long windows retain weekly comparisons", () => {
+  const result = getUsageComparison(report({ window_days: 7 }), new Date("2026-01-02T00:30:00+05:30"))
+  assert.equal(result.previous.start, "2025-12-26")
+  assert.equal(result.previous.end, "2025-12-28")
+  assert.equal(result.current.start, "2025-12-29")
+  assert.equal(result.current.end, "2025-12-31")
+  assert.equal(getUsageComparison(report({ window_days: 90 }), now).periodDays, 7)
+  assert.equal(getUsageComparison(report({ window_days: 1 }), now), null)
+})
+
 test("weights cache rate by cacheable queries, not requests or daily rates", () => {
-  const result = getWeeklyComparison(report({ daily: [
+  const result = getUsageComparison(report({ daily: [
     day("2026-09-02", { requests: 1000, cache_l1: 1, cache_l2: 0, cache_miss: 0 }),
     day("2026-09-03", { cache_l1: 0, cache_l2: 0, cache_miss: 9 }),
   ] }), now)
@@ -48,7 +80,7 @@ test("weights cache rate by cacheable queries, not requests or daily rates", () 
 })
 
 test("preserves unknown costs, while absent event buckets are zero recorded activity", () => {
-  const result = getWeeklyComparison(report({ daily: [
+  const result = getUsageComparison(report({ daily: [
     day("2026-09-02", { cost_usd: null, embedding_cost_usd: null }), day("2026-09-03"),
   ] }), now)
   assert.equal(result.current.spend, null)
@@ -57,7 +89,7 @@ test("preserves unknown costs, while absent event buckets are zero recorded acti
 })
 
 test("recorded spend includes embedding-only activity and tiny real costs", () => {
-  const result = getWeeklyComparison(report({ daily: [
+  const result = getUsageComparison(report({ daily: [
     day("2026-09-02", { cost_usd: null, embedding_cost_usd: 0.00000001 }),
   ] }), now)
   assert.equal(result.current.spend, 0.00000001)
