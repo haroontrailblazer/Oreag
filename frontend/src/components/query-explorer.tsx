@@ -78,8 +78,8 @@ export function QueryExplorer() {
       <div><h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Query explorer</h1><p className="mt-1 text-sm text-muted-foreground">Find questions. Inspect latency, caching, and retrieval quality.</p></div>
       <Button variant="outline" size="sm" disabled={isValidating} onClick={() => { if (cursors.length) setCursors([]); else void mutate() }}><ArrowClockwiseIcon className={isValidating ? "size-4 animate-spin" : "size-4"} />Refresh</Button>
     </header>
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-0.5 pb-3">
-      <section aria-label="Query filters" className="space-y-4 rounded-xl border bg-card p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-0.5 pb-3">
+      <section aria-label="Query filters" className="max-h-[40%] shrink-0 space-y-4 overflow-y-auto rounded-xl border bg-card p-4 [@media(max-height:700px)]:max-h-[30%]">
         <div className="relative"><MagnifyingGlassIcon aria-hidden="true" className="absolute top-2.5 left-3 size-4 text-muted-foreground" /><Input aria-label="Search questions" placeholder="Search questions…" maxLength={200} value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div>
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <Filter label="Project" value={filters.project} onChange={value => changeFilter("project", value)}><option value="">All projects</option>{projects?.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</Filter>
@@ -90,8 +90,11 @@ export function QueryExplorer() {
         {projectsError && !isSessionExpired(projectsError) && <p className="text-xs text-destructive">Project filters could not load. You can still search across all projects.</p>}
         {filtered && <Button size="sm" variant="ghost" onClick={reset}>Reset filters</Button>}
       </section>
-      <section aria-label="Query results" aria-busy={isLoading} className="overflow-hidden rounded-xl border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3"><h2 className="text-sm font-medium">Recent queries</h2><span className="text-xs text-muted-foreground" role="status">{data ? `${data.items.length} on this page · Newest first` : "Loading records…"}</span></div>
+      {/* Natural height for short lists; only the rows shrink and scroll when
+          the card reaches the space left below the filters, like FilesTab. */}
+      <section aria-label="Query results" aria-busy={isLoading} className="flex max-h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-3"><h2 className="text-sm font-medium">Recent queries</h2><span className="text-xs text-muted-foreground" role="status">{data ? `${data.items.length} on this page · Newest first` : "Loading records…"}</span></div>
+        <div className="min-h-0 overflow-y-auto">
         {error && !isSessionExpired(error) ? <div role="alert" className="space-y-3 p-8 text-sm"><p>Could not load query history. Please try again.</p><Button variant="outline" onClick={() => void mutate()}>Retry</Button></div>
           : !data ? <QueryExplorerLoading />
           : data.items.length === 0 ? <div className="px-6 py-16 text-center"><MagnifyingGlassIcon className="mx-auto mb-4 size-7 text-muted-foreground" /><h3 className="text-sm font-medium">{filtered ? "No queries match these filters" : "No queries in this time range"}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{filtered ? "Try another search, a wider time range, or reset the filters." : "Questions from the playground and query API will appear here once recorded."}</p></div>
@@ -99,9 +102,10 @@ export function QueryExplorer() {
             <div className="min-w-0 flex-1"><p className="line-clamp-2 break-words text-sm font-medium leading-6">{query.question}</p><p className="mt-1 truncate text-xs text-muted-foreground">{query.project_name} · {dateLabel(query.created_at)}</p></div>
             <div className="flex shrink-0 flex-wrap items-center gap-3"><Badge variant="outline" className="text-[11px]">{queryCacheLabel(query.cache_layer)}</Badge><span className="w-24 text-right text-xs tabular-nums text-muted-foreground">{queryLatency(query.latency_ms)}</span><ArrowRightIcon aria-hidden="true" className="size-4 text-muted-foreground" /></div>
           </button></li>)}</ul>}
-        <footer className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3"><span className="text-xs text-muted-foreground">Page {cursors.length + 1}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={!cursors.length || isLoading} onClick={() => setCursors(current => current.slice(0, -1))}>Previous</Button><Button size="sm" variant="outline" disabled={!data?.next_cursor || isLoading || !!error || search !== filters.search} onClick={() => { if (data?.next_cursor) setCursors(current => [...current, data.next_cursor!]) }}>Next</Button></div></footer>
+        </div>
+        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-4 py-3"><span className="text-xs text-muted-foreground">Page {cursors.length + 1}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={!cursors.length || isLoading} onClick={() => setCursors(current => current.slice(0, -1))}>Previous</Button><Button size="sm" variant="outline" disabled={!data?.next_cursor || isLoading || !!error || search !== filters.search} onClick={() => { if (data?.next_cursor) setCursors(current => [...current, data.next_cursor!]) }}>Next</Button></div></footer>
       </section>
-      <p className="px-1 text-xs leading-5 text-muted-foreground">Recorded queries only. Failed requests and other API operations are not included. Times are shown in your local timezone.</p>
+      <p className="shrink-0 px-1 text-xs leading-5 text-muted-foreground">Recorded queries only. Failed requests and other API operations are not included. Times are shown in your local timezone.</p>
     </div>
     <Sheet open={selected !== null} onOpenChange={open => { if (!open) setSelected(null) }}><SheetContent side="right" className="w-full max-w-full bg-background sm:w-[540px]" onCloseAutoFocus={event => { event.preventDefault(); triggerRef.current?.focus() }}><SheetHeader className="p-6 pr-12"><SheetTitle className="text-lg">Query details</SheetTitle><SheetDescription>Recorded question and performance measurements.</SheetDescription></SheetHeader>{selected && <QueryDetail key={selected} id={selected} />}</SheetContent></Sheet>
   </div>

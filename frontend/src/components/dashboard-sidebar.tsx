@@ -3,6 +3,7 @@
 import {
   CaretRightIcon as ChevronRight,
   ChartBarIcon as ChartBar,
+  ChatTextIcon as ChatText,
   CircleIcon as Circle,
   FileTextIcon as FileText,
   KanbanIcon as FolderKanban,
@@ -50,7 +51,7 @@ const mainNav = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
   { href: "/settings/usage", label: "Usage", icon: ChartBar },
-  { href: "/query-explorer", label: "Query explorer", icon: Search },
+  { href: "/query-explorer", label: "Query explorer", icon: ChatText },
 ]
 
 const statusTone: Record<Project["status"], string> = {
@@ -58,15 +59,6 @@ const statusTone: Record<Project["status"], string> = {
   indexing: "fill-amber-500 text-amber-500",
   ready: "fill-emerald-500 text-emerald-500",
   error: "fill-red-500 text-red-500",
-}
-
-function NavigationPending({ label }: { label: string }) {
-  const { pending } = useLinkStatus()
-  return pending ? (
-    <span className="ml-auto" role="status" aria-label={`Opening ${label}`}>
-      <Spinner size={14} />
-    </span>
-  ) : null
 }
 
 function SidebarLink({
@@ -90,7 +82,6 @@ function SidebarLink({
     >
       <Icon className="size-4" />
       <span className="truncate">{label}</span>
-      <NavigationPending label={label} />
     </Link>
   )
 }
