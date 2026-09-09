@@ -589,7 +589,6 @@ export function PlaygroundTab({ project }: { project: Project }) {
 
 
             <BestPractices
-              className="order-last ml-auto"
               tips={[
                 {
                   visual: <ConversationViz />,
