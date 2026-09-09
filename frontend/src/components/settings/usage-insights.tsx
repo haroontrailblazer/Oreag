@@ -33,7 +33,7 @@ function Insight({ title, icon, value, children }: {
   title: string; icon: ReactNode; value: ReactNode; children: ReactNode
 }) {
   return (
-    <article className="min-w-0 space-y-3 rounded-xl border border-border/70 bg-background/80 p-4 sm:p-5">
+    <article className="usage-insight-card min-w-0 space-y-3 rounded-xl border border-border/70 bg-background/80 p-4 sm:p-5">
       <h3 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">{icon}{title}</h3>
       <div className="break-words text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">{value}</div>
       <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">{children}</div>

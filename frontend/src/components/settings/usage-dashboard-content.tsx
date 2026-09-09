@@ -1223,7 +1223,7 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
 function DailyTable({ series }: { series: UsageDaily[] }) {
   const rows = [...series].reverse() // most recent first
   return (
-    <Card className="usage-daily-table h-[32rem] gap-0 overflow-hidden py-0 md:h-[24rem]">
+    <Card className="usage-daily-table gap-0 overflow-hidden py-0">
       <CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
         <div className="divide-y md:hidden">
           {rows.map((day) => (
@@ -1335,10 +1335,7 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
 
   return (
     <Card
-      className={cn(
-        "usage-data-card gap-0 overflow-hidden",
-        rows.length > 0 && "h-[34rem] md:h-[27rem]"
-      )}
+      className="usage-data-card gap-0 overflow-hidden"
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">
@@ -1458,10 +1455,7 @@ function ModelsTable({
 
   return (
     <Card
-      className={cn(
-        "usage-data-card gap-0 overflow-hidden",
-        rows.length > 0 && "h-[34rem] md:h-[27rem]"
-      )}
+      className="usage-data-card gap-0 overflow-hidden"
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">
@@ -1628,10 +1622,7 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
 
   return (
     <Card
-      className={cn(
-        "usage-data-card gap-0 overflow-hidden",
-        rows.length > 0 && "h-[38rem] md:h-[27rem]"
-      )}
+      className="usage-data-card gap-0 overflow-hidden"
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">
@@ -1869,7 +1860,7 @@ export function UsageDetails({ data }: { data: AccountUsage }) {
               <p>Traffic, token volume and delivery performance across the selected window.</p>
             </div>
           </div>
-          <DeferredUsagePanel label="Daily activity" minHeight={360}>
+          <DeferredUsagePanel label="Daily activity" layout="daily">
             <DailyTrends daily={data.daily} />
           </DeferredUsagePanel>
         </section>
@@ -1883,21 +1874,21 @@ export function UsageDetails({ data }: { data: AccountUsage }) {
             </div>
           </div>
           {/* Operational half: how the system BEHAVED, next to what it spent. */}
-          <DeferredUsagePanel label="Response time" minHeight={380}>
+          <DeferredUsagePanel label="Response time">
             <LatencyTrend daily={data.daily} />
           </DeferredUsagePanel>
           <div className="grid gap-4 lg:grid-cols-2">
-            <DeferredUsagePanel label="Traffic by endpoint" minHeight={380}>
+            <DeferredUsagePanel label="Traffic by endpoint">
               <EndpointBreakdown rows={data.by_endpoint} />
             </DeferredUsagePanel>
-            <DeferredUsagePanel label="Cache composition" minHeight={380}>
+            <DeferredUsagePanel label="Cache composition">
               <CacheTrend daily={data.daily} />
             </DeferredUsagePanel>
           </div>
-          <DeferredUsagePanel label="Tokens by model" minHeight={340}>
+          <DeferredUsagePanel label="Tokens by model">
             <ModelUsage rows={data.by_model} />
           </DeferredUsagePanel>
-          <DeferredUsagePanel label="Retrieval quality" minHeight={380}>
+          <DeferredUsagePanel label="Retrieval quality">
             <RetrievalQuality daily={data.daily} />
           </DeferredUsagePanel>
         </section>
@@ -1910,19 +1901,19 @@ export function UsageDetails({ data }: { data: AccountUsage }) {
               <p>Trace account consumption across credentials, models and projects.</p>
             </div>
           </div>
-          <DeferredUsagePanel label="Project portfolio" minHeight={440}>
+          <DeferredUsagePanel label="Project portfolio">
             <ProjectPortfolio rows={data.by_project} />
           </DeferredUsagePanel>
-          <DeferredUsagePanel label="API key usage" minHeight={320}>
+          <DeferredUsagePanel label="API key usage">
             <ApiKeysTable rows={data.by_api_key} />
           </DeferredUsagePanel>
-          <DeferredUsagePanel label="Model usage" minHeight={320}>
+          <DeferredUsagePanel label="Model usage">
             <ModelsTable
               rows={data.by_model}
               unmeasuredModels={data.caveats.unmeasured_models}
             />
           </DeferredUsagePanel>
-          <DeferredUsagePanel label="Project usage" minHeight={320}>
+          <DeferredUsagePanel label="Project usage">
             <ProjectsTable rows={data.by_project} />
           </DeferredUsagePanel>
         </section>

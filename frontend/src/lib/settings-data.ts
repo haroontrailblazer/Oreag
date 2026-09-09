@@ -107,9 +107,8 @@ export async function fetchRecoveryCount(): Promise<{ remaining: number }> {
  * point the page renders populated instead of spinning. Five requests, once
  * per session, none of them large.
  *
- * NOT Next.js route prefetching: prefetching a protected route makes the
- * middleware answer with a redirect that then gets served from the router
- * cache. This warms DATA only and never touches routing.
+ * This warms data only. DashboardPrefetch separately prepares routes after
+ * checking the current session, avoiding cached sign-in redirects.
  */
 export function warmSettingsData(): void {
   preload(PROVIDER_KEYS_KEY, fetcher)

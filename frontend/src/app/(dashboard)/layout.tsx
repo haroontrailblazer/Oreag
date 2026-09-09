@@ -1,4 +1,5 @@
 import { DashboardSidebar } from "@/components/dashboard-sidebar"
+import { DashboardPrefetch } from "@/components/dashboard-prefetch"
 import { SessionExpiredOverlay } from "@/components/session-expired-overlay"
 
 export default function DashboardLayout({
@@ -18,6 +19,7 @@ export default function DashboardLayout({
     // the clipped root.
     <div className="relative min-h-dvh bg-background md:grid md:h-dvh md:grid-cols-[16rem_minmax(0,1fr)] md:overflow-hidden">
       <DashboardSidebar />
+      <DashboardPrefetch />
       <SessionExpiredOverlay />
       <main className="min-w-0 bg-muted/20 md:h-dvh md:overflow-y-auto">
         {/* min-h-full + md:h-full give children a *definite* height to resolve

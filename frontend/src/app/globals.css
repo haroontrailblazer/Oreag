@@ -253,12 +253,66 @@
 .usage-dashboard,
 .usage-dashboard-content {
   --usage-panel-shadow: 0 1px 3px rgb(0 0 0 / 0.04);
+  --usage-card-height: 32rem;
+  --usage-metric-height: 14rem;
+  --usage-insight-height: 16rem;
+  --usage-summary-height: calc(var(--usage-metric-height) * 3 + 2px);
 }
 
 .usage-dashboard-content [data-slot="card"] {
+  width: 100%;
+  height: var(--usage-card-height);
+  min-height: 0;
   min-width: 0;
+  flex-shrink: 0;
+  overflow: hidden;
   border-color: var(--border);
   box-shadow: var(--usage-panel-shadow);
+}
+
+.usage-dashboard-content [data-slot="card"] > :is(
+  [data-slot="card-header"],
+  [data-slot="card-footer"]
+) {
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow: auto;
+}
+
+.usage-dashboard-content [data-slot="card"] > [data-slot="card-content"] {
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--muted-foreground) transparent;
+  scrollbar-width: thin;
+}
+
+.usage-insight-card {
+  height: var(--usage-insight-height);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+/* Reserve the same space before deferred panels mount. The daily section
+   contains two cards plus its table-toggle button. */
+.usage-panel-placeholder,
+.usage-loading-card {
+  height: var(--usage-card-height);
+}
+
+[data-usage-layout="daily"] > .usage-panel-placeholder {
+  height: calc(var(--usage-card-height) * 2 + 3.5rem);
+}
+
+.usage-loading-summary {
+  height: var(--usage-summary-height);
+}
+
+@media (min-width: 64rem) {
+  [data-usage-layout="daily"] > .usage-panel-placeholder {
+    height: calc(var(--usage-card-height) + 2.75rem);
+  }
 }
 
 .usage-dashboard-content [data-slot="chart"] {
@@ -275,6 +329,7 @@
 }
 
 .usage-summary-grid .usage-metric-card {
+  height: var(--usage-metric-height);
   min-width: 0;
   border: 0;
   border-radius: 0;
@@ -296,7 +351,16 @@
 }
 
 .usage-feature-card {
-  min-height: 25.5rem;
+  gap: 1rem;
+  padding-block: 1rem;
+}
+
+.usage-feature-card > [data-slot="card-header"] {
+  padding-bottom: 1rem;
+}
+
+.usage-feature-card > [data-slot="card-content"] {
+  gap: 1rem;
 }
 
 .usage-spend-card,
@@ -378,6 +442,11 @@
 }
 
 @media (min-width: 80rem) {
+  .usage-dashboard,
+  .usage-dashboard-content {
+    --usage-summary-height: calc(var(--usage-metric-height) + 2px);
+  }
+
   .usage-summary-grid .usage-metric-card:nth-child(n) {
     border-top: 0;
   }
@@ -390,10 +459,6 @@
 @media (max-width: 39.999rem) {
   .usage-dashboard-header {
     align-items: flex-start;
-  }
-
-  .usage-feature-card {
-    min-height: auto;
   }
 
   .usage-section-heading p {

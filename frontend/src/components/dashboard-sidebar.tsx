@@ -59,16 +59,10 @@ const statusTone: Record<Project["status"], string> = {
   error: "fill-red-500 text-red-500",
 }
 
-function warmUsageCharts() {
-  // Warm static code on navigation intent; data continues to use the existing
-  // shared SWR cache. A failed preload must not prevent normal navigation.
-  void import("@/components/settings/usage-dashboard-content").catch(() => {})
-}
-
-function UsageNavigationPending() {
+function NavigationPending({ label }: { label: string }) {
   const { pending } = useLinkStatus()
   return pending ? (
-    <span className="ml-auto" role="status" aria-label="Opening Usage">
+    <span className="ml-auto" role="status" aria-label={`Opening ${label}`}>
       <Spinner size={14} />
     </span>
   ) : null
@@ -88,8 +82,6 @@ function SidebarLink({
   return (
     <Link
       href={href}
-      onPointerEnter={href === "/settings/usage" ? warmUsageCharts : undefined}
-      onFocus={href === "/settings/usage" ? warmUsageCharts : undefined}
       className={cn(
         "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -97,7 +89,7 @@ function SidebarLink({
     >
       <Icon className="size-4" />
       <span className="truncate">{label}</span>
-      {href === "/settings/usage" && <UsageNavigationPending />}
+      <NavigationPending label={label} />
     </Link>
   )
 }

@@ -3,10 +3,9 @@
 import dynamic from "next/dynamic"
 import { useState } from "react"
 import useSWR from "swr"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { UsageInsights } from "@/components/settings/usage-insights"
-import { UsageDetailsSkeleton } from "@/components/settings/usage-loading"
+import { UsageDetailsSkeleton, UsageInsightsSkeleton } from "@/components/settings/usage-loading"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import {
   DEFAULT_USAGE_WINDOW,
@@ -83,17 +82,8 @@ export function UsageDashboard() {
 
       {isLoading && !data && (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 sm:gap-6">
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-            {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-24" />
-            ))}
-          </div>
-          <Skeleton className="h-40" />
-          <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-            <Skeleton className="h-72" />
-            <Skeleton className="h-72" />
-          </div>
-          <Skeleton className="h-64" />
+          <UsageInsightsSkeleton />
+          <UsageDetailsSkeleton />
         </div>
       )}
 
