@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm"
 import { CopyBlock } from "@/components/copy-block"
 
 import { CodeTabs, parseOscmd } from "./code-tabs"
+import imageSizes from "./image-sizes.json"
 
 /** Flatten heading children to plain text (for slugified anchor ids). */
 function nodeText(node: ReactNode): string {
@@ -63,7 +64,7 @@ export function Markdown({
             const isBlock = Boolean(lang) || text.includes("\n")
             if (!isBlock) {
               return (
-                <code className="rounded bg-muted px-1 py-0.5 text-[0.85em] font-normal">
+                <code className="rounded bg-muted px-1 py-0.5 text-[0.85em] font-normal [overflow-wrap:anywhere]">
                   {children}
                 </code>
               )
@@ -74,6 +75,9 @@ export function Markdown({
           },
           img: ({ src, alt }) => {
             const label = alt ?? ""
+            const size = typeof src === "string"
+              ? imageSizes[src as keyof typeof imageSizes]
+              : undefined
             if (src === "placeholder" || label.startsWith("SCREENSHOT:")) {
               const caption = label.replace(/^SCREENSHOT:\s*/, "")
               return (
@@ -86,8 +90,26 @@ export function Markdown({
                 </span>
               )
             }
-            // eslint-disable-next-line @next/next/no-img-element
-            return <img src={src} alt={label} className="rounded-lg border" />
+            return (
+              <a
+                href={typeof src === "string" ? src : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="not-prose block rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4"
+                aria-label={`Open full-size screenshot: ${label}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={label}
+                  width={size?.width}
+                  height={size?.height}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-auto max-w-full rounded-lg border"
+                />
+              </a>
+            )
           },
         }}
       >
