@@ -439,7 +439,7 @@ export function FilesTab({
     // bundling animation later grew the header and pushed the bottom of the
     // list off-screen. That number had to account for the card's OWN header;
     // this one does not, which is why it cannot rot the same way.
-    <Card className="flex max-h-full min-h-0 flex-col gap-0 overflow-hidden p-0">
+    <Card role="region" aria-label="Files listing" className="flex max-h-full min-h-0 flex-col gap-0 overflow-hidden p-0">
       <div className="flex shrink-0 items-start justify-between gap-3 border-b px-5 py-4">
         <div className="min-w-0 flex-1 space-y-0.5">
           <h3 className="text-sm font-semibold">Files</h3>
@@ -517,7 +517,7 @@ export function FilesTab({
       </div>
 
       {inFlight > 0 && (
-        <div className="flex items-center gap-4 border-b bg-muted/30 px-6 py-2.5">
+        <div className="flex shrink-0 items-center gap-4 border-b bg-muted/30 px-6 py-2.5">
           {/* size-9 slot mirrors the rows' icon box, so the artwork's left
               edge AND the text column line up with the file rows below. */}
           <span className="flex size-9 shrink-0 items-center">
@@ -536,7 +536,7 @@ export function FilesTab({
       )}
 
       {fileCount === 0 ? (
-        <div className="px-6 py-16 text-center">
+        <div className="min-h-0 overflow-y-auto px-6 py-16 text-center">
           <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
             <FileText className="size-5" />
           </div>

@@ -169,7 +169,7 @@ export default function ProjectPage({
             </TabsTrigger>
           ))}
         </TabsList>
-        <TabsContent value="files" className="mt-4 min-h-0 flex-1 overflow-y-auto" forceMount={mountAll}>
+        <TabsContent value="files" className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden" forceMount={mountAll}>
           <FilesTab
             project={project}
             onChanged={handleChanged}

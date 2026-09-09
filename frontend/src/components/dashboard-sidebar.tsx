@@ -52,8 +52,8 @@ const mainNav = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
   { href: "/settings/usage", label: "Usage", icon: ChartBar },
-  { href: "/query-explorer", label: "Query explorer", icon: ChatText },
-  { href: "/knowledge-health", label: "Knowledge health", icon: Heartbeat },
+  { href: "/query-explorer", label: "Queries", icon: ChatText },
+  { href: "/knowledge-health", label: "Health", icon: Heartbeat },
 ]
 
 const statusTone: Record<Project["status"], string> = {

@@ -21,12 +21,12 @@ export function QueryDetailSkeleton() {
 }
 
 export function QueryExplorerLoading() {
-  return <div role="status" aria-label="Loading query explorer" className="flex h-[calc(100dvh-6.25rem)] min-h-0 min-w-0 flex-col gap-4 md:h-full">
-    <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4"><div><h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Query explorer</h1><p className="mt-1 text-sm text-muted-foreground">Find questions. Inspect latency, caching, and retrieval quality.</p></div><Skeleton className="h-8 w-24" /></header>
+  return <div role="status" aria-label="Loading queries" className="flex h-[calc(100dvh-6.25rem)] min-h-0 min-w-0 flex-col gap-4 md:h-full">
+    <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4"><div><h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Queries</h1><p className="mt-1 text-sm text-muted-foreground">Find questions. Inspect latency, caching, and retrieval quality.</p></div><Skeleton className="h-8 w-24" /></header>
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-0.5 pb-3">
-      <div className="max-h-[40%] shrink-0 space-y-4 overflow-y-auto rounded-xl border bg-card p-4 [@media(max-height:700px)]:max-h-[30%]">
-        <Skeleton className="h-9 w-full" />
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{[0, 1, 2, 3].map(index => <div key={index} className="space-y-1.5"><Skeleton className="h-4 w-20" /><Skeleton className="h-9 w-full" /></div>)}</div>
+      <div className="shrink-0 rounded-xl border bg-card p-4 md:max-h-[40%] md:space-y-4 md:overflow-y-auto md:[@media(max-height:700px)]:max-h-[30%]">
+        <div className="flex items-center gap-3"><Skeleton className="h-9 min-w-0 flex-1" /><Skeleton className="size-9 shrink-0 md:hidden" /></div>
+        <div className="hidden grid-cols-2 gap-3 md:grid xl:grid-cols-4">{[0, 1, 2, 3].map(index => <div key={index} className="space-y-1.5"><Skeleton className="h-4 w-20" /><Skeleton className="h-9 w-full" /></div>)}</div>
       </div>
       <div className="flex max-h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-3"><h2 className="text-sm font-medium">Recent queries</h2><Skeleton className="h-3 w-36" /></div>

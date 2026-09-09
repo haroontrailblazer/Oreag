@@ -7,20 +7,13 @@ import { ArrowClockwiseIcon, ArrowRightIcon, MagnifyingGlassIcon } from "@phosph
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { MobileFilters } from "@/components/mobile-filters"
+import { FilterSelect } from "@/components/filter-select"
 import { QueryDetailSkeleton, QueryRowsSkeleton } from "@/components/query-explorer-loading"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import { DEFAULT_QUERY_FILTERS, queryCacheLabel, queryExplorerKey, queryLatency, querySimilarity, type QueryFilters, type QueryPage, type QueryRecord } from "@/lib/query-explorer"
 import type { Project } from "@/lib/types"
-
-function Filter({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode }) {
-  return <label className="flex min-w-0 flex-col gap-1.5 text-xs text-muted-foreground">
-    {label}
-    <select value={value} onChange={event => onChange(event.target.value)} className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      {children}
-    </select>
-  </label>
-}
 
 function dateLabel(value: string) { return new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) }
 
@@ -66,23 +59,33 @@ export function QueryExplorer() {
   }
   function reset() { setSearch(""); setFilters(DEFAULT_QUERY_FILTERS); setCursors([]) }
   const filtered = Object.keys(DEFAULT_QUERY_FILTERS).some(key => filters[key as keyof QueryFilters] !== DEFAULT_QUERY_FILTERS[key as keyof QueryFilters]) || search !== ""
+  const activeFilterCount = (["days", "project", "cache", "latency"] as const)
+    .filter(key => filters[key] !== DEFAULT_QUERY_FILTERS[key]).length
+  const filterControls = <div className="space-y-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <FilterSelect label="Project" value={filters.project} onChange={value => changeFilter("project", value)} options={[{ value: "", label: "All projects" }, ...(projects ?? []).map(project => ({ value: project.id, label: project.name }))]} />
+      <FilterSelect label="Time range" value={filters.days} onChange={value => changeFilter("days", value)} options={[7, 30, 90].map(days => ({ value: String(days), label: `Last ${days} days` }))} />
+      <FilterSelect label="Cache result" value={filters.cache} onChange={value => changeFilter("cache", value)} options={[{ value: "all", label: "All results" }, { value: "fresh", label: "Fresh" }, { value: "l1", label: "Exact cache" }, { value: "l2", label: "Semantic cache" }]} />
+      <FilterSelect label="Response time" value={filters.latency} onChange={value => changeFilter("latency", value)} options={[{ value: "", label: "Any latency" }, { value: "1000", label: "At least 1 second" }, { value: "3000", label: "At least 3 seconds" }, { value: "10000", label: "At least 10 seconds" }]} />
+    </div>
+    {projectsError && !isSessionExpired(projectsError) && <p className="text-xs text-destructive">Project filters could not load. You can still search across all projects.</p>}
+  </div>
 
   return <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 min-w-0 flex-col gap-4 md:h-full">
     <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4">
-      <div><h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Query explorer</h1><p className="mt-1 text-sm text-muted-foreground">Find questions. Inspect latency, caching, and retrieval quality.</p></div>
+      <div><h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Queries</h1><p className="mt-1 text-sm text-muted-foreground">Find questions. Inspect latency, caching, and retrieval quality.</p></div>
       <Button variant="outline" size="sm" disabled={isValidating} onClick={() => { if (cursors.length) setCursors([]); else void mutate() }}><ArrowClockwiseIcon className={isValidating ? "size-4 animate-spin" : "size-4"} />Refresh</Button>
     </header>
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-0.5 pb-3">
-      <section aria-label="Query filters" className="max-h-[40%] shrink-0 space-y-4 overflow-y-auto rounded-xl border bg-card p-4 [@media(max-height:700px)]:max-h-[30%]">
-        <div className="relative"><MagnifyingGlassIcon aria-hidden="true" className="absolute top-2.5 left-3 size-4 text-muted-foreground" /><Input aria-label="Search questions" placeholder="Search questions…" maxLength={200} value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div>
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <Filter label="Project" value={filters.project} onChange={value => changeFilter("project", value)}><option value="">All projects</option>{projects?.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</Filter>
-          <Filter label="Time range" value={filters.days} onChange={value => changeFilter("days", value)}>{[7, 30, 90].map(days => <option key={days} value={days}>Last {days} days</option>)}</Filter>
-          <Filter label="Cache result" value={filters.cache} onChange={value => changeFilter("cache", value)}><option value="all">All results</option><option value="fresh">Fresh</option><option value="l1">Exact cache</option><option value="l2">Semantic cache</option></Filter>
-          <Filter label="Response time" value={filters.latency} onChange={value => changeFilter("latency", value)}><option value="">Any latency</option><option value="1000">At least 1 second</option><option value="3000">At least 3 seconds</option><option value="10000">At least 10 seconds</option></Filter>
+      <section aria-label="Query filters" className="shrink-0 rounded-xl border bg-card p-4 md:max-h-[40%] md:space-y-4 md:overflow-y-auto md:[@media(max-height:700px)]:max-h-[30%]">
+        <div className="flex items-center gap-3">
+          <div className="relative min-w-0 flex-1"><MagnifyingGlassIcon aria-hidden="true" className="absolute top-2.5 left-3 size-4 text-muted-foreground" /><Input aria-label="Search questions" placeholder="Search questions…" maxLength={200} value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div>
+          <MobileFilters title="Query filters" activeCount={activeFilterCount} onReset={reset}>{filterControls}</MobileFilters>
         </div>
-        {projectsError && !isSessionExpired(projectsError) && <p className="text-xs text-destructive">Project filters could not load. You can still search across all projects.</p>}
-        {filtered && <Button size="sm" variant="ghost" onClick={reset}>Reset filters</Button>}
+        <div className="hidden space-y-4 md:block">
+          {filterControls}
+          {filtered && <Button size="sm" variant="ghost" onClick={reset}>Reset filters</Button>}
+        </div>
       </section>
       {/* Natural height for short lists; only the rows shrink and scroll when
           the card reaches the space left below the filters, like FilesTab. */}

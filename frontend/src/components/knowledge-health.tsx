@@ -7,6 +7,8 @@ import { ArrowClockwiseIcon, ArrowRightIcon, HeartbeatIcon, MagnifyingGlassIcon 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { MobileFilters } from "@/components/mobile-filters"
+import { FilterSelect } from "@/components/filter-select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fetcher, isSessionExpired } from "@/lib/api"
@@ -25,7 +27,7 @@ function StateBadge({ project }: { project: ProjectHealth }) {
 }
 
 export function KnowledgeHealthLoading() {
-  return <div role="status" aria-label="Loading knowledge health" className="space-y-4">
+  return <div role="status" aria-label="Loading health" className="space-y-4">
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28 animate-none rounded-xl" />)}
     </div>
@@ -86,11 +88,12 @@ export function KnowledgeHealthDashboard() {
     { label: "Queued / indexing", value: projects.reduce((total, project) => total + project.indexing_files, 0), detail: "Files still being processed" },
     { label: "Identical extra uploads", value: projects.reduce((total, project) => total + project.duplicate_copies, 0), detail: "Copies to review within projects" },
   ]
+  const statusOptions = [{ value: "all", label: "All statuses" }, ...Object.entries(HEALTH_LABELS).map(([value, label]) => ({ value, label }))]
 
   return <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 min-w-0 flex-col gap-4 md:h-full">
     <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4">
       <div>
-        <h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Knowledge health</h1>
+        <h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Health</h1>
         <p className="mt-1 text-sm text-muted-foreground">Check indexing readiness and find documents that need attention.</p>
       </div>
       <Button size="sm" variant="outline" disabled={isValidating} onClick={() => void mutate()}>
@@ -99,7 +102,7 @@ export function KnowledgeHealthDashboard() {
     </header>
     <div className="min-h-0 flex-1 overflow-y-auto pb-3 pr-0.5">
       {error && !isSessionExpired(error) && <div role="alert" className="mb-4 space-y-2 rounded-xl border p-4 text-sm">
-        <p>Could not refresh knowledge health.{data ? " Showing the last available snapshot." : " Please try again."}</p>
+        <p>Could not refresh health data.{data ? " Showing the last available snapshot." : " Please try again."}</p>
         <Button variant="outline" size="sm" onClick={() => void mutate()}>Retry</Button>
       </div>}
       {!data && (!error || isSessionExpired(error)) && <KnowledgeHealthLoading />}
@@ -111,15 +114,15 @@ export function KnowledgeHealthDashboard() {
             <p className="mt-auto text-xs leading-5 text-muted-foreground">{metric.detail}</p>
           </div>)}
         </div>
-        <div className="flex flex-wrap gap-3">
-          <div className="relative min-w-0 flex-1 basis-48">
+        <div className="flex items-center gap-3 md:flex-wrap">
+          <div className="relative min-w-0 flex-1 md:basis-48">
             <MagnifyingGlassIcon aria-hidden="true" className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
             <Input aria-label="Search projects" placeholder="Search projects…" value={search} onChange={event => setSearch(event.target.value)} className="pl-9" />
           </div>
-          <select aria-label="Health status" value={state} onChange={event => setState(event.target.value)} className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <option value="all">All statuses</option>
-            {Object.entries(HEALTH_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-          </select>
+          <MobileFilters title="Health filters" activeCount={state === "all" ? 0 : 1} onReset={() => setState("all")}>
+            <FilterSelect label="Health status" value={state} onChange={setState} options={statusOptions} />
+          </MobileFilters>
+          <div className="hidden md:block md:w-48"><FilterSelect label="Health status" value={state} onChange={setState} options={statusOptions} hideLabel /></div>
         </div>
         <section aria-label="Project health" className="overflow-hidden rounded-xl border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
