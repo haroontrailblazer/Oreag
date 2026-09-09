@@ -8,6 +8,7 @@ import { fetcher } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 import { createNavigationPrefetchQueue, dashboardPrefetchTarget, DASHBOARD_ROUTES } from "@/lib/navigation-prefetch"
 import type { Project } from "@/lib/types"
+import { queryExplorerKey } from "@/lib/query-explorer"
 
 function scheduleIdle(callback: () => void) {
   // Space out work and allow the page the user opened to paint first.
@@ -67,6 +68,8 @@ export function DashboardPrefetch() {
           await import("@/components/settings/usage-dashboard-content")
         } else if (path === "/projects/new") {
           await warmData("/api/models")
+        } else if (path === "/query-explorer") {
+          await warmData(queryExplorerKey())
         } else if (path.startsWith("/projects/")) {
           await warmData(`/api${path}`)
           if (!stopped) await warmData(`/api${path}/files`)

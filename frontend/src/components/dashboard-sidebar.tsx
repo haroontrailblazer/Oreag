@@ -50,6 +50,7 @@ const mainNav = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
   { href: "/settings/usage", label: "Usage", icon: ChartBar },
+  { href: "/query-explorer", label: "Query explorer", icon: Search },
 ]
 
 const statusTone: Record<Project["status"], string> = {
