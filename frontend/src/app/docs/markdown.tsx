@@ -10,6 +10,8 @@ import { CopyBlock } from "@/components/copy-block"
 import { CodeTabs, parseOscmd } from "./code-tabs"
 import imageSizes from "./image-sizes.json"
 
+const screenshotSizes: Record<string, { width: number; height: number; pixelRatio?: number }> = imageSizes
+
 /** Flatten heading children to plain text (for slugified anchor ids). */
 function nodeText(node: ReactNode): string {
   if (node == null || node === false || node === true) return ""
@@ -76,7 +78,7 @@ export function Markdown({
           img: ({ src, alt }) => {
             const label = alt ?? ""
             const size = typeof src === "string"
-              ? imageSizes[src as keyof typeof imageSizes]
+              ? screenshotSizes[src]
               : undefined
             if (src === "placeholder" || label.startsWith("SCREENSHOT:")) {
               const caption = label.replace(/^SCREENSHOT:\s*/, "")
@@ -91,24 +93,18 @@ export function Markdown({
               )
             }
             return (
-              <a
-                href={typeof src === "string" ? src : undefined}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="not-prose block rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4"
-                aria-label={`Open full-size screenshot: ${label}`}
-              >
+              <span className="not-prose block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={src}
                   alt={label}
-                  width={size?.width}
-                  height={size?.height}
+                  width={size ? size.width / (size.pixelRatio ?? 1) : undefined}
+                  height={size ? size.height / (size.pixelRatio ?? 1) : undefined}
                   loading="lazy"
                   decoding="async"
                   className="h-auto max-w-full rounded-lg border"
                 />
-              </a>
+              </span>
             )
           },
         }}

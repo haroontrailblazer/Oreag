@@ -4,8 +4,9 @@
     "height": 899
   },
   "/docs/account-security.png": {
-    "width": 538,
-    "height": 356
+    "width": 1344,
+    "height": 894,
+    "pixelRatio": 2
   },
   "/docs/add-files-dialog.png": {
     "width": 644,
@@ -16,8 +17,9 @@
     "height": 742
   },
   "/docs/agent-memory-tab.png": {
-    "width": 1120,
-    "height": 644
+    "width": 1344,
+    "height": 1136,
+    "pixelRatio": 2
   },
   "/docs/answer-model-account-key.png": {
     "width": 672,
@@ -40,24 +42,29 @@
     "height": 505
   },
   "/docs/change-password.png": {
-    "width": 538,
-    "height": 181
+    "width": 1344,
+    "height": 452,
+    "pixelRatio": 2
   },
   "/docs/confirm-file-version.png": {
-    "width": 1280,
-    "height": 720
+    "width": 1344,
+    "height": 1264,
+    "pixelRatio": 2
   },
   "/docs/create-project-configuration.png": {
-    "width": 538,
-    "height": 522
+    "width": 1344,
+    "height": 1304,
+    "pixelRatio": 2
   },
   "/docs/create-project-documents.png": {
-    "width": 538,
-    "height": 409
+    "width": 1344,
+    "height": 1024,
+    "pixelRatio": 2
   },
   "/docs/dashboard-projects.png": {
-    "width": 1136,
-    "height": 264
+    "width": 2200,
+    "height": 578,
+    "pixelRatio": 2
   },
   "/docs/embedding-key-reindex.png": {
     "width": 711,
@@ -68,8 +75,9 @@
     "height": 185
   },
   "/docs/file-version-history.png": {
-    "width": 1280,
-    "height": 720
+    "width": 1344,
+    "height": 1040,
+    "pixelRatio": 2
   },
   "/docs/files-tab-header.png": {
     "width": 1360,
@@ -80,32 +88,37 @@
     "height": 802
   },
   "/docs/mcp-connector.png": {
-    "width": 871,
-    "height": 320
+    "width": 1344,
+    "height": 846,
+    "pixelRatio": 2
   },
   "/docs/playground.png": {
     "width": 1367,
     "height": 862
   },
   "/docs/project-answer-policy.png": {
-    "width": 871,
-    "height": 578
+    "width": 1344,
+    "height": 2058,
+    "pixelRatio": 2
   },
   "/docs/project-api-keys-card.png": {
     "width": 1360,
     "height": 270
   },
   "/docs/project-api-reference.png": {
-    "width": 871,
-    "height": 712
+    "width": 1344,
+    "height": 1852,
+    "pixelRatio": 2
   },
   "/docs/project-files-overview.png": {
-    "width": 1120,
-    "height": 512
+    "width": 2200,
+    "height": 1072,
+    "pixelRatio": 2
   },
   "/docs/project-indexing-settings.png": {
-    "width": 428,
-    "height": 344
+    "width": 1344,
+    "height": 862,
+    "pixelRatio": 2
   },
   "/docs/project-key-override-chip.png": {
     "width": 697,
@@ -140,12 +153,14 @@
     "height": 1078
   },
   "/docs/sign-in.png": {
-    "width": 1280,
-    "height": 720
+    "width": 896,
+    "height": 996,
+    "pixelRatio": 2
   },
   "/docs/sign-up.png": {
-    "width": 1280,
-    "height": 720
+    "width": 896,
+    "height": 1236,
+    "pixelRatio": 2
   },
   "/docs/three-key-entry-points.png": {
     "width": 980,
@@ -156,59 +171,73 @@
     "height": 1000
   },
   "/docs/usage-api-key-table.png": {
-    "width": 1101,
-    "height": 346
+    "width": 2072,
+    "height": 866,
+    "pixelRatio": 2
   },
   "/docs/usage-cache-composition.png": {
-    "width": 544,
-    "height": 289
+    "width": 1504,
+    "height": 724,
+    "pixelRatio": 2
   },
   "/docs/usage-cache-savings.png": {
-    "width": 544,
-    "height": 423
+    "width": 1504,
+    "height": 976,
+    "pixelRatio": 2
   },
   "/docs/usage-daily-requests.png": {
-    "width": 544,
-    "height": 278
+    "width": 1504,
+    "height": 696,
+    "pixelRatio": 2
   },
   "/docs/usage-daily-table.png": {
-    "width": 1101,
-    "height": 308
+    "width": 2072,
+    "height": 770,
+    "pixelRatio": 2
   },
   "/docs/usage-daily-tokens.png": {
-    "width": 544,
-    "height": 278
+    "width": 1504,
+    "height": 696,
+    "pixelRatio": 2
   },
   "/docs/usage-endpoints.png": {
-    "width": 544,
-    "height": 289
+    "width": 1504,
+    "height": 556,
+    "pixelRatio": 2
   },
   "/docs/usage-model-table.png": {
-    "width": 1101,
-    "height": 346
+    "width": 2072,
+    "height": 866,
+    "pixelRatio": 2
   },
   "/docs/usage-model-tokens.png": {
-    "width": 1101,
-    "height": 199
+    "width": 1504,
+    "height": 542,
+    "pixelRatio": 2
   },
   "/docs/usage-project-portfolio.png": {
-    "width": 1101,
-    "height": 429
+    "width": 1504,
+    "height": 1732,
+    "pixelRatio": 2
   },
   "/docs/usage-project-table.png": {
-    "width": 1101,
-    "height": 346
+    "width": 2072,
+    "height": 866,
+    "pixelRatio": 2
   },
   "/docs/usage-response-time.png": {
-    "width": 1101,
-    "height": 298
+    "width": 1504,
+    "height": 790,
+    "pixelRatio": 2
   },
   "/docs/usage-retrieval-quality.png": {
-    "width": 1101,
-    "height": 298
+    "width": 1504,
+    "height": 790,
+    "pixelRatio": 2
   },
   "/docs/usage-spend-split.png": {
-    "width": 544,
-    "height": 423
+    "width": 1504,
+    "height": 1058,
+    "pixelRatio": 2
   }
 }
