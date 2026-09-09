@@ -1,31 +1,25 @@
-import Image from "next/image"
-
 import { cn } from "@/lib/utils"
 
 /**
- * The Oreag logo rendered as a 3D app-icon badge. Centralised so the brand mark
- * gets the same depth/gloss treatment everywhere it appears (landing, auth,
- * sidebar, mobile bar). Pass size + rounding (and any hover) through
- * `className`; `imgClassName` tweaks the logo itself (e.g. `scale-150`). The
- * 3D surface comes from the `.brand-mark` class in globals.css.
+ * The approved context-loop mark. Its transparent mask inherits currentColor,
+ * keeping the same silhouette in light and dark themes without a badge surface.
  */
 export function BrandMark({
   className,
-  imgClassName,
 }: {
   className?: string
-  imgClassName?: string
 }) {
   return (
-    <span className={cn("brand-mark", className)}>
-      <Image
-        src="/logo.png"
-        alt=""
-        width={200}
-        height={200}
-        priority
-        className={cn("size-full object-contain dark:invert", imgClassName)}
-      />
-    </span>
+    <span aria-hidden="true" className={cn("brand-mark size-9 shrink-0 text-foreground", className)} />
+  )
+}
+
+/** Shared centered lockup for every authentication and password card. */
+export function AuthBrand() {
+  return (
+    <div className="flex flex-col items-center gap-2 pb-2 text-foreground" data-slot="auth-brand">
+      <BrandMark className="size-12 sm:size-14" />
+      <span className="text-2xl font-bold leading-none tracking-[-0.045em]">Oreag</span>
+    </div>
   )
 }

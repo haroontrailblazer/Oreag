@@ -24,12 +24,12 @@ import { join } from "node:path"
  * Falls back to the bare path if the read fails - a preview with a stale
  * version is far better than a build that dies over a cache-busting nicety.
  */
-export const OG_IMAGE_FILE = "oreag-og-whatsapp-v3.jpg"
+export const OG_IMAGE_FILE = "oreag-og-context-loop.jpg"
 export const OG_IMAGE_WIDTH = 1200
 export const OG_IMAGE_HEIGHT = 630
 export const OG_IMAGE_TYPE = "image/jpeg"
 export const OG_IMAGE_ALT =
-  "Oreag above a painterly night scene of a person working through documents"
+  "Oreag context-loop logo — connected knowledge for your apps and agents"
 
 function contentVersion(): string {
   try {

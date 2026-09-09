@@ -1,0 +1,164 @@
+"use client"
+
+import { useRef, useState } from "react"
+import Link from "next/link"
+import useSWR from "swr"
+import { ArrowClockwiseIcon, ArrowRightIcon, HeartbeatIcon, MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { Skeleton } from "@/components/ui/skeleton"
+import { fetcher, isSessionExpired } from "@/lib/api"
+import { cn } from "@/lib/utils"
+import {
+  HEALTH_LABELS, KNOWLEDGE_HEALTH_KEY, healthIssues, healthProjectLink,
+  healthSimilarity, healthState, sortedHealthProjects,
+  type KnowledgeHealth, type ProjectHealth,
+} from "@/lib/knowledge-health"
+
+function StateBadge({ project }: { project: ProjectHealth }) {
+  const state = healthState(project)
+  return <Badge variant="outline" className={cn("shrink-0", state === "attention" && "border-amber-500/30 text-amber-700 dark:text-amber-400")}>
+    {HEALTH_LABELS[state]}
+  </Badge>
+}
+
+export function KnowledgeHealthLoading() {
+  return <div role="status" aria-label="Loading knowledge health" className="space-y-4">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28 animate-none rounded-xl" />)}
+    </div>
+    <Skeleton className="h-64 animate-none rounded-xl" />
+  </div>
+}
+
+function HealthDetail({ project }: { project: ProjectHealth }) {
+  const issues = healthIssues(project)
+  return <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6 pt-2">
+    <StateBadge project={project} />
+    <dl className="grid grid-cols-2 gap-3">
+      {[
+        ["Current files", project.current_files], ["Searchable files", project.searchable_files],
+        ["Indexed chunks", project.indexed_chunks], ["Identical extra uploads", project.duplicate_copies],
+      ].map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border p-3">
+        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dd className="mt-2 text-lg font-semibold tabular-nums">{value}</dd>
+      </div>)}
+    </dl>
+    <section className="space-y-2 rounded-xl border p-4">
+      <h3 className="text-sm font-medium">Retrieval · Last 30 days</h3>
+      <p className="text-2xl font-semibold tabular-nums">{healthSimilarity(project.avg_retrieval_similarity)}</p>
+      <p className="text-xs leading-5 text-muted-foreground">Mean similarity across {project.measured_queries} measured, uncached queries. {project.fresh_queries - project.measured_queries} uncached queries have no measurement.</p>
+      <p className="text-xs leading-5 text-muted-foreground">Similarity depends on the embedding model and questions asked. It does not measure answer accuracy or prove that the knowledge base is complete.</p>
+    </section>
+    <div>
+      <h3 className="mb-3 text-sm font-medium">Checks and next steps</h3>
+      {issues.length ? <ul className="divide-y rounded-xl border">
+        {issues.map(issue => <li key={issue.title} className="space-y-2 p-4">
+          <h4 className="text-sm font-medium">{issue.title}</h4>
+          <p className="text-xs leading-5 text-muted-foreground">{issue.description}</p>
+          <Link href={healthProjectLink(project.id, issue.tab)} className="inline-flex items-center gap-1 text-xs font-medium underline underline-offset-4">
+            Open {issue.tab}<ArrowRightIcon aria-hidden="true" className="size-3" />
+          </Link>
+        </li>)}
+      </ul> : <p className="rounded-xl border p-4 text-sm text-muted-foreground">No indexing issues detected in the current files. Test representative questions to assess coverage.</p>}
+    </div>
+    <p className="text-xs leading-5 text-muted-foreground">
+      Most recent successful indexing: {project.last_indexed_at ? new Date(project.last_indexed_at).toLocaleString() : "Not recorded"}. This is an indexing timestamp, not a document freshness assessment.
+    </p>
+    <Button asChild variant="outline"><Link href={healthProjectLink(project.id, "files")}>Open project files<ArrowRightIcon className="size-4" /></Link></Button>
+  </div>
+}
+
+export function KnowledgeHealthDashboard() {
+  const { data, error, isValidating, mutate } = useSWR<KnowledgeHealth>(KNOWLEDGE_HEALTH_KEY, fetcher)
+  const [search, setSearch] = useState("")
+  const [state, setState] = useState("all")
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const projects = data?.projects ?? []
+  const visible = sortedHealthProjects(projects, search, state)
+  const selected = projects.find(project => project.id === selectedId)
+  const summary = [
+    { label: "Need attention", value: projects.filter(project => healthState(project) === "attention").length, detail: "Projects with file issues" },
+    { label: "Searchable files", value: projects.reduce((total, project) => total + project.searchable_files, 0), detail: "Current files with indexed chunks" },
+    { label: "Queued / indexing", value: projects.reduce((total, project) => total + project.indexing_files, 0), detail: "Files still being processed" },
+    { label: "Identical extra uploads", value: projects.reduce((total, project) => total + project.duplicate_copies, 0), detail: "Copies to review within projects" },
+  ]
+
+  return <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 min-w-0 flex-col gap-4 md:h-full">
+    <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4">
+      <div>
+        <h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Knowledge health</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Check indexing readiness and find documents that need attention.</p>
+      </div>
+      <Button size="sm" variant="outline" disabled={isValidating} onClick={() => void mutate()}>
+        <ArrowClockwiseIcon className="size-4" />{isValidating ? "Checking…" : "Refresh"}
+      </Button>
+    </header>
+    <div className="min-h-0 flex-1 overflow-y-auto pb-3 pr-0.5">
+      {error && !isSessionExpired(error) && <div role="alert" className="mb-4 space-y-2 rounded-xl border p-4 text-sm">
+        <p>Could not refresh knowledge health.{data ? " Showing the last available snapshot." : " Please try again."}</p>
+        <Button variant="outline" size="sm" onClick={() => void mutate()}>Retry</Button>
+      </div>}
+      {!data && (!error || isSessionExpired(error)) && <KnowledgeHealthLoading />}
+      {data && <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {summary.map(metric => <div key={metric.label} className="flex min-h-36 min-w-0 flex-col rounded-xl border bg-card p-4">
+            <p className="text-xs font-medium text-muted-foreground">{metric.label}</p>
+            <p className="my-2 text-3xl font-semibold tabular-nums">{metric.value.toLocaleString()}</p>
+            <p className="mt-auto text-xs leading-5 text-muted-foreground">{metric.detail}</p>
+          </div>)}
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <div className="relative min-w-0 flex-1 basis-48">
+            <MagnifyingGlassIcon aria-hidden="true" className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+            <Input aria-label="Search projects" placeholder="Search projects…" value={search} onChange={event => setSearch(event.target.value)} className="pl-9" />
+          </div>
+          <select aria-label="Health status" value={state} onChange={event => setState(event.target.value)} className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <option value="all">All statuses</option>
+            {Object.entries(HEALTH_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select>
+        </div>
+        <section aria-label="Project health" className="overflow-hidden rounded-xl border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+            <h2 className="text-sm font-medium">Projects</h2>
+            <span role="status" className="text-xs text-muted-foreground">{visible.length} of {projects.length} · Attention first</span>
+          </div>
+          {!visible.length ? <div className="space-y-3 px-6 py-12 text-center">
+            <HeartbeatIcon className="mx-auto size-7 text-muted-foreground" />
+            <p className="text-sm font-medium">{projects.length ? "No projects match these filters" : "No knowledge bases yet"}</p>
+            <p className="text-xs text-muted-foreground">{projects.length ? "Try another name or status." : "Create a project and add documents to start checking its readiness."}</p>
+            {projects.length ? <Button variant="outline" size="sm" onClick={() => { setSearch(""); setState("all") }}>Reset filters</Button> : <Button asChild variant="outline"><Link href="/projects/new">Create project</Link></Button>}
+          </div> : <ul className="divide-y">
+            {visible.map(project => <li key={project.id}>
+              <button type="button" onClick={event => { triggerRef.current = event.currentTarget; setSelectedId(project.id) }} className="flex w-full min-w-0 flex-col gap-3 px-4 py-4 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:flex-row sm:items-center sm:gap-6">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{project.name}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{project.searchable_files} / {project.current_files} current files searchable · {project.indexed_chunks.toLocaleString()} chunks</p>
+                  {project.duplicate_copies > 0 && <p className="mt-1 text-xs text-muted-foreground">{project.duplicate_copies} identical extra upload{project.duplicate_copies === 1 ? "" : "s"} to review</p>}
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <StateBadge project={project} />
+                  <ArrowRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+                </div>
+              </button>
+            </li>)}
+          </ul>}
+        </section>
+        <p className="text-xs leading-5 text-muted-foreground">Current files only; superseded versions are excluded. Readiness reflects indexing status, not answer accuracy. Retrieval measurements cover the last {data.query_window_days} days.</p>
+        <p className="text-xs text-muted-foreground">Checked {new Date(data.generated_at).toLocaleString()}</p>
+      </div>}
+    </div>
+    <Sheet open={selectedId !== null} onOpenChange={open => { if (!open) setSelectedId(null) }}>
+      <SheetContent side="right" className="w-full max-w-full bg-background sm:w-[540px]" onCloseAutoFocus={event => { event.preventDefault(); triggerRef.current?.focus() }}>
+        <SheetHeader className="p-6 pr-12">
+          <SheetTitle className="break-words text-lg">{selected?.name ?? "Project health"}</SheetTitle>
+          <SheetDescription>Readiness checks and next steps for this knowledge base.</SheetDescription>
+        </SheetHeader>
+        {selected ? <HealthDetail project={selected} /> : <p className="p-6 text-sm text-muted-foreground">This project is no longer in the current report.</p>}
+      </SheetContent>
+    </Sheet>
+  </div>
+}

@@ -4,6 +4,7 @@ import {
   CaretRightIcon as ChevronRight,
   ChartBarIcon as ChartBar,
   ChatTextIcon as ChatText,
+  HeartbeatIcon as Heartbeat,
   CircleIcon as Circle,
   FileTextIcon as FileText,
   KanbanIcon as FolderKanban,
@@ -52,6 +53,7 @@ const mainNav = [
   { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
   { href: "/settings/usage", label: "Usage", icon: ChartBar },
   { href: "/query-explorer", label: "Query explorer", icon: ChatText },
+  { href: "/knowledge-health", label: "Knowledge health", icon: Heartbeat },
 ]
 
 const statusTone: Record<Project["status"], string> = {
@@ -383,9 +385,9 @@ function SidebarBody() {
         href="/dashboard"
         className="group flex min-w-0 items-center gap-3"
       >
-        <BrandMark className="size-14 shrink-0 rounded-xl transition-transform group-hover:scale-[1.03]" />
+        <BrandMark className="size-11" />
         <span className="min-w-0 leading-tight">
-          <span className="block truncate text-lg font-semibold tracking-tight">
+          <span className="block truncate text-xl font-bold tracking-[-0.045em] text-foreground">
             Oreag
           </span>
           <span className="block truncate text-xs text-sidebar-foreground/55">
@@ -569,8 +571,8 @@ export function DashboardSidebar() {
           </SheetContent>
         </Sheet>
         <Link href="/dashboard" className="group flex min-w-0 items-center gap-2">
-          <BrandMark className="size-8 shrink-0 rounded-lg" />
-          <span className="truncate text-base font-semibold tracking-tight">
+          <BrandMark className="size-8" />
+          <span className="truncate text-lg font-bold tracking-[-0.045em] text-foreground">
             Oreag
           </span>
         </Link>

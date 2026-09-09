@@ -23,9 +23,9 @@ export const metadata: Metadata = {
   title: "Oreag - RAG & Memory as a Service",
   description:
     "Turn your documents into a queryable RAG API with a built-in memory graph: upload, tune chunking and embeddings, and get a per-project endpoint.",
-  // Favicons come from the app/ file conventions: icon.png + favicon.ico (both
-  // the Oreag 3D app-icon badge, matching the landing brand mark). The
-  // OG/Twitter image is public/oreag-og-whatsapp-v3.jpg (regenerate with
+  // Transparent icons come from icon.svg, favicon.ico and apple-icon.png.
+  // The SVG follows the browser's light/dark preference. The
+  // OG/Twitter image is public/oreag-og-context-loop.jpg (regenerate with
   // `node scripts/generate-og.mjs`); its ?v= is a hash of the file's own bytes,
   // so replacing the artwork changes the URL and social platforms re-fetch it.
   // See lib/og-image.

@@ -2,6 +2,7 @@ export const DASHBOARD_ROUTES = [
   "/settings/usage", "/settings/api-keys", "/projects/new",
   "/settings/profile", "/settings/report-key-issue", "/dashboard",
   "/query-explorer",
+  "/knowledge-health",
 ] as const
 
 /** Only application pages, never auth actions, API endpoints or external URLs. */

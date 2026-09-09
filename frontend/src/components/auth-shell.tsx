@@ -1,4 +1,4 @@
-import { BrandMark } from "@/components/ui/brand-mark"
+import { AuthBrand } from "@/components/ui/brand-mark"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
@@ -34,10 +34,7 @@ export function AuthShell({
       <Card className="w-full max-w-md max-h-[calc(100svh-2rem)] overflow-y-auto rounded-3xl py-5 no-scrollbar sm:py-8">
         <CardContent className="flex flex-col gap-4 sm:gap-6">
           <div className="flex flex-col items-center gap-2 text-center">
-            <BrandMark
-              className="size-11 shrink-0 rounded-2xl sm:size-12"
-              imgClassName="scale-150"
-            />
+            <AuthBrand />
             <span className="rounded-full border bg-muted/60 px-3 py-1 text-[11px] font-medium text-muted-foreground">
               {badge}
             </span>

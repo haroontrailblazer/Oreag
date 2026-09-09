@@ -32,10 +32,9 @@ export default async function Home() {
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <BrandMark
-              className="size-9 shrink-0 rounded-lg"
-              imgClassName="scale-150"
+              className="size-9"
             />
-            <span className="text-lg font-semibold tracking-tight">Oreag</span>
+            <span className="text-xl font-bold tracking-[-0.045em] text-foreground">Oreag</span>
           </div>
           <nav className="flex items-center gap-4 text-sm font-medium text-muted-foreground sm:gap-5">
             <Link href="/docs" className="transition-colors hover:text-foreground">

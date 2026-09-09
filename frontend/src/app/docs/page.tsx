@@ -53,10 +53,9 @@ export default function DocsPage() {
             <DocsMobileNav />
             <Link href="/" className="flex min-w-0 items-center gap-2.5">
               <BrandMark
-                className="size-8 shrink-0 rounded-lg"
-                imgClassName="scale-150"
+                className="size-8"
               />
-              <span className="truncate font-semibold tracking-tight">
+              <span className="truncate text-lg font-bold tracking-[-0.045em] text-foreground">
                 Oreag{" "}
                 <span className="font-normal text-muted-foreground">docs</span>
               </span>

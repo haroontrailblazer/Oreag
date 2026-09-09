@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { OtpField, isCompleteCode } from "@/components/auth/otp-field"
 import { SetPasswordForm } from "@/components/set-password-form"
+import { AuthBrand } from "@/components/ui/brand-mark"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -148,7 +149,8 @@ export function ChangePasswordCard() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="text-center">
+        <AuthBrand />
         <CardTitle>Change password</CardTitle>
         <CardDescription>
           Min 12 characters, one uppercase, one special character. We&apos;ll

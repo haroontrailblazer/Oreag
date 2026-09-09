@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client"
 import { createNavigationPrefetchQueue, dashboardPrefetchTarget, DASHBOARD_ROUTES } from "@/lib/navigation-prefetch"
 import type { Project } from "@/lib/types"
 import { queryExplorerKey } from "@/lib/query-explorer"
+import { KNOWLEDGE_HEALTH_KEY } from "@/lib/knowledge-health"
 
 function scheduleIdle(callback: () => void) {
   // Space out work and allow the page the user opened to paint first.
@@ -70,6 +71,8 @@ export function DashboardPrefetch() {
           await warmData("/api/models")
         } else if (path === "/query-explorer") {
           await warmData(queryExplorerKey())
+        } else if (path === "/knowledge-health") {
+          await warmData(KNOWLEDGE_HEALTH_KEY)
         } else if (path.startsWith("/projects/")) {
           await warmData(`/api${path}`)
           if (!stopped) await warmData(`/api${path}/files`)

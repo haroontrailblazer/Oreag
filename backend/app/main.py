@@ -14,6 +14,7 @@ from .routers import (
     account,
     files,
     keys,
+    knowledge_health,
     memory,
     memory_graph,
     meta,
@@ -266,6 +267,7 @@ app.include_router(files.router)
 app.include_router(keys.router)
 app.include_router(provider_keys.router)
 app.include_router(account.router)
+app.include_router(knowledge_health.router)
 app.include_router(query_explorer.router)
 app.include_router(memory.public_router)
 app.include_router(memory.owner_router)
