@@ -59,6 +59,7 @@ import {
   RetrievalQuality,
 } from "@/components/settings/usage-quality"
 import { ProjectPortfolio } from "@/components/settings/usage-projects"
+import { UsageInsights } from "@/components/settings/usage-insights"
 import { TextScrambleEffect } from "@/components/ui/text-scramble-effect"
 import {
   Table,
@@ -1928,6 +1929,9 @@ export function UsageView({ data }: { data: AccountUsage }) {
   }
   return (
     <div className="usage-dashboard-content usage-motion flex min-h-full flex-col gap-6 sm:gap-8">
+      <MotionReveal>
+        <UsageInsights data={data} />
+      </MotionReveal>
       <MotionReveal>
         <TotalsRow
           totals={data.totals}

@@ -174,7 +174,7 @@ const fixture: AccountUsage = {
     },
   ],
   daily: Array.from({ length: 14 }, (_, index) => ({
-    date: `2026-07-${String(index + 15).padStart(2, "0")}`,
+    date: new Date(Date.now() - (14 - index) * 86_400_000).toISOString().slice(0, 10),
     requests: 42 + index * 7,
     prompt_tokens: 72000 + index * 9400,
     completion_tokens: 13000 + index * 1200,
