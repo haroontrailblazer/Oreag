@@ -271,5 +271,13 @@
   "/docs/usage-budgets.png": {
     "width": 1088,
     "height": 523
+  },
+  "/docs/usage-budget-setup.png": {
+    "width": 1280,
+    "height": 900
+  },
+  "/docs/usage-budget-mobile.png": {
+    "width": 390,
+    "height": 844
   }
 }
