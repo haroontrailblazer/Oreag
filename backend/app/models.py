@@ -14,6 +14,7 @@ from sqlalchemy import (
     JSON,
     Numeric,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -28,6 +29,35 @@ from .config import settings
 
 class Base(DeclarativeBase):
     pass
+
+
+class UsageBudget(Base):
+    __tablename__ = "usage_budgets"
+    __table_args__ = (UniqueConstraint("owner_id", "scope_key"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
+    scope_key: Mapped[str] = mapped_column(Text)
+    amount_usd: Mapped[float] = mapped_column(Numeric(18, 2))
+    warning_percent: Mapped[int] = mapped_column(Integer, default=80)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_check_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UsageBudgetAlert(Base):
+    __tablename__ = "usage_budget_alerts"
+    __table_args__ = (UniqueConstraint("budget_id", "period_start", "threshold_percent"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    budget_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("usage_budgets.id", ondelete="CASCADE"), index=True)
+    period_start: Mapped[date] = mapped_column(Date)
+    threshold_percent: Mapped[int] = mapped_column(Integer)
+    amount_usd: Mapped[float] = mapped_column(Numeric(18, 2))
+    spent_usd: Mapped[float] = mapped_column(Numeric(24, 10))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class EvaluationSuiteRecord(Base):

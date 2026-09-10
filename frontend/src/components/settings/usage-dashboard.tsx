@@ -5,6 +5,7 @@ import { useState } from "react"
 import useSWR from "swr"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { UsageInsights } from "@/components/settings/usage-insights"
+import { UsageBudgets } from "@/components/settings/usage-budgets"
 import { UsageDetailsSkeleton, UsageInsightsSkeleton } from "@/components/settings/usage-loading"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import {
@@ -80,6 +81,8 @@ export function UsageDashboard() {
         </p>
       )}
 
+      <div className="usage-scroll relative min-h-0 flex-1 overflow-y-auto pb-3 pr-0.5">
+      <UsageBudgets />
       {isLoading && !data && (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 sm:gap-6">
           <UsageInsightsSkeleton />
@@ -90,13 +93,14 @@ export function UsageDashboard() {
       {data && (
         <div
           className={cn(
-            "usage-scroll min-h-0 flex-1 overflow-y-auto pb-3 pr-0.5",
+            "min-w-0",
             isLoading && "opacity-60 transition-opacity"
           )}
         >
           <UsageView data={data} />
         </div>
       )}
+      </div>
     </div>
   )
 }

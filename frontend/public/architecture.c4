@@ -426,6 +426,15 @@ model {
             dialect-trap 'the grouping keys are bare IS NULL predicates, not CASE. A CASE renders its 1/0 as bind parameters which SQLAlchemy numbers independently in SELECT and GROUP BY, so Postgres rejects the query - while SQLite, which the suite runs on, accepts it. Tests passed and production would have 500d; a compile-against-postgresql test now guards it.'
           }
         }
+        budgets = component 'Budgets and Alerts' 'Warning-only monthly account and project budgets over recorded model and embedding spend.' {
+          technology 'services/budgets.py · usage_budgets · usage_budget_alerts · migration 0045'
+          metadata {
+            endpoints '/api/account/budgets · /api/account/budgets/{budget_id} · /api/account/budgets/alerts · /api/account/budgets/alerts/{alert_id}/read · /api/account/budgets/alerts/read-all'
+            scheduling 'Background worker checks due budgets about once a minute with FOR UPDATE SKIP LOCKED. No hooks on query or provider requests.'
+            semantics 'UTC calendar month. Saved costs are excluded; missing prices stay unknown. Threshold alerts deduplicate by budget/month/percentage and retain the original limit and spend.'
+            tenancy 'Owner-authenticated configuration and alerts. Project-key callers cannot read account budgets or change limits. RLS allows owner reads; backend controls mutations.'
+          }
+        }
         embeddingUsage = component 'Embedding Metering' 'Request-scoped tally of embedding tokens, collected without changing the embedder contract.' {
           #guard
           technology 'services/embedding_usage.py · ContextVar accumulator · pure-ASGI middleware opens one scope per request'
@@ -548,7 +557,7 @@ model {
 
     db = containerDb 'Database' 'projects · files · chunks · memories · provider_keys · api_keys · query_logs · semantic_query_cache · usage_events · suspended_accounts' {
       #scale
-      technology 'Supabase Postgres 17 + pgvector 0.8 · 44 migrations'
+      technology 'Supabase Postgres 17 + pgvector 0.8 · 45 migrations'
       icon tech:postgresql
       metadata {
         vector-columns 'chunks.embedding, memories.embedding and semantic_query_cache.embedding are DIMENSIONLESS `vector`, so every project can pick its own model and size in one shared table'
@@ -642,6 +651,8 @@ model {
 
   dashboardApi -[internal]-> queryHistory 'owner-scoped query list and detail'
   dashboardApi -[internal]-> evaluations 'owner-scoped saved sets and runs'
+  dashboardApi -[internal]-> budgets 'owner-scoped monthly budgets and alerts'
+  budgets -[persist]-> db 'read metered costs; persist budgets and threshold alerts'
   publicApi -[internal]-> evaluations 'project-key scoped saved sets and runs'
   evaluations -[persist]-> db 'evaluation_suites, evaluation_runs and evaluation_vectors'
   evaluations -[internal]-> agentic 'fresh answers from isolated snapshot retrieval'

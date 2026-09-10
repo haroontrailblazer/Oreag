@@ -37,6 +37,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { SquaresLoader } from "@/components/ui/squares-loader"
 import { fetcher } from "@/lib/api"
+import { BUDGET_ALERTS_KEY, BUDGET_REFRESH_MS, type BudgetAlerts } from "@/lib/budgets"
 import {
   DEFAULT_USAGE_WINDOW,
   USAGE_REFRESH_MS,
@@ -68,11 +69,13 @@ function SidebarLink({
   label,
   icon: Icon,
   active,
+  unread = 0,
 }: {
   href: string
   label: string
   icon: React.ComponentType<{ className?: string }>
   active: boolean
+  unread?: number
 }) {
   return (
     <Link
@@ -84,6 +87,7 @@ function SidebarLink({
     >
       <Icon className="size-4" />
       <span className="truncate">{label}</span>
+      {unread > 0 && <span className="ml-auto rounded-full bg-amber-500/15 px-1.5 text-[10px] text-amber-700 dark:text-amber-400" aria-label={`${unread} unread budget alerts`}>{unread}</span>}
     </Link>
   )
 }
@@ -304,6 +308,7 @@ function SidebarBody() {
   useSWR(usageKey(DEFAULT_USAGE_WINDOW), fetcher, {
     refreshInterval: USAGE_REFRESH_MS,
   })
+  const { data: budgetAlerts } = useSWR<BudgetAlerts>(BUDGET_ALERTS_KEY, fetcher, {refreshInterval:BUDGET_REFRESH_MS})
 
   // Fill the Settings caches while the user is still looking at the dashboard.
   //
@@ -401,6 +406,7 @@ function SidebarBody() {
           <SidebarLink
             key={item.href}
             {...item}
+            unread={item.href === "/settings/usage" ? budgetAlerts?.unread_count : 0}
             active={
               item.href === "/dashboard"
                 ? pathname === "/dashboard"

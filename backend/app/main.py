@@ -12,6 +12,7 @@ from .config import settings
 from .services import embedding_usage, tracing
 from .routers import (
     account,
+    budgets,
     evaluations,
     files,
     keys,
@@ -52,8 +53,10 @@ async def lifespan(app: FastAPI):
         # in-flight file platform-wide on each deploy.)
         from .services.ingest_queue import start_workers
         from .services.maintenance import maintenance_loop
+        from .services.budgets import budget_loop
 
         start_workers(stop_workers)
+        threading.Thread(target=budget_loop, args=(stop_workers,), name="budget-alerts", daemon=True).start()
         threading.Thread(
             target=maintenance_loop,
             args=(stop_workers,),
@@ -268,6 +271,7 @@ app.include_router(files.router)
 app.include_router(keys.router)
 app.include_router(provider_keys.router)
 app.include_router(account.router)
+app.include_router(budgets.router)
 app.include_router(knowledge_health.router)
 app.include_router(query_explorer.router)
 app.include_router(memory.public_router)
