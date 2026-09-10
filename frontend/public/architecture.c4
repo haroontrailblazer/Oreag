@@ -188,7 +188,7 @@ model {
             no-public-confirm 'deliberately absent from /v1 and MCP: /openapi.json and /docs are unauthenticated, so a confirm endpoint there would be a publicly documented way to retire live law - and an API key is not the person the review gate exists to ask.'
           }
         }
-        publicApi = component 'Public API' '/v1/* — query · stream · retrieve · explore · memory · graph · ingest' {
+        publicApi = component 'Public API' '/v1/* — query · stream · history · health · feedback · retrieve · explore · memory · graph · ingest' {
           technology 'Bearer oreag_sk_ · SHA-256 lookup'
           metadata {
             keys 'oreag_sk_ + 32 url-safe random bytes; only the SHA-256 hash and a 16-char display prefix are stored'
@@ -376,12 +376,36 @@ model {
           technology 'Redis INCR + EXPIRE · std 120/300 · heavy 10/20 per min'
           metadata {
             algorithm 'fixed window: INCR then EXPIRE 60 on first hit; 429 carries Retry-After = seconds left in the window'
-            buckets 'std for query/stream/retrieve/memory; heavy for explore and memory-graph'
+            buckets 'std for query/stream/history/health/feedback/retrieve/memory; heavy for explore and memory-graph'
             dashboard 'the signed-in /api surface is limited PER USER, not per key: 240/min standard and 30/min heavy. Enforced inside get_current_user so every authenticated route is covered by construction, with heavy_dashboard_limit added as an explicit dependency on the routes that call a provider. Before this /api had no limit at all, which mattered because that is where the LLM calls live - a stolen JWT or a retry loop could spend BYOK credit unbounded.'
           }
         }
         usage = component 'Usage Metering' 'One usage_events row per public request. Best-effort, never fails the request. The prerequisite for billing.' {
           #guard
+        }
+        queryHistory = component 'Query History' 'Shared query log reads for the owner dashboard and project-key API, with filters and keyset pagination.' {
+          #readpath
+          technology 'services/query_history.py · GET /api/account/queries · GET /v1/projects/{project_id}/queries · GET /v1/projects/{project_id}/queries/{query_id}'
+          metadata {
+            scope 'the authenticated owner or validated API-key project constrains every SELECT; records include API calls and Playground tests'
+            retention 'string bigint IDs; list previews shorten questions and omit feedback notes; detail returns the full question and note; historical answers and source passages are not retained'
+          }
+        }
+        knowledgeHealth = component 'Knowledge Health' 'Shared file readiness, query activity and feedback diagnostics; grouped reads without provider calls.' {
+          #readpath
+          technology 'services/knowledge_health.py · GET /api/account/knowledge-health · GET /v1/projects/{project_id}/health'
+          metadata {
+            scope 'owner reports cover owned projects; public reports contain only the validated API-key project'
+            measurements '30-day query activity and current feedback ratings; retrieval averages use measured uncached queries only, preserving missing values as null'
+          }
+        }
+        feedback = component 'Answer Feedback' 'One mutable helpful or not_helpful rating and optional note per query, shared by API consumers and Playground.' {
+          #writepath
+          technology 'services/feedback.py · PUT/DELETE /v1/projects/{project_id}/queries/{query_id}/feedback · PUT/DELETE /api/account/queries/{query_id}/feedback · migration 0043'
+          metadata {
+            authorization 'the UPDATE itself is scoped to the authenticated owner or validated API-key project; public routes enforce standard rate limits and suspension checks'
+            semantics 'notes are trimmed and limited to 1000 characters; delete clears rating, note and timestamp; feedback does not alter retrieval, generation or cached answers'
+          }
         }
         usageReport = component 'Usage Report' 'Account-scoped read side of metering, behind GET /api/account/usage: totals, per-model, per-key and per-project rollups with cache economics and a daily series.' {
           technology 'services/usage_report.py · one grouped cube pass over usage_events + 3 support queries'
@@ -515,7 +539,7 @@ model {
 
     db = containerDb 'Database' 'projects · files · chunks · memories · provider_keys · api_keys · query_logs · semantic_query_cache · usage_events · suspended_accounts' {
       #scale
-      technology 'Supabase Postgres 17 + pgvector 0.8 · 18 migrations'
+      technology 'Supabase Postgres 17 + pgvector 0.8 · 43 migrations'
       icon tech:postgresql
       metadata {
         vector-columns 'chunks.embedding, memories.embedding and semantic_query_cache.embedding are DIMENSIONLESS `vector`, so every project can pick its own model and size in one shared table'
@@ -595,7 +619,7 @@ model {
 
   publicApi -[auth]-> rateLimit 'per key and per project, heavy bucket for explore and graph'
   publicApi -[auth]-> db 'rejects suspended projects and accounts'
-  publicApi -[internal]-> usage 'records the request'
+  publicApi -[internal]-> usage 'records metered operations'
 
   // ── inside the backend: write path ───────────────────────────────────────
 
@@ -606,6 +630,16 @@ model {
   ingestion -[internal]-> conversion 'converts the upload to Markdown'
   conversion -[internal]-> transcription 'audio only'
   ingestion -[internal]-> contentVersion 'bumps, invalidating every cache'
+
+  dashboardApi -[internal]-> queryHistory 'owner-scoped query list and detail'
+  publicApi -[internal]-> queryHistory 'project-scoped query list and detail'
+  dashboardApi -[internal]-> knowledgeHealth 'owner-scoped health report'
+  publicApi -[internal]-> knowledgeHealth 'project-scoped health report'
+  dashboardApi -[internal]-> feedback 'save or remove answer feedback'
+  publicApi -[internal]-> feedback 'save or remove answer feedback'
+  queryHistory -[persist]-> db 'reads query_logs joined to projects'
+  knowledgeHealth -[persist]-> db 'reads current files and 30-day query diagnostics'
+  feedback -[persist]-> db 'updates query_logs feedback fields atomically'
 
   // ── inside the backend: read path ────────────────────────────────────────
 

@@ -16,7 +16,7 @@ import {
 } from "@phosphor-icons/react/dist/ssr"
 import Link, { useLinkStatus } from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import useSWR from "swr"
 
@@ -130,7 +130,7 @@ function ProjectLink({
       href={`/projects/${project.id}`}
       prefetch={false}
       className={cn(
-        "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex h-9 items-center gap-2 rounded-md px-3 text-[13px] font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:h-8",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
@@ -417,21 +417,22 @@ function SidebarBody() {
           <span className="text-xs font-medium uppercase tracking-wide text-sidebar-foreground/55">
             {inProject ? "Files" : "Projects"}
           </span>
-          {(inProject ? files?.length : projects?.length) ? (
+          {!inProject && Boolean(projects?.length) ? (
             <Badge variant="secondary" className="h-5 rounded-md px-1.5 text-[10px]">
-              {inProject ? files?.length : projects?.length}
+              {projects?.length}
             </Badge>
           ) : null}
         </div>
 
         <div className="relative shrink-0">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-foreground/45" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-sidebar-foreground/45" />
           <Input
             type="search"
+            aria-label={inProject ? "Search files" : "Search projects"}
             placeholder={inProject ? "Search files" : "Search projects"}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="h-8 bg-background pl-8 text-sm"
+            className="h-7 bg-background pl-7 text-base placeholder:text-[13px] md:text-[13px]"
           />
         </div>
 
@@ -543,6 +544,7 @@ function SidebarBody() {
 export function DashboardSidebar() {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuTitleRef = useRef<HTMLHeadingElement>(null)
 
   // Close the mobile drawer whenever the route changes - adjusted during
   // render (not a setState-in-effect).
@@ -562,8 +564,13 @@ export function DashboardSidebar() {
               <List className="size-5" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-72 p-0">
-            <SheetTitle className="sr-only">Navigation</SheetTitle>
+          <SheetContent side="left" className="w-72 p-0" onOpenAutoFocus={event => {
+            // Focus the drawer heading, not its search input: opening navigation
+            // should not summon a mobile keyboard. Search still focuses on tap.
+            event.preventDefault()
+            menuTitleRef.current?.focus({ preventScroll: true })
+          }}>
+            <SheetTitle ref={menuTitleRef} tabIndex={-1} className="sr-only">Navigation</SheetTitle>
             <SheetDescription className="sr-only">
               Browse projects, files, and account settings.
             </SheetDescription>
