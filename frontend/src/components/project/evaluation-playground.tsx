@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { FilterSelect } from "@/components/filter-select"
 import { AnswerMarkdown } from "./answer-markdown"
 import { AnswerFeedback } from "@/components/answer-feedback"
+import { EvaluationSchedule } from "./evaluation-schedule"
 import { EvaluationConfigCard } from "./evaluation-config"
 import { api, fetcher, isSessionExpired } from "@/lib/api"
 import { importEvaluation, MAX_CASES, projectEvaluationConfig, type EvaluationCase, type EvaluationDefinition, type EvaluationRun, type SavedEvaluation } from "@/lib/evaluation"
@@ -28,7 +29,7 @@ export function EvaluationPlayground({ project, onBack }: { project: Project; on
   const base = `/api/projects/${project.id}/evaluations`
   const { data: saved, error: loadError, mutate: reload } = useSWR<SavedEvaluation>(`${base}/suite`, fetcher, { revalidateOnFocus: false })
   const { data: models, error: modelsError } = useSWR<ModelsResponse>("/api/models", fetcher)
-  const { data: history, mutate: reloadHistory } = useSWR<EvaluationRun[]>(`${base}/runs`, fetcher)
+  const { data: history, mutate: reloadHistory } = useSWR<EvaluationRun[]>(`${base}/runs`, fetcher, { refreshInterval: 10000 })
   const baseline = projectEvaluationConfig(project)
   const [draft, setDraft] = useState<EvaluationDefinition | null>(null)
   const [draftRevision, setDraftRevision] = useState<number | null>(null)
@@ -63,7 +64,11 @@ export function EvaluationPlayground({ project, onBack }: { project: Project; on
     const abort = new AbortController(); controller.current = abort; setRunning(true); setError("")
     try {
       while (active(current) && !abort.signal.aborted) {
-        current = await api<EvaluationRun>(`${base}/runs/${current.id}/advance`, { method: "POST", signal: abort.signal })
+        if (current.execution === "background") {
+          await new Promise<void>(resolve => { const timer = setTimeout(done, 2000); function done() { clearTimeout(timer); abort.signal.removeEventListener("abort", done); resolve() } abort.signal.addEventListener("abort", done, { once: true }) })
+          if (abort.signal.aborted) break
+          current = await api<EvaluationRun>(`${base}/runs/${current.id}`, { signal: abort.signal })
+        } else current = await api<EvaluationRun>(`${base}/runs/${current.id}/advance`, { method: "POST", signal: abort.signal })
         if (mounted.current) setRun(current)
       }
     } catch (err) { if (!abort.signal.aborted && mounted.current) showError(err) }
@@ -96,7 +101,7 @@ export function EvaluationPlayground({ project, onBack }: { project: Project; on
     try { setRun(await api<EvaluationRun>(`${base}/runs/${run.id}/cancel`, { method: "POST" })); void reloadHistory() } catch (err) { showError(err) }
   }
   async function selectRun(id: string) {
-    try { setRun(await api<EvaluationRun>(`${base}/runs/${id}`)) } catch (err) { showError(err) }
+    try { const selected = await api<EvaluationRun>(`${base}/runs/${id}`); setRun(selected); if (active(selected) && selected.execution === "background") void drive(selected) } catch (err) { showError(err) }
   }
   async function removeRun() {
     if (!run) return
@@ -123,6 +128,8 @@ export function EvaluationPlayground({ project, onBack }: { project: Project; on
     </header>
     {(error || loadError || modelsError) && <div role="alert" className="space-y-2 rounded-lg border border-destructive/30 p-3 text-sm"><p>{error || "Could not load saved evaluations or available models."}</p><Button variant="outline" size="sm" onClick={() => { setError(""); void reload(); void mutate("/api/models") }}>Retry loading</Button></div>}
     {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
+    <EvaluationSchedule base={base} history={history ?? []} />
+    <p className="text-xs text-muted-foreground">Runs continue in the background when you leave this page.</p>
     <fieldset disabled={!ready || busy} className="min-w-0 space-y-4 disabled:opacity-60">
       <legend className="sr-only">Evaluation settings</legend>
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">Configurations</h3><label className="flex items-center gap-2 text-xs"><input type="checkbox" className="accent-foreground" checked={suite.variants.length === 2} onChange={e => update({ ...suite, variants: e.target.checked ? [suite.variants[0], { ...suite.variants[0] }] : [suite.variants[0]] })} />Compare two configurations</label></div>
@@ -144,7 +151,7 @@ export function EvaluationPlayground({ project, onBack }: { project: Project; on
     </fieldset>
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><p>{draft ? "Unsaved changes" : saved?.suite ? "Saved in the project database" : "Create and save a test set"} · Text checks ignore case and extra whitespace.</p>{draft && <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setDraft(null); setDraftRevision(null); void reload() }}>Load saved set</Button>}</div>
     <section aria-label="Saved evaluation runs" className="space-y-3 border-t pt-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold">Saved runs</h3><div className="w-full min-w-0 sm:w-72"><FilterSelect label="Choose a saved run" hideLabel value={run?.id ?? ""} onChange={id => { if (id && !running) void selectRun(id) }} options={[{ value: "", label: history?.length ? "Select a run" : "No runs yet" }, ...(history ?? []).map(r => ({ value: r.id, label: `${new Date(r.created_at).toLocaleString()} · ${r.status}` }))]} /></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold">Saved runs</h3><div className="w-full min-w-0 sm:w-72"><FilterSelect label="Choose a saved run" hideLabel value={run?.id ?? ""} onChange={id => { if (id && !running) void selectRun(id) }} options={[{ value: "", label: history?.length ? "Select a run" : "No runs yet" }, ...(history ?? []).map(r => ({ value: r.id, label: `${new Date(r.created_at).toLocaleString()} · ${r.status}${r.quality_report?.state === "regressed" ? " · Regression warning" : ""}` }))]} /></div></div>
       {run && <>
         <div className="flex flex-wrap items-center justify-between gap-2"><p role="status" className="text-sm capitalize">{run.status} · {run.prepared}/{run.corpus_count * run.suite.variants.length} vectors · {run.results.length}/{run.suite.cases.length * run.suite.variants.length} answers</p><div className="flex flex-wrap gap-2">
           {!running && (active(run) || run.status === "failed") && <Button variant="outline" size="sm" onClick={() => void resume()}><PlayIcon />Resume run</Button>}
@@ -152,6 +159,7 @@ export function EvaluationPlayground({ project, onBack }: { project: Project; on
           <Button variant="outline" size="sm" onClick={() => download("evaluation-results.json", run)}><DownloadSimpleIcon />Export results</Button>
           {!running && !active(run) && <Button variant="ghost" size="icon" aria-label="Delete saved run" onClick={() => void removeRun()}><TrashIcon /></Button>}
         </div></div>
+        {run.quality_report?.state === "regressed" && <div role="alert" className="space-y-2 rounded-xl border border-amber-500/40 p-3 text-xs"><p className="font-medium">Regression warning</p>{run.quality_report.warnings.map((w, i) => <p key={i}>Configuration {w.variant === 0 ? "A" : "B"}: {w.metric.replaceAll("_", " ")} changed by {w.change.toFixed(1)}{w.metric === "pass_percent" ? " points" : "%"} (limit {w.limit}).</p>)}</div>}
         {run.error && <p role="alert" className="text-sm text-destructive">{run.error}</p>}
         <p className="text-xs leading-5 text-muted-foreground">{new Date(run.created_at).toLocaleString()} · {run.corpus_count} source passages. Results use this run’s saved configurations. Pass counts measure text/source rules, not factual accuracy.</p>
         <div className={cn("grid gap-3", run.suite.variants.length === 2 && "md:grid-cols-2")}>{run.suite.variants.map((config, variant) => {

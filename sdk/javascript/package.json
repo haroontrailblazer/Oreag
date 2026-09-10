@@ -1,0 +1,1 @@
+{"name":"@oreag/sdk","version":"0.1.0","type":"module","main":"index.js","types":"index.d.ts","exports":{".":{"types":"./index.d.ts","import":"./index.js"},"./webhooks":{"types":"./webhooks.d.ts","import":"./webhooks.js"}},"files":["index.js","index.d.ts","webhooks.js","webhooks.d.ts","README.md"],"engines":{"node":">=18"},"scripts":{"test":"node --test test.mjs"}}

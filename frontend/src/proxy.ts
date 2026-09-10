@@ -18,6 +18,8 @@ import { NextResponse, type NextRequest } from "next/server"
 const PUBLIC_PATHS = [
   "/",
   "/docs",
+  "/downloads/oreag-python-sdk.zip",
+  "/downloads/oreag-javascript-sdk.zip",
   "/login",
   "/signup",
   "/auth/callback", // PKCE ?code= exchange (OAuth)

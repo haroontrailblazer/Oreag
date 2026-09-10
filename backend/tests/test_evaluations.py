@@ -17,6 +17,7 @@ from app.routers import evaluations
 from app.routers.deps import heavy_dashboard_limit
 from app.schemas import QueryResponse, SourceChunk
 from app.services import evaluations as service
+from app.models import EvaluationSchedule, QueryLog
 
 
 @compiles(sa.BigInteger, "sqlite")
@@ -31,7 +32,7 @@ SUITE = {"version": 2, "cases": [{"id": "q", "question": "What is the policy?", 
 @pytest.fixture()
 def app_data(monkeypatch):
     engine = sa.create_engine("sqlite://", poolclass=sa.pool.StaticPool, connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine, tables=[x.__table__ for x in (Project, File, Chunk, MemoryChunk, EvaluationSuiteRecord, EvaluationRun, EvaluationVector, ApiKey, SuspendedAccount)])
+    Base.metadata.create_all(engine, tables=[x.__table__ for x in (Project, File, Chunk, MemoryChunk, EvaluationSuiteRecord, EvaluationRun, EvaluationVector, ApiKey, SuspendedAccount, EvaluationSchedule, QueryLog)])
     with Session(engine, expire_on_commit=False) as db:
         owner = uuid.uuid4()
         mine, other = Project(owner_id=owner, name="Mine"), Project(owner_id=uuid.uuid4(), name="Other")

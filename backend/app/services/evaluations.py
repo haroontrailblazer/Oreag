@@ -1,6 +1,6 @@
 """Persisted evaluation snapshots and bounded, leased work steps.
 
-Each step prepares <=32 vectors or answers one question. The caller drives steps;
+Each step prepares <=32 vectors or answers one question. A durable worker drives steps;
 reloads/restarts can resume the persisted cursor without repeating committed work.
 """
 import json
@@ -82,11 +82,15 @@ def get_run(db, project_id, run_id):
 
 def run_out(run):
     return {"id": str(run.id), "status": run.status, "suite": run.suite, "corpus_count": run.corpus_count,
+            "execution": run.execution, "reference_run_id": str(run.reference_run_id) if run.reference_run_id else None,
+            "quality_report": run.quality_report,
             "content_version": run.content_version, "prepared": run.prepared, "results": run.results,
             "error": run.error, "created_at": run.created_at, "updated_at": run.updated_at}
 
 
-def create_run(db, project, body):
+def create_run(db, project, body, *, commit=True, quality_limits=None, api_key_id=None):
+    from .quality import allowed, validate_reference
+    allowed(db, project, api_key_id)
     previous = db.get(EvaluationRun, body.id)
     if previous:
         if previous.project_id != project.id:
@@ -98,6 +102,15 @@ def create_run(db, project, body):
         raise HTTPException(422, "Add at least one question.")
     check_credentials(db, project, body.suite)
     db.execute(select(Project.id).where(Project.id == project.id).with_for_update()).one()
+    # A concurrent retry can have committed while we waited on the project lock.
+    previous = db.get(EvaluationRun, body.id, populate_existing=True)
+    if previous:
+        if previous.project_id != project.id:
+            raise HTTPException(404, "Evaluation run not found")
+        if previous.suite != body.suite.model_dump():
+            raise HTTPException(409, "This run ID already belongs to a different configuration.")
+        return run_out(previous)
+    validate_reference(db, project.id, body.reference_run_id, body.suite.model_dump())
     if db.scalar(select(func.count()).select_from(EvaluationRun).where(EvaluationRun.project_id == project.id)) >= 20:
         raise HTTPException(409, "This project has 20 saved runs. Delete an old run before starting another.")
     version = project.content_version
@@ -113,9 +126,13 @@ def create_run(db, project, body):
     if len(corpus) > MAX_CORPUS or len(json.dumps(corpus).encode()) > 8_000_000:
         raise HTTPException(422, "Evaluation supports up to 2,000 indexed passages and 8 MB of text per run. Use a smaller test project.")
     row = EvaluationRun(id=body.id, project_id=project.id, status="preparing", suite=body.suite.model_dump(),
+                        execution="background" if body.background else "manual", requested_by_key_id=api_key_id,
+                        reference_run_id=body.reference_run_id, quality_limits=quality_limits or {},
                         corpus=corpus, corpus_count=len(corpus), content_version=version, prepared=0, results=[])
     db.add(row)
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     return run_out(row)
 
 
@@ -226,8 +243,20 @@ def advance(db: Session, project, run_id, api_key_id=None):
                 with cross_lingual.isolated_evaluation(passages):
                     response = run_query(db, candidate, case.question, config.top_k, api_key_id=api_key_id, usage_out=usage,
                                          retrieval_override=index_retriever(db, run_id, variant, config, candidate), bypass_cache=True, record_query=False)
-                results.append({"caseId": case.id, "variant": variant, "status": score(case, response), "response": response.model_dump()})
+                from ..providers.registry import cost_for, embedding_cost_for
+                from . import embedding_usage
+                llm_cost = cost_for(config.llm_model, usage.get("usage"), config.llm_provider)
+                acc = embedding_usage.current()
+                embedding_cost = (embedding_cost_for(acc.total.model, acc.total.prompt_tokens, config.embedding_provider)
+                                  if acc and acc.calls and not acc.unmeasured_calls else (0 if acc and not acc.calls else None))
+                cost = llm_cost + embedding_cost if llm_cost is not None and embedding_cost is not None else None
+                results.append({"caseId": case.id, "variant": variant, "status": score(case, response), "response": response.model_dump(), "cost_usd": cost})
                 changes = {"results": results, "status": "completed" if len(results) == len(suite.cases) * len(suite.variants) else "running"}
+        if changes.get("status") == "completed":
+            from .quality import assess
+            snapshot = SimpleNamespace(project_id=project_id, suite=run.suite, results=changes.get("results", results),
+                                       reference_run_id=run.reference_run_id, quality_limits=run.quality_limits)
+            changes["quality_report"] = assess(db, snapshot)
         db.execute(update(EvaluationRun).where(EvaluationRun.id == run_id, EvaluationRun.lease_token == token, EvaluationRun.status != "cancelled")
                    .values(**changes, error=None, lease_token=None, lease_until=None, updated_at=datetime.now(timezone.utc)))
         db.commit()

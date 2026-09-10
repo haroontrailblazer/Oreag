@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import Chunk, Memory, Project, QueryLog
 from ..providers import resolver
-from . import embedding_usage
+from . import embedding_usage, query_timeline
 from ..providers.base import (
     ProviderUnavailableError,
     TokenUsage,
@@ -102,7 +102,8 @@ def _request_helpers(db: Session, project: Project):
                         dimensions=project.embedding_dimensions,
                     )
                 )
-            vector = _embedder[0].embed_query(query)
+            with query_timeline.phase("embedding"):
+                vector = _embedder[0].embed_query(query)
             embed_memo[query] = vector
         return vector
 
@@ -352,13 +353,15 @@ def _in_embedding_scope(acc, fn):
     explicitly, because a copied context would tally into a copy the request
     thread never reads.
     """
+    timeline = query_timeline.current()
     def wrapper(*args, **kwargs):
-        with embedding_usage.adopt(acc):
+        with embedding_usage.adopt(acc), query_timeline.adopt(timeline):
             return fn(*args, **kwargs)
 
     return wrapper
 
 
+@query_timeline.capture
 def run_query(
     db: Session,
     project: Project,
@@ -414,6 +417,7 @@ def run_query(
     # Everything this request spends on LLM calls, summed for metering.
     request_usage = _UsageAccumulator()
 
+    @query_timeline.measure("retrieval")
     def retrieve_fn(query: str, k: int) -> list[dict]:
         """One retrieval pass over the brain: document chunks + relevant memories.
 
@@ -623,6 +627,7 @@ def run_query(
     if record_query:
         try:
             query_log = QueryLog(
+                timeline=query_timeline.snapshot(),
                 project_id=project_id,
                 api_key_id=api_key_id,
                 question=question,
@@ -678,6 +683,7 @@ def _slice_text(text: str, size: int = 18):
         yield text[i : i + size]
 
 
+@query_timeline.capture
 def run_query_stream(
     db: Session,
     project: Project,
@@ -762,6 +768,7 @@ def run_query_stream(
     # Everything this request spends on LLM calls, summed for metering.
     request_usage = _UsageAccumulator()
 
+    @query_timeline.measure("retrieval")
     def retrieve_fn(query: str, k: int) -> list[dict]:
         sources = (
             retrieval.retrieve(
@@ -1030,6 +1037,7 @@ def run_query_stream(
     query_id = None
     try:
         query_log = QueryLog(
+            timeline=query_timeline.snapshot(),
             project_id=project_id,
             api_key_id=api_key_id,
             question=question,

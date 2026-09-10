@@ -11,6 +11,25 @@ on:
   workflow_dispatch:
 
 jobs:
+  sdk-tests:
+    name: Python and JavaScript SDK contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: node --test sdk/javascript/test.mjs
+      - run: pip install ./sdk/python
+      - run: python -m unittest test_sdk.py
+        working-directory: sdk/python
+      - name: SDK downloads match source
+        run: |
+          python scripts/package_sdks.py
+          git diff --exit-code -- frontend/public/downloads
   docs-sync:
     name: documentation is in sync with the code
     runs-on: ubuntu-latest

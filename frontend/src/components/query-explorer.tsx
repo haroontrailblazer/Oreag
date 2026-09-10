@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { MobileFilters } from "@/components/mobile-filters"
 import { FilterSelect } from "@/components/filter-select"
+import { QueryTimeline, AddQueryToSet } from "@/components/query-tools"
 import { AnswerFeedback } from "@/components/answer-feedback"
 import { QueryDetailSkeleton, QueryRowsSkeleton } from "@/components/query-explorer-loading"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -31,10 +32,12 @@ function QueryDetail({ id }: { id: string }) {
     <div><p className="text-xs text-muted-foreground">{dateLabel(data.created_at)}</p><p className="mt-1 break-words text-sm font-medium">{data.project_name}</p></div>
     <section><h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Question</h3><p className="whitespace-pre-wrap break-words rounded-xl border bg-background p-4 text-sm leading-7">{data.question}</p></section>
     <dl className="grid grid-cols-2 gap-3">{metrics.map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border bg-background p-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-2 break-words text-sm font-medium tabular-nums">{value}</dd></div>)}</dl>
+    <QueryTimeline query={data} />
     <p className="text-xs leading-5 text-muted-foreground">Retrieval similarity is the mean similarity of the retrieved chunks. Cache similarity measures the semantic cache match. Unavailable measurements remain unreported.</p>
     <div className="rounded-xl border p-4 text-sm leading-6 text-muted-foreground">Historical answers and source text are not retained in these query logs.</div>
     <section className="space-y-3 rounded-xl border p-4">
       <h3 className="text-sm font-medium">Answer feedback</h3>
+      <AddQueryToSet query={data} />
       {data.feedback_rating ? <>
         <p className="text-xs text-muted-foreground">{data.feedback_rating === "helpful" ? "Marked helpful" : "Marked not helpful"}{data.feedback_updated_at ? ` · ${dateLabel(data.feedback_updated_at)}` : ""}</p>
         <AnswerFeedback queryId={data.id} initialRating={data.feedback_rating} initialNote={data.feedback_note} />

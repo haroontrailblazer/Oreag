@@ -24,6 +24,7 @@ class QueryRecord(BaseModel):
     feedback_rating: Literal["helpful", "not_helpful"] | None = None
     feedback_note: str | None = None
     feedback_updated_at: datetime | None = None
+    timeline: dict | None = None
 
 
 class QueryPage(BaseModel):
@@ -40,6 +41,7 @@ def _statement(scope: ColumnElement[bool], *, preview: bool):
         QueryLog.cache_similarity,
         QueryLog.feedback_rating, QueryLog.feedback_updated_at,
         (literal(None) if preview else QueryLog.feedback_note).label("feedback_note"),
+        (literal(None) if preview else QueryLog.timeline).label("timeline"),
     ).join(Project, Project.id == QueryLog.project_id).where(scope)
 
 

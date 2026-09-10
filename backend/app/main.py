@@ -14,6 +14,7 @@ from .routers import (
     account,
     budgets,
     evaluations,
+    webhooks,
     files,
     keys,
     knowledge_health,
@@ -54,8 +55,12 @@ async def lifespan(app: FastAPI):
         from .services.ingest_queue import start_workers
         from .services.maintenance import maintenance_loop
         from .services.budgets import budget_loop
+        from .services.quality import quality_loop
+        from .services.webhooks import webhook_loop
 
         start_workers(stop_workers)
+        threading.Thread(target=quality_loop, args=(stop_workers,), name="evaluation-jobs", daemon=True).start()
+        threading.Thread(target=webhook_loop, args=(stop_workers,), name="webhook-delivery", daemon=True).start()
         threading.Thread(target=budget_loop, args=(stop_workers,), name="budget-alerts", daemon=True).start()
         threading.Thread(
             target=maintenance_loop,
@@ -279,6 +284,7 @@ app.include_router(memory.owner_router)
 app.include_router(memory_graph.owner_router)
 app.include_router(playground.router)
 app.include_router(evaluations.router)
+app.include_router(webhooks.router)
 app.include_router(evaluations.public_router)
 app.include_router(meta.router)
 app.include_router(rag_v1.router)

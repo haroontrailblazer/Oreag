@@ -17,6 +17,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
+import { WebhooksPanel } from "./webhooks-panel"
 import { Badge } from "@/components/ui/badge"
 import { BestPractices } from "@/components/ui/best-practices"
 import {
@@ -685,6 +686,8 @@ console.log(await feedback.json());`
           </Table>}
         </CardContent>
       </Card>
+      <WebhooksPanel projectId={project.id} />
+      <div className="rounded-xl border p-4 text-sm"><h3 className="font-medium">Python & JavaScript SDKs</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Typed query, streaming, upload, feedback, and evaluation methods with runnable examples. Install the extracted folder locally; packages are not yet published to registries.</p><div className="mt-3 flex flex-wrap gap-4 text-xs"><a className="underline" href="/downloads/oreag-python-sdk.zip">Download Python SDK</a><a className="underline" href="/downloads/oreag-javascript-sdk.zip">Download JavaScript SDK</a><a className="underline" href="/docs#reference-python-and-javascript-sdks">SDK guide</a></div></div>
 
       <Card id="project-api-reference">
         <CardHeader>
@@ -828,8 +831,8 @@ console.log(await feedback.json());`
               GET /evaluations/suite reads the saved test set and revision. PUT the same path with
               revision and a version-2 suite to save model, embedder, vector dimensions, and answer policy.
               POST /evaluations/runs with a unique UUID id and suite creates an isolated snapshot.
-              POST /evaluations/runs/&#123;run_id&#125;/advance repeatedly until completed or failed:
-              each call embeds one batch or answers one question. GET the run after a disconnect.
+              Runs continue in the background. Poll GET /evaluations/runs/&#123;run_id&#125; until completed or failed:
+              the worker embeds batches and answers questions independently. GET the run after a disconnect.
               The cancel and resume actions use POST; DELETE the run removes its saved results and vectors.
               Evaluation settings, scores, and feedback never update live project configuration,
               production vectors, Queries, or Health. PUT /evaluations/runs/&#123;run_id&#125;/results/&#123;result_index&#125;/feedback
@@ -837,6 +840,7 @@ console.log(await feedback.json());`
               Use the zero-based index in the run&apos;s results array. Evaluation answers have no live query_id.
               Fresh answers and indexing consume provider quota. Project keys scope every operation.
             </p>
+            <p className="text-xs leading-relaxed text-muted-foreground">Use Evaluator → Automatic checks to schedule saved sets and compare quality, latency, and cost. POST /evaluations/cases/from-query adds a recorded question and your expected answer with the saved set revision. Query detail includes measured stage timings.</p>
             <a href="/docs#querying" className="text-xs underline underline-offset-4">Evaluation configuration and API guide</a>
           </div>
 

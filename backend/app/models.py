@@ -73,6 +73,11 @@ class EvaluationRun(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     status: Mapped[str] = mapped_column(Text, default="preparing")
+    execution: Mapped[str] = mapped_column(Text, default="manual")
+    requested_by_key_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    reference_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    quality_limits: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    quality_report: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     suite: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     corpus: Mapped[list] = deferred(mapped_column(JSON().with_variant(JSONB, "postgresql")))
     corpus_count: Mapped[int] = mapped_column(Integer)
@@ -96,6 +101,50 @@ class EvaluationVector(Base):
     content: Mapped[str] = mapped_column(Text)
     is_memory: Mapped[bool] = mapped_column(Boolean, default=False)
     embedding = mapped_column(Vector)
+
+
+class EvaluationSchedule(Base):
+    __tablename__ = "evaluation_schedules"
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    interval_hours: Mapped[int] = mapped_column(Integer, default=24)
+    suite: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    reference_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    quality_limits: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class WebhookEndpoint(Base):
+    __tablename__ = "webhook_endpoints"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    url: Mapped[str] = mapped_column(Text)
+    events: Mapped[list] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    secret_encrypted: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+    __table_args__ = (UniqueConstraint("endpoint_id", "event_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    endpoint_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("webhook_endpoints.id", ondelete="CASCADE"), index=True)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    event_type: Mapped[str] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    response_status: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    history: Mapped[list] = mapped_column(JSON().with_variant(JSONB, "postgresql"), default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Project(Base):
@@ -485,6 +534,7 @@ class QueryLog(Base):
     feedback_rating: Mapped[str | None] = mapped_column(Text)
     feedback_note: Mapped[str | None] = mapped_column(NulSafeText)
     feedback_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    timeline: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

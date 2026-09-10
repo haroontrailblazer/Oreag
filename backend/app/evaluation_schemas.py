@@ -66,3 +66,30 @@ class StartEvaluation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: uuid.UUID
     suite: EvaluationSuite
+    background: bool = True
+    reference_run_id: uuid.UUID | None = None
+
+
+class QualityLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    quality_drop_pp: float = Field(default=5, ge=0, le=100)
+    latency_increase_percent: float = Field(default=25, ge=0, le=1000)
+    cost_increase_percent: float = Field(default=25, ge=0, le=1000)
+
+
+class SaveSchedule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    interval_hours: Literal[6, 12, 24, 168] = 24
+    reference_run_id: uuid.UUID | None = None
+    quality_limits: QualityLimits = Field(default_factory=QualityLimits)
+    revision: int = Field(default=0, ge=0)
+
+
+class AddQueryCase(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    query_id: int = Field(gt=0, le=9_223_372_036_854_775_807)
+    expected: str = Field(default="", max_length=4000)
+    source: str = Field(default="", max_length=500)
+    match: Literal["contains", "exact"] = "contains"
+    revision: int = Field(ge=0)

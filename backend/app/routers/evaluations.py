@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 
 from ..auth.api_keys import require_api_key
 from ..db import get_db
-from ..evaluation_schemas import SaveEvaluation, StartEvaluation
+from ..evaluation_schemas import SaveEvaluation, StartEvaluation, SaveSchedule, AddQueryCase
 from ..schemas import FeedbackInput
-from ..models import ApiKey, EvaluationRun, Project
+from ..models import ApiKey, EvaluationRun, EvaluationSchedule, Project
 from ..services import evaluations as service
+from ..services import quality
 from ..services.rate_limit import enforce_rate_limit
 from .deps import get_owned_project, heavy_dashboard_limit
 from .rag_v1 import _get_project
@@ -56,7 +57,7 @@ def save_suite(body: SaveEvaluation, project: Project = Depends(get_owned_projec
 
 @router.get("/runs")
 def list_runs(project: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
-    return [dict(row) for row in db.execute(select(EvaluationRun.id, EvaluationRun.status, EvaluationRun.created_at)
+    return [dict(row) for row in db.execute(select(EvaluationRun.id, EvaluationRun.status, EvaluationRun.created_at, EvaluationRun.quality_report)
             .where(EvaluationRun.project_id == project.id).order_by(EvaluationRun.created_at.desc()).limit(20)).mappings()]
 
 
@@ -106,8 +107,9 @@ def public_list_runs(project: Project = Depends(public_project), db: Session = D
 
 
 @public_router.post("/runs", status_code=201)
-def public_start_run(body: StartEvaluation, project: Project = Depends(public_project), db: Session = Depends(get_db)):
-    return start_run(body, project, db)
+def public_start_run(body: StartEvaluation, project: Project = Depends(public_project), db: Session = Depends(get_db), api_key: ApiKey = Depends(require_api_key)):
+    enforce_rate_limit(api_key.id, project.id, heavy=True)
+    return service.create_run(db, project, body, api_key_id=api_key.id)
 
 
 @public_router.get("/runs/{run_id}")
@@ -134,3 +136,23 @@ def public_resume(run_id: uuid.UUID, project: Project = Depends(public_project),
 @public_router.delete("/runs/{run_id}", status_code=204)
 def public_delete_run(run_id: uuid.UUID, project: Project = Depends(public_project), db: Session = Depends(get_db)):
     delete_run(run_id, project, db)
+
+
+@router.get("/schedule")
+def get_schedule(project: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
+    return quality.schedule_out(db.get(EvaluationSchedule, project.id))
+
+
+@router.put("/schedule")
+def save_schedule(body: SaveSchedule, project: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
+    return quality.save_schedule(db, project, body)
+
+
+@router.post("/cases/from-query")
+def add_query_case(body: AddQueryCase, project: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
+    return quality.add_query(db, project, body)
+
+
+@public_router.post("/cases/from-query")
+def public_add_query_case(body: AddQueryCase, project: Project = Depends(public_project), db: Session = Depends(get_db)):
+    return quality.add_query(db, project, body)

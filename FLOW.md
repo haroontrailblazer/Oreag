@@ -732,3 +732,12 @@ turned session theft into permanent account takeover.
 ---
 
 <sub>Oreag architecture - structured diagram set · logic preserved from source.</sub>
+
+
+### Background quality and integration events
+
+`services/quality.py` snapshots saved schedules into leased evaluation jobs. The worker rechecks suspension and originating API-key revocation before each step. No production Project fields or vectors are written. Reference comparisons report explicit text/source pass-rate drops, mean latency rises, and measured query cost rises; null metrics stay unknown. The UI polls runs and shows regression warnings.
+
+Migration 0046 adds transactional file/evaluation/project-budget outbox triggers. `services/webhooks.py` claims deliveries with SKIP LOCKED, signs exact bytes, validates and pins public DNS, and retries at most eight times. Project-owner routes configure encrypted secrets and inspect deliveries. Account-wide budget spend never enters project events.
+
+`services/query_timeline.py` collects bounded timing spans across streaming/thread boundaries and persists them only in query details. `evaluations/cases/from-query` copies an owned recorded question plus the user's expected answer into the revision-checked test set. SDKs in `sdk/python` and `sdk/javascript` wrap existing public contracts; ambiguous requests are never silently retried.

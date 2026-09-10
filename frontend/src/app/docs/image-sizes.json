@@ -279,5 +279,33 @@
   "/docs/usage-budget-mobile.png": {
     "width": 390,
     "height": 844
+  },
+  "/docs/automatic-checks.png": {
+    "width": 960,
+    "height": 452
+  },
+  "/docs/project-webhooks.png": {
+    "width": 960,
+    "height": 462
+  },
+  "/docs/query-timeline.png": {
+    "width": 576,
+    "height": 486
+  },
+  "/docs/feedback-test-set.png": {
+    "width": 512,
+    "height": 468
+  },
+  "/docs/quality-checks-mobile.png": {
+    "width": 358,
+    "height": 718
+  },
+  "/docs/quality-webhooks-mobile.png": {
+    "width": 358,
+    "height": 400
+  },
+  "/docs/quality-query-mobile.png": {
+    "width": 358,
+    "height": 502
   }
 }

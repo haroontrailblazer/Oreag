@@ -1,4 +1,5 @@
 export type QueryRecord = {
+  timeline?: { trace_id: string; total_ms: number; spans: { stage: string; start_ms: number; duration_ms: number; success: boolean }[] } | null
   id: string
   project_id: string
   project_name: string

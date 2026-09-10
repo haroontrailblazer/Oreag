@@ -353,6 +353,10 @@ def record_embedding_spend(
         logger.warning("Could not record embedding spend", exc_info=True)
 
 
+from . import query_timeline
+
+
+@query_timeline.measure("llm")
 def observed_generate(llm, system_prompt: str, user_prompt: str, *, name: str,
                       metadata: dict | None = None):
     """Call an LLM and record it as a Langfuse `generation`.
@@ -463,6 +467,7 @@ def query_trace(*, project, question: str, api_key_id=None, conversation_id=None
         yield None
 
 
+@query_timeline.measure("llm")
 def observed_stream(llm, streamer, system_prompt: str, user_prompt: str, *,
                     name: str, metadata: dict | None = None):
     """Record a STREAMED generation, yielding deltas and returning `TokenUsage`.
