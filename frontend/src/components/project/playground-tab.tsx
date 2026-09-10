@@ -570,7 +570,6 @@ export function PlaygroundTab({ project, onEvaluate }: { project: Project; onEva
             </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            {onEvaluate && <Button variant="outline" size="sm" disabled={loading} onClick={onEvaluate}><FlaskIcon className="size-4" /><span className="hidden sm:inline">Open evaluator</span><span className="sm:hidden">Evaluate</span></Button>}
         {cacheStats && cacheStats.queries > 0 ? (
           <details
             ref={cacheDetails}
@@ -626,6 +625,21 @@ export function PlaygroundTab({ project, onEvaluate }: { project: Project; onEva
                 },
               ]}
             />
+              {onEvaluate && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={loading}
+                  onClick={onEvaluate}
+                  aria-label="Evaluator"
+                  title="Evaluator"
+                  className="gap-1.5"
+                >
+                  <FlaskIcon className="size-4" />
+                  <span className="hidden sm:inline">Evaluator</span>
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
