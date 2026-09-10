@@ -12,12 +12,15 @@ def build():
         source = ROOT / "sdk" / language
         prefix = f"oreag-{language}-sdk"
         with ZipFile(output / f"{prefix}.zip", "w", ZIP_DEFLATED) as archive:
-            for file in sorted(source.rglob("*")):
+            for file in sorted(source.rglob("*"), key=lambda path: path.relative_to(source).as_posix()):
                 if not file.is_file() or any(p in ("__pycache__", "node_modules", ".pytest_cache", "build", "dist") or p.endswith(".egg-info") for p in file.relative_to(source).parts):
                     continue
                 if file.name != "LICENSE" and file.suffix not in (".py", ".md", ".toml", ".js", ".mjs", ".ts", ".json", ".typed", ".in"):
                     continue
                 info = ZipInfo(f"{prefix}/{file.relative_to(source).as_posix()}", (2026, 1, 1, 0, 0, 0))
+                # ZipInfo otherwise records the host OS (Windows=0, Unix=3).
+                # Use Unix metadata consistently for the permissions below.
+                info.create_system = 3
                 info.compress_type = ZIP_DEFLATED
                 info.external_attr = 0o644 << 16
                 archive.writestr(info, file.read_bytes().replace(b"\r\n", b"\n"))

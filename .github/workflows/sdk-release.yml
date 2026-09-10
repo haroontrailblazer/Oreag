@@ -28,6 +28,8 @@ jobs:
           python-version: '3.13'
       - id: version
         run: python scripts/check_sdk_release.py --github-output
+      - name: SDK archive reproducibility
+        run: python -m unittest discover -s scripts -p test_package_sdks.py
       - run: node --test sdk/javascript/test.mjs
       - run: pip install build twine ./sdk/python
       - run: python -m unittest test_sdk.py
