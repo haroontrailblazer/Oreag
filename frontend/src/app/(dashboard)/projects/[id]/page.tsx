@@ -7,7 +7,7 @@ import useSWR, { mutate as globalMutate } from "swr"
 import { ApiTab } from "@/components/project/api-tab"
 import { FilesTab } from "@/components/project/files-tab"
 import { MemoryTab } from "@/components/project/memory-tab"
-import { PlaygroundTab } from "@/components/project/playground-tab"
+import { PlaygroundWorkspace } from "@/components/project/playground-workspace"
 import { SettingsTab } from "@/components/project/settings-tab"
 import { VisualizeTab } from "@/components/project/visualize-tab"
 import { SquaresLoader } from "@/components/ui/squares-loader"
@@ -183,7 +183,7 @@ export default function ProjectPage({
         {/* Playground manages its own scroll (conversation scrolls, input +
             header stay put), so this slot doesn't scroll - it just fills. */}
         <TabsContent value="playground" className="mt-4 flex min-h-0 flex-1 flex-col" forceMount={mountAll}>
-          <PlaygroundTab project={project} />
+          <PlaygroundWorkspace project={project} />
         </TabsContent>
         <TabsContent value="api" className="mt-4 min-h-0 flex-1 overflow-y-auto" forceMount={mountAll}>
           <ApiTab project={project} />
