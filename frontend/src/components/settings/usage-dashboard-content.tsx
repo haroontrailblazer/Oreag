@@ -1886,7 +1886,7 @@ export function UsageDetails({ data }: { data: AccountUsage }) {
           <DeferredUsagePanel label="Response time">
             <LatencyTrend daily={data.daily} />
           </DeferredUsagePanel>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-2 lg:[&>[data-usage-panel]]:grid">
             <DeferredUsagePanel label="Traffic by endpoint">
               <EndpointBreakdown rows={data.by_endpoint} />
             </DeferredUsagePanel>
