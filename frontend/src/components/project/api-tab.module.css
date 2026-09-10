@@ -79,3 +79,20 @@
 @media (prefers-reduced-motion: reduce) {
   .page [data-slot="button"], .page [data-slot="tabs-trigger"], .dialog [data-slot="button"] { transition: none; }
 }
+
+/* SDK setup and secondary guides share the surrounding API card structure. */
+.sdkInstall { min-width: 0; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.sdkGrid { display: grid; gap: 16px; min-width: 0; margin-top: 16px; }
+.sdkPackage { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.sdkPackage .copyRow { min-width: 0; padding: 8px 10px 8px 12px; box-shadow: none; }
+.copyButton { flex-shrink: 0; }
+.guides { min-width: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.guide + .guide { border-top: 1px solid var(--border); }
+.guide > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; cursor: pointer; list-style: none; font-size: 12px; font-weight: 500; }
+.guide > summary::-webkit-details-marker { display: none; }
+.guide > summary::after { content: "+"; color: var(--muted-foreground); font-size: 17px; font-weight: 400; }
+.guide[open] > summary::after { content: "−"; }
+.guide > summary:hover { background: var(--muted); }
+.guide > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; border-radius: 8px; }
+.guide > div { min-width: 0; padding: 0 16px 18px; color: var(--muted-foreground); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+@container api (min-width: 760px) { .sdkGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

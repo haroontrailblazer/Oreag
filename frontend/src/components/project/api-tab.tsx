@@ -686,37 +686,157 @@ console.log(await feedback.json());`
           </Table>}
         </CardContent>
       </Card>
-      <WebhooksPanel projectId={project.id} />
-      <div className="rounded-xl border p-4 text-sm"><h3 className="font-medium">Safe retries</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Use the same Idempotency-Key and content for buffered queries, uploads or evaluation creation after a lost response. Completed results replay for 24 hours. Pending, uncertain or changed requests return 409. Streaming does not support replay.</p><a className="mt-2 inline-block text-xs underline" href="/docs#reference-safe-retries">Retry guide</a></div>
-      <section aria-labelledby="sdk-install-title" className="min-w-0 rounded-xl border p-4 text-sm">
-        <h3 id="sdk-install-title" className="font-medium">Python & JavaScript SDKs</h3>
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Install an SDK, then configure it on your server with this project&apos;s API key and project ID.
-          Version 0.2.0 supports queries, streaming, uploads, feedback, evaluations and safe retries.
-        </p>
-        <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-2">
-          <div className="min-w-0 space-y-2">
-            <h4 className="text-xs font-medium">JavaScript / TypeScript · npm</h4>
-            <CopyRow value="npm install @haroontrailblazer/oreag-sdk" label="Copy npm install command" />
-            <a className="inline-block break-all text-xs underline" href="https://www.npmjs.com/package/@haroontrailblazer/oreag-sdk" target="_blank" rel="noreferrer">
-              npmjs.com/package/@haroontrailblazer/oreag-sdk
-            </a>
+
+      <Card id="project-api-quickstart">
+        <CardHeader>
+          <CardTitle><Terminal aria-hidden="true" />Quickstart</CardTitle>
+          <CardDescription>
+            Query this project from your app - swap in an API key and go. Pass
+            the same{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+              conversation_id
+            </code>{" "}
+            to make follow-ups like &ldquo;summarize that&rdquo; conversational.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <section aria-labelledby="sdk-install-title" className={styles.sdkInstall}>
+            <h3 id="sdk-install-title" className="text-sm font-medium">Install an SDK</h3>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              Install an SDK, then configure it on your server with this project&apos;s API key and project ID.
+              Version 0.2.0 supports queries, streaming, uploads, feedback, evaluations and safe retries.
+            </p>
+            <div className={styles.sdkGrid}>
+              <div className={styles.sdkPackage}>
+                <h4 className="text-xs font-medium">JavaScript / TypeScript · npm</h4>
+                <CopyRow value="npm install @haroontrailblazer/oreag-sdk" label="Copy npm install command" />
+                <a className="inline-block break-all text-xs underline" href="https://www.npmjs.com/package/@haroontrailblazer/oreag-sdk" target="_blank" rel="noreferrer">
+                  View package on npm
+                </a>
+              </div>
+              <div className={styles.sdkPackage}>
+                <h4 className="text-xs font-medium">Python · PyPI</h4>
+                <CopyRow value="pip install oreag-sdk" label="Copy pip install command" />
+                <a className="inline-block break-all text-xs underline" href="https://pypi.org/project/oreag-sdk/" target="_blank" rel="noreferrer">
+                  View package on PyPI
+                </a>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-4 text-xs">
+              <a className="underline" href="/docs#reference-python-and-javascript-sdks">SDK setup guide</a>
+              <a className="underline" href="/downloads/oreag-python-sdk.zip">Download Python source</a>
+              <a className="underline" href="/downloads/oreag-javascript-sdk.zip">Download JavaScript source</a>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">The proprietary viewing-only license is unchanged.</p>
+          </section>
+
+          <h3 className="text-sm font-medium">Make your first request</h3>
+          <div className={styles.examples}>
+          <Tabs defaultValue="curl">
+            <TabsList>
+              <TabsTrigger value="curl">cURL</TabsTrigger>
+              <TabsTrigger value="js">JavaScript</TabsTrigger>
+              <TabsTrigger value="python">Python</TabsTrigger>
+            </TabsList>
+            <TabsContent value="curl">
+              <CodePanel title="Terminal" code={curlExample} />
+            </TabsContent>
+            <TabsContent value="js">
+              <CodePanel title="query.ts" code={jsExample} />
+            </TabsContent>
+            <TabsContent value="python">
+              <CodePanel title="query.py" code={pythonExample} />
+            </TabsContent>
+          </Tabs>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">Response</span>
+              <Badge
+                variant="outline"
+                className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[10.5px] text-emerald-600 dark:text-emerald-400"
+              >
+                200 OK
+              </Badge>
+            </div>
+            <CodePanel title="application/json" code={responseExample} />
           </div>
-          <div className="min-w-0 space-y-2">
-            <h4 className="text-xs font-medium">Python · PyPI</h4>
-            <CopyRow value="pip install oreag-sdk" label="Copy pip install command" />
-            <a className="inline-block break-all text-xs underline" href="https://pypi.org/project/oreag-sdk/" target="_blank" rel="noreferrer">
-              pypi.org/project/oreag-sdk
-            </a>
           </div>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-4 text-xs">
-          <a className="underline" href="/docs#reference-python-and-javascript-sdks">SDK setup guide</a>
-          <a className="underline" href="/downloads/oreag-python-sdk.zip">Download Python source</a>
-          <a className="underline" href="/downloads/oreag-javascript-sdk.zip">Download JavaScript source</a>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">The proprietary viewing-only license is unchanged.</p>
-      </section>
+
+          <div className={styles.guides}>
+          <details className={styles.guide}>
+            <summary>Safe retries</summary>
+            <div className="space-y-3">
+              <p>Reuse the same Idempotency-Key and content for buffered queries, uploads or evaluations after a lost response. Completed results replay for 24 hours. Pending, uncertain or changed requests return 409. Streaming does not support replay.</p>
+              <a className="underline underline-offset-4" href="/docs#reference-safe-retries">Retry guide</a>
+            </div>
+          </details>
+          <details className={styles.guide}>
+            <summary>Monitor your application</summary>
+            <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              GET /queries returns items and next_cursor. Pass next_cursor as before
+              to load the next page. Filters: days (7, 30, 90), search, cache
+              (all, fresh, l1, l2), feedback (all, helpful, not_helpful, unrated),
+              min_latency_ms, and limit (1–100). GET /health returns generated_at,
+              query_window_days, and a projects array containing this project only.
+              Any active project key can read its API and Playground history,
+              including questions and feedback notes. Keep these calls server-side.
+            </p>
+            <a href="/docs#queries" className="text-xs underline underline-offset-4">Queries, Health, and feedback guide</a>
+            </div>
+          </details>
+
+          <details className={styles.guide}>
+            <summary>Saved evaluations</summary>
+            <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              GET /evaluations/suite reads the saved test set and revision. PUT the same path with
+              revision and a version-2 suite to save model, embedder, vector dimensions, and answer policy.
+              POST /evaluations/runs with a unique UUID id and suite creates an isolated snapshot.
+              Runs continue in the background. Poll GET /evaluations/runs/&#123;run_id&#125; until completed or failed:
+              the worker embeds batches and answers questions independently. GET the run after a disconnect.
+              The cancel and resume actions use POST; DELETE the run removes its saved results and vectors.
+              Evaluation settings, scores, and feedback never update live project configuration,
+              production vectors, Queries, or Health. PUT /evaluations/runs/&#123;run_id&#125;/results/&#123;result_index&#125;/feedback
+              with rating and optional note to rate a finished run result; DELETE clears it.
+              Use the zero-based index in the run&apos;s results array. Evaluation answers have no live query_id.
+              Fresh answers and indexing consume provider quota. Project keys scope every operation.
+            </p>
+            <p className="text-xs leading-relaxed text-muted-foreground">Use Evaluator → Automatic checks to schedule saved sets and compare quality, latency, and cost. POST /evaluations/cases/from-query adds a recorded question and your expected answer with the saved set revision. Query detail includes measured stage timings.</p>
+            <a href="/docs#querying" className="text-xs underline underline-offset-4">Evaluation configuration and API guide</a>
+            </div>
+          </details>
+
+          <details className={styles.guide}>
+            <summary>Answer feedback</summary>
+            <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Keep the response&apos;s query_id as a string. Send feedback from
+              your server after a user rates an answer; skip it when query_id is
+              null. Notes are optional, up to 1,000 characters. Saving replaces
+              the previous rating and note; DELETE the same URL to remove them.
+              Any active key for this project can update its query feedback,
+              which appears in Queries. No upload permission is needed.
+            </p>
+            <CodePanel title="feedback.ts (server)" code={feedbackExample} />
+            </div>
+          </details>
+
+          <details className={styles.guide}>
+            <summary>Ingest documents</summary>
+            <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Upload files programmatically with a key that has{" "}
+              <span className="font-medium text-foreground">uploads</span>{" "}
+              enabled - read-only keys get a 403.
+            </p>
+            <CodePanel title="Terminal" code={uploadExample} />
+            </div>
+          </details>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card id="project-api-reference">
         <CardHeader>
@@ -795,108 +915,7 @@ console.log(await feedback.json());`
         </CardContent>
       </Card>
 
-      <Card id="project-api-quickstart">
-        <CardHeader>
-          <CardTitle><Terminal aria-hidden="true" />Quickstart</CardTitle>
-          <CardDescription>
-            Query this project from your app - swap in an API key and go. Pass
-            the same{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-              conversation_id
-            </code>{" "}
-            to make follow-ups like &ldquo;summarize that&rdquo; conversational.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className={styles.examples}>
-          <Tabs defaultValue="curl">
-            <TabsList>
-              <TabsTrigger value="curl">cURL</TabsTrigger>
-              <TabsTrigger value="js">JavaScript</TabsTrigger>
-              <TabsTrigger value="python">Python</TabsTrigger>
-            </TabsList>
-            <TabsContent value="curl">
-              <CodePanel title="Terminal" code={curlExample} />
-            </TabsContent>
-            <TabsContent value="js">
-              <CodePanel title="query.ts" code={jsExample} />
-            </TabsContent>
-            <TabsContent value="python">
-              <CodePanel title="query.py" code={pythonExample} />
-            </TabsContent>
-          </Tabs>
-
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Response</span>
-              <Badge
-                variant="outline"
-                className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[10.5px] text-emerald-600 dark:text-emerald-400"
-              >
-                200 OK
-              </Badge>
-            </div>
-            <CodePanel title="application/json" code={responseExample} />
-          </div>
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-sm font-medium">Monitor your application</span>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              GET /queries returns items and next_cursor. Pass next_cursor as before
-              to load the next page. Filters: days (7, 30, 90), search, cache
-              (all, fresh, l1, l2), feedback (all, helpful, not_helpful, unrated),
-              min_latency_ms, and limit (1–100). GET /health returns generated_at,
-              query_window_days, and a projects array containing this project only.
-              Any active project key can read its API and Playground history,
-              including questions and feedback notes. Keep these calls server-side.
-            </p>
-            <a href="/docs#queries" className="text-xs underline underline-offset-4">Queries, Health, and feedback guide</a>
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-sm font-medium">Saved evaluations</span>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              GET /evaluations/suite reads the saved test set and revision. PUT the same path with
-              revision and a version-2 suite to save model, embedder, vector dimensions, and answer policy.
-              POST /evaluations/runs with a unique UUID id and suite creates an isolated snapshot.
-              Runs continue in the background. Poll GET /evaluations/runs/&#123;run_id&#125; until completed or failed:
-              the worker embeds batches and answers questions independently. GET the run after a disconnect.
-              The cancel and resume actions use POST; DELETE the run removes its saved results and vectors.
-              Evaluation settings, scores, and feedback never update live project configuration,
-              production vectors, Queries, or Health. PUT /evaluations/runs/&#123;run_id&#125;/results/&#123;result_index&#125;/feedback
-              with rating and optional note to rate a finished run result; DELETE clears it.
-              Use the zero-based index in the run&apos;s results array. Evaluation answers have no live query_id.
-              Fresh answers and indexing consume provider quota. Project keys scope every operation.
-            </p>
-            <p className="text-xs leading-relaxed text-muted-foreground">Use Evaluator → Automatic checks to schedule saved sets and compare quality, latency, and cost. POST /evaluations/cases/from-query adds a recorded question and your expected answer with the saved set revision. Query detail includes measured stage timings.</p>
-            <a href="/docs#querying" className="text-xs underline underline-offset-4">Evaluation configuration and API guide</a>
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-sm font-medium">Answer feedback</span>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Keep the response&apos;s query_id as a string. Send feedback from
-              your server after a user rates an answer; skip it when query_id is
-              null. Notes are optional, up to 1,000 characters. Saving replaces
-              the previous rating and note; DELETE the same URL to remove them.
-              Any active key for this project can update its query feedback,
-              which appears in Queries. No upload permission is needed.
-            </p>
-            <CodePanel title="feedback.ts (server)" code={feedbackExample} />
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-sm font-medium">Ingest documents</span>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Upload files programmatically with a key that has{" "}
-              <span className="font-medium text-foreground">uploads</span>{" "}
-              enabled - read-only keys get a 403.
-            </p>
-            <CodePanel title="Terminal" code={uploadExample} />
-          </div>
-        </CardContent>
-      </Card>
+      <WebhooksPanel projectId={project.id} />
 
       <Card id="project-api-mcp">
         <CardHeader>
