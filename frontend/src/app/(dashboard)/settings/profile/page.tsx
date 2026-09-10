@@ -2,6 +2,7 @@
 
 import {
   CameraIcon as Camera,
+  ArrowUpRightIcon as ArrowUpRight,
   ChatCircleTextIcon as ChatCircleText,
   CheckIcon as Check,
   CopyIcon as Copy,
@@ -11,8 +12,10 @@ import {
   PencilSimpleIcon as PencilSimple,
   SealCheckIcon as SealCheck,
   SignOutIcon as SignOut,
+  ShieldCheckIcon as ShieldCheck,
   WarningCircleIcon as WarningCircle,
 } from "@phosphor-icons/react/dist/ssr"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
@@ -74,15 +77,15 @@ function StatTile({
   value: number | null
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border bg-background p-4">
+    <div className="flex min-w-0 flex-col gap-3 rounded-xl border bg-background p-4 sm:flex-row sm:items-center">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
         {icon}
       </span>
       <div className="min-w-0">
-        <div className="text-xl font-semibold tabular-nums leading-6">
-          {value ?? "-"}
+        <div className="break-all text-2xl font-semibold tabular-nums leading-8 tracking-tight">
+          {value == null ? <span aria-label="Not available">—</span> : value.toLocaleString("en-US")}
         </div>
-        <div className="truncate text-xs text-muted-foreground">{label}</div>
+        <div className="text-xs leading-relaxed text-muted-foreground">{label}</div>
       </div>
     </div>
   )
@@ -276,53 +279,72 @@ export default function ProfilePage() {
     // so there's no leftover black band below a mis-sized frame. overflow-x
     // guards against any stray horizontal scroll.
     <div className="flex flex-col gap-6 overflow-x-hidden md:h-full md:min-h-0 md:overflow-hidden">
-      <div className="shrink-0">
-        <h1 className="text-2xl font-semibold">Profile</h1>
-        <p className="text-sm text-muted-foreground">
+      <div className="shrink-0 space-y-1 border-b pb-5">
+        <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
           Manage your account, security, sessions and appearance.
         </p>
       </div>
 
-      <div className="space-y-6 md:min-h-0 md:flex-1 md:overflow-y-auto md:pb-1">
+      <div className="space-y-6 md:min-h-0 md:flex-1 md:overflow-y-auto md:pb-4 md:pr-1">
         {/* Identity hero: avatar and account details side by side, full width. */}
-        <Card>
-          <CardContent className="flex flex-col items-center gap-6 p-6 text-center sm:flex-row sm:items-start sm:gap-8 sm:p-8 sm:text-left">
-            <div className="group relative shrink-0">
-              <UserAvatar
-                key={previewSrc ?? "none"}
-                src={previewSrc}
-                name={name || email}
-                className="size-24 text-3xl sm:size-28"
-              />
-              <button
-                type="button"
-                aria-label="Change profile picture"
-                disabled={uploading}
-                onClick={() => fileRef.current?.click()}
-                className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-              >
-                {uploading ? <Spin /> : <Camera className="size-6" />}
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={handleAvatarChange}
-              />
+        <Card className="gap-0 overflow-hidden py-0">
+          <CardHeader className="border-b bg-muted/20 py-5">
+            <CardTitle>Personal details</CardTitle>
+            <CardDescription>Your name and photo across your Oreag workspace.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-6 p-5 sm:flex-row sm:items-start sm:gap-8 sm:p-6">
+            <div className="flex shrink-0 items-center gap-4 sm:flex-col sm:items-center sm:text-center">
+              <div className="relative shrink-0">
+                <UserAvatar
+                  key={previewSrc ?? "none"}
+                  src={previewSrc}
+                  name={savedName || email}
+                  className="size-20 text-3xl sm:size-24"
+                />
+                <button
+                  type="button"
+                  aria-label="Change profile picture"
+                  disabled={uploading}
+                  onClick={() => fileRef.current?.click()}
+                  className="absolute -bottom-1 -right-1 flex size-9 items-center justify-center rounded-full border bg-background text-foreground shadow-sm transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-wait"
+                >
+                  {uploading ? <Spin /> : <Camera className="size-4" />}
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={handleAvatarChange}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Button type="button" variant="outline" size="sm" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                  {uploading ? "Uploading…" : "Change photo"}
+                </Button>
+                <p className="text-xs text-muted-foreground">Image up to 3 MB</p>
+              </div>
             </div>
 
             <div className="min-w-0 flex-1 space-y-4">
+              <div className="space-y-1">
+                <h2 className="break-words text-xl font-semibold tracking-tight">{savedName || "Your profile"}</h2>
+                <p className="text-xs text-muted-foreground">Keep your account details up to date.</p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="display-name">Display name</Label>
-                <div className="flex justify-center gap-2 sm:justify-start">
+                <div className="flex items-center gap-2">
                   <Input
                     ref={nameInputRef}
                     id="display-name"
                     value={name}
                     placeholder="Your name"
                     maxLength={50}
+                    autoComplete="nickname"
+                    aria-describedby="display-name-hint"
                     readOnly={!editingName}
+                    disabled={savingName}
                     onChange={(e) => setName(e.target.value)}
                     onKeyDown={(e) => {
                       if (
@@ -333,19 +355,20 @@ export default function ProfilePage() {
                       ) {
                         handleSaveName()
                       }
-                      if (e.key === "Escape") {
+                      if (e.key === "Escape" && !savingName) {
                         setName(savedName)
                         setEditingName(false)
                       }
                     }}
-                    className="max-w-72 read-only:cursor-default read-only:bg-muted/30"
+                    className="min-w-0 max-w-md read-only:cursor-default read-only:bg-muted/30"
                   />
                   {editingName ? (
                     <Button
+                      className="shrink-0"
                       onClick={handleSaveName}
                       disabled={savingName || name.trim() === savedName}
                     >
-                      {savingName ? <Spin /> : "Save"}
+                      {savingName ? <><Spin /><span className="sr-only">Saving name</span></> : "Save"}
                     </Button>
                   ) : (
                     <Button
@@ -360,10 +383,20 @@ export default function ProfilePage() {
                     </Button>
                   )}
                 </div>
+                <div className="flex max-w-md items-center justify-between gap-3">
+                  <p id="display-name-hint" className="text-xs text-muted-foreground">{editingName ? `${name.length}/50 characters` : "Choose the name shown in your workspace."}</p>
+                  {editingName && (
+                    <Button type="button" variant="ghost" size="sm" disabled={savingName} onClick={() => { setName(savedName); setEditingName(false) }}>
+                      Cancel
+                    </Button>
+                  )}
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-center gap-2 text-sm sm:justify-start">
-                <span className="text-muted-foreground">{email ?? "-"}</span>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Email address</p>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="min-w-0 break-all text-muted-foreground">{email ?? "Loading account…"}</span>
                 {meta?.verified ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                     <SealCheck className="size-3.5" weight="fill" />
@@ -375,6 +408,7 @@ export default function ProfilePage() {
                     Unverified
                   </span>
                 ) : null}
+              </div>
               </div>
 
               {/* Verify prompt: only when the email isn't confirmed yet. */}
@@ -397,35 +431,53 @@ export default function ProfilePage() {
                 </div>
               ) : null}
 
-              <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground sm:justify-start">
-                <span>Member since {formatDate(meta?.createdAt ?? null)}</span>
-                <span>Last sign-in {formatDate(meta?.lastSignIn ?? null)}</span>
+            </div>
+          </CardContent>
+          <dl className="grid gap-4 border-t bg-muted/20 px-5 py-4 text-sm sm:grid-cols-3 sm:px-6">
+            <div className="space-y-1">
+              <dt className="text-xs text-muted-foreground">Member since</dt>
+              <dd className="font-medium">{formatDate(meta?.createdAt ?? null)}</dd>
+            </div>
+            <div className="space-y-1">
+              <dt className="text-xs text-muted-foreground">Last sign-in</dt>
+              <dd className="font-medium">{formatDate(meta?.lastSignIn ?? null)}</dd>
+            </div>
+            <div className="space-y-1">
+              <dt className="text-xs text-muted-foreground">Account ID</dt>
+              <dd>
                 <button
                   type="button"
                   onClick={handleCopyId}
+                  disabled={!meta}
+                  aria-label={copied ? "Account ID copied" : "Copy account ID"}
                   title="Copy account ID (useful in support requests)"
-                  className="inline-flex items-center gap-1 font-mono transition-colors hover:text-foreground"
+                  className="inline-flex min-h-6 items-center gap-2 rounded font-mono text-xs transition-colors hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
                 >
                   {copied ? (
                     <Check className="size-3.5 text-emerald-500" />
                   ) : (
                     <Copy className="size-3.5" />
                   )}
-                  {meta ? `${meta.id.slice(0, 8)}…` : "-"}
+                  <span aria-live="polite">{copied ? "Copied" : meta ? `${meta.id.slice(0, 8)}…` : "-"}</span>
                 </button>
-              </div>
+              </dd>
             </div>
-          </CardContent>
+          </dl>
         </Card>
 
         {/* Account-wide usage: full-width row of stat tiles. */}
         <Card>
-          <CardHeader>
-            <CardTitle>Usage overview</CardTitle>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1.5">
+            <CardTitle>Workspace activity</CardTitle>
             <CardDescription>
               Everything this account has indexed and served, across all
               projects.
             </CardDescription>
+            </div>
+            <Button asChild variant="outline" size="sm" className="w-fit shrink-0">
+              <Link href="/settings/usage">View usage <ArrowUpRight className="size-3.5" /></Link>
+            </Button>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile
@@ -451,12 +503,31 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1.5">
+              <CardTitle>Appearance</CardTitle>
+              <CardDescription>Choose a theme, or follow your device settings.</CardDescription>
+            </div>
+            <div className="w-full shrink-0 sm:w-64">
+              <ThemeToggle showLabels />
+            </div>
+          </CardContent>
+        </Card>
+
+        <section aria-labelledby="profile-security-heading" className="space-y-4">
+          <div className="flex items-start gap-3 pt-2">
+            <ShieldCheck className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+            <div className="space-y-1">
+              <h2 id="profile-security-heading" className="text-base font-semibold">Security &amp; access</h2>
+              <p className="text-sm text-muted-foreground">Manage how you sign in and where you stay signed in.</p>
+            </div>
+          </div>
         {/* Full width: this is the most consequential security control on the
             page, and its factor lists need the room. */}
         <TwoFactorCard />
 
-        {/* Two balanced rows of paired cards, like the project Settings tab. */}
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid items-start gap-4 lg:grid-cols-2">
           {/* Security - reauthentication-gated, see the card's own notes. */}
           <ChangePasswordCard />
 
@@ -469,7 +540,12 @@ export default function ProfilePage() {
                 session looks suspicious.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">This device</p>
+                  <p className="text-xs text-muted-foreground">End your current session.</p>
+                </div>
               <Button
                 variant="outline"
                 disabled={signingOut || signingOutAll}
@@ -484,6 +560,12 @@ export default function ProfilePage() {
                   </>
                 )}
               </Button>
+              </div>
+              <div className="space-y-3 border-t pt-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">All devices</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">Sign out across devices, including this one.</p>
+                </div>
               <Button
                 variant="outline"
                 disabled={signingOut || signingOutAll}
@@ -491,26 +573,16 @@ export default function ProfilePage() {
               >
                 {signingOutAll ? <Spin /> : "Sign out of all devices"}
               </Button>
+              </div>
             </CardContent>
           </Card>
-
-          {/* Appearance */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Appearance</CardTitle>
-              <CardDescription>
-                Choose how Oreag looks on this device.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ThemeToggle />
-            </CardContent>
-          </Card>
+        </div>
+        </section>
 
           {/* Danger zone */}
           <Card className="border-destructive/40 bg-destructive/[0.02]">
-            <CardHeader>
-              <CardTitle className="text-destructive">Danger zone</CardTitle>
+            <CardHeader className="gap-2">
+              <CardTitle className="text-destructive">Delete account</CardTitle>
               <CardDescription>
                 Permanently delete your account and all of your projects, files,
                 indexed chunks, API keys and provider keys. This cannot be
@@ -523,7 +595,6 @@ export default function ProfilePage() {
               </Button>
             </CardContent>
           </Card>
-        </div>
       </div>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -536,6 +607,8 @@ export default function ProfilePage() {
             </DialogDescription>
           </DialogHeader>
           <Input
+            id="delete-account-confirmation"
+            aria-label="Type DELETE to confirm account deletion"
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
             placeholder="DELETE"

@@ -26,7 +26,7 @@ function getServerSnapshot() {
   return false
 }
 
-export function ThemeToggle() {
+export function ThemeToggle({ showLabels = false }: { showLabels?: boolean }) {
   const { theme, setTheme } = useTheme()
   const mounted = useSyncExternalStore(
     subscribe,
@@ -41,10 +41,10 @@ export function ThemeToggle() {
         {OPTIONS.map(({ label, icon: Icon }) => (
           <div
             key={label}
-            className="inline-flex h-7 items-center justify-center rounded-md px-2 text-muted-foreground"
+            className={cn("inline-flex items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground", showLabels ? "h-9" : "h-7")}
           >
             <Icon className="size-3.5" />
-            <span className="sr-only">{label}</span>
+            <span className={showLabels ? undefined : "sr-only"}>{label}</span>
           </div>
         ))}
       </div>
@@ -68,11 +68,12 @@ export function ThemeToggle() {
             onClick={() => setTheme(value)}
             className={cn(
               "h-7 px-2 text-xs text-muted-foreground",
+              showLabels && "h-9 gap-1.5",
               selected && "bg-accent text-accent-foreground shadow-xs"
             )}
           >
             <Icon className="size-3.5" />
-            <span className="sr-only">{label}</span>
+            <span className={showLabels ? undefined : "sr-only"}>{label}</span>
           </Button>
         )
       })}

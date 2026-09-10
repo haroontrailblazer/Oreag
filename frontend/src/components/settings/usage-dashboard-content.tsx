@@ -1223,7 +1223,7 @@ function DailyTrends({ daily }: { daily: UsageDaily[] }) {
 function DailyTable({ series }: { series: UsageDaily[] }) {
   const rows = [...series].reverse() // most recent first
   return (
-    <Card className="usage-daily-table gap-0 overflow-hidden py-0">
+    <Card className="usage-daily-table h-[32rem] gap-0 overflow-hidden py-0 md:h-[24rem]">
       <CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
         <div className="divide-y md:hidden">
           {rows.map((day) => (
@@ -1335,7 +1335,10 @@ function ApiKeysTable({ rows }: { rows: UsageByApiKey[] }) {
 
   return (
     <Card
-      className="usage-data-card gap-0 overflow-hidden"
+      className={cn(
+        "usage-data-card gap-0 overflow-hidden",
+        rows.length > 0 && "h-[34rem] md:h-[27rem]"
+      )}
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">
@@ -1455,7 +1458,10 @@ function ModelsTable({
 
   return (
     <Card
-      className="usage-data-card gap-0 overflow-hidden"
+      className={cn(
+        "usage-data-card gap-0 overflow-hidden",
+        rows.length > 0 && "h-[34rem] md:h-[27rem]"
+      )}
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">
@@ -1622,7 +1628,10 @@ function ProjectsTable({ rows }: { rows: UsageByProject[] }) {
 
   return (
     <Card
-      className="usage-data-card gap-0 overflow-hidden"
+      className={cn(
+        "usage-data-card gap-0 overflow-hidden",
+        rows.length > 0 && "h-[38rem] md:h-[27rem]"
+      )}
     >
       <CardHeader className="shrink-0 border-b bg-muted/20 pb-5">
         <CardTitle className="flex items-center gap-2 text-base">

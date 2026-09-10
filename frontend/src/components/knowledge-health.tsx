@@ -27,11 +27,12 @@ function StateBadge({ project }: { project: ProjectHealth }) {
 }
 
 export function KnowledgeHealthLoading() {
-  return <div role="status" aria-label="Loading health" className="space-y-4">
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28 animate-none rounded-xl" />)}
+  return <div role="status" aria-label="Loading health" className="flex min-h-0 flex-1 flex-col gap-3 md:block md:space-y-4">
+    <div className="grid shrink-0 grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
+      {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-20 animate-none rounded-xl md:h-36" />)}
     </div>
-    <Skeleton className="h-64 animate-none rounded-xl" />
+    <Skeleton className="h-9 shrink-0 animate-none rounded-md md:hidden" />
+    <Skeleton className="min-h-0 flex-1 animate-none rounded-xl md:h-64" />
   </div>
 }
 
@@ -90,31 +91,31 @@ export function KnowledgeHealthDashboard() {
   ]
   const statusOptions = [{ value: "all", label: "All statuses" }, ...Object.entries(HEALTH_LABELS).map(([value, label]) => ({ value, label }))]
 
-  return <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 min-w-0 flex-col gap-4 md:h-full">
-    <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4">
-      <div>
-        <h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Health</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Check indexing readiness and find documents that need attention.</p>
+  return <div className="relative flex h-[calc(100dvh-6.3125rem)] min-h-0 min-w-0 flex-col gap-3 overflow-hidden md:h-full md:gap-4">
+    <header className="flex shrink-0 items-start justify-between gap-3 border-b pb-3 md:flex-wrap md:items-center md:pb-4">
+      <div className="min-w-0 flex-1">
+        <h1 className="text-2xl font-semibold tracking-[-0.035em] md:text-[1.75rem]">Health</h1>
+        <p className="mt-1 text-xs text-muted-foreground md:text-sm">Check indexing readiness and find documents that need attention.</p>
       </div>
-      <Button size="sm" variant="outline" disabled={isValidating} onClick={() => void mutate()}>
-        <ArrowClockwiseIcon className="size-4" />{isValidating ? "Checking…" : "Refresh"}
+      <Button size="sm" variant="outline" className="shrink-0" aria-label={isValidating ? "Checking health" : "Refresh health"} disabled={isValidating} onClick={() => void mutate()}>
+        <ArrowClockwiseIcon className="size-4" /><span className="hidden md:inline">{isValidating ? "Checking…" : "Refresh"}</span>
       </Button>
     </header>
-    <div className="min-h-0 flex-1 overflow-y-auto pb-3 pr-0.5">
-      {error && !isSessionExpired(error) && <div role="alert" className="mb-4 space-y-2 rounded-xl border p-4 text-sm">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden pr-0.5 md:block md:overflow-y-auto md:pb-3">
+      {error && !isSessionExpired(error) && <div role="alert" className="mb-4 shrink-0 space-y-2 rounded-xl border p-4 text-sm">
         <p>Could not refresh health data.{data ? " Showing the last available snapshot." : " Please try again."}</p>
         <Button variant="outline" size="sm" onClick={() => void mutate()}>Retry</Button>
       </div>}
       {!data && (!error || isSessionExpired(error)) && <KnowledgeHealthLoading />}
-      {data && <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {summary.map(metric => <div key={metric.label} className="flex min-h-36 min-w-0 flex-col rounded-xl border bg-card p-4">
-            <p className="text-xs font-medium text-muted-foreground">{metric.label}</p>
-            <p className="my-2 text-3xl font-semibold tabular-nums">{metric.value.toLocaleString()}</p>
-            <p className="mt-auto text-xs leading-5 text-muted-foreground">{metric.detail}</p>
+      {data && <div className="flex min-h-0 flex-1 flex-col gap-3 md:block md:space-y-4">
+        <div className="grid shrink-0 grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4" aria-label="Health summary">
+          {summary.map(metric => <div key={metric.label} className="relative flex min-w-0 flex-col gap-1 rounded-xl border bg-card p-3 md:min-h-36 md:gap-0 md:p-4">
+            <p className="text-[11px] font-medium leading-4 text-muted-foreground md:text-xs">{metric.label}</p>
+            <p className="break-words text-xl font-semibold tabular-nums md:my-2 md:text-3xl">{metric.value.toLocaleString()}</p>
+            <p className="sr-only md:not-sr-only md:mt-auto md:text-xs md:leading-5 md:text-muted-foreground">{metric.detail}</p>
           </div>)}
         </div>
-        <div className="flex items-center gap-3 md:flex-wrap">
+        <div className="flex shrink-0 items-center gap-3 md:flex-wrap">
           <div className="relative min-w-0 flex-1 md:basis-48">
             <MagnifyingGlassIcon aria-hidden="true" className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
             <Input aria-label="Search projects" placeholder="Search projects…" value={search} onChange={event => setSearch(event.target.value)} className="pl-9" />
@@ -124,6 +125,7 @@ export function KnowledgeHealthDashboard() {
           </MobileFilters>
           <div className="hidden md:block md:w-48"><FilterSelect label="Health status" value={state} onChange={setState} options={statusOptions} hideLabel /></div>
         </div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-3 md:space-y-4 md:overflow-visible md:pb-0" role="region" aria-label="Health results" tabIndex={0}>
         <section aria-label="Project health" className="overflow-hidden rounded-xl border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
             <h2 className="text-sm font-medium">Projects</h2>
@@ -152,6 +154,7 @@ export function KnowledgeHealthDashboard() {
         </section>
         <p className="text-xs leading-5 text-muted-foreground">Current files only; superseded versions are excluded. Readiness reflects indexing status, not answer accuracy. Retrieval measurements cover the last {data.query_window_days} days.</p>
         <p className="text-xs text-muted-foreground">Checked {new Date(data.generated_at).toLocaleString()}</p>
+        </div>
       </div>}
     </div>
     <Sheet open={selectedId !== null} onOpenChange={open => { if (!open) setSelectedId(null) }}>

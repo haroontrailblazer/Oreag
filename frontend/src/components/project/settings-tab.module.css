@@ -1,4 +1,6 @@
 .page {
+  /* Keep hidden form controls inside the tab's scrolling content. */
+  position: relative;
   --panel: color-mix(in oklch, var(--card) 94%, var(--muted));
   --edge-light: color-mix(in oklch, var(--background) 90%, white);
   --surface-shadow: #00000014;

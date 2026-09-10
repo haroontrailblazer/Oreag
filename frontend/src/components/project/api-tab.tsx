@@ -474,20 +474,22 @@ print(data["answer"])`
     setDeleting(false)
   }
 
+  const noKeys = !keysError && keys?.length === 0
+
   return (
     <div className={styles.page}>
       <Card id="project-api-keys">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <CardTitle><KeyRound aria-hidden="true" />API keys{keys && <span className={styles.count}>{keys.filter(key => !key.revoked_at).length} active</span>}</CardTitle>
+              <CardTitle><KeyRound aria-hidden="true" />API keys{!!keys?.length && <span className={styles.count}>{keys.filter(key => !key.revoked_at).length} active</span>}</CardTitle>
               <CardDescription>
                 Keys are shown once at creation - store them securely.
               </CardDescription>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-2">
               <BestPractices tips={BEST_PRACTICE_TIPS} />
-              <Button
+              {!noKeys && <Button
                 onClick={handleCreate}
                 disabled={creating}
                 aria-label="Create key"
@@ -501,12 +503,26 @@ print(data["answer"])`
                     <span className="hidden sm:inline">Create key</span>
                   </>
                 )}
-              </Button>
+              </Button>}
             </div>
           </div>
         </CardHeader>
         <CardContent className={styles.flush}>
-          <Table className={styles.keysTable}>
+          {noKeys ? (
+            <section className={styles.emptyKeys} aria-label="No API keys">
+              <div className={styles.emptyKeysIcon} aria-hidden="true"><KeyRound className="size-6" /></div>
+              <div className="space-y-2">
+                <h3 className="text-base font-semibold tracking-tight">Connect your first app</h3>
+                <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
+                  Create an API key to query this project from your app or agent.
+                </p>
+              </div>
+              <Button onClick={handleCreate} disabled={creating}>
+                {creating ? <Spin /> : <Plus className="size-4" aria-hidden="true" />}
+                {creating ? "Creating key…" : "Create API key"}
+              </Button>
+            </section>
+          ) : <Table className={styles.keysTable}>
             <TableHeader>
               <TableRow>
                 <TableHead className="pl-6">Key</TableHead>
@@ -544,16 +560,6 @@ print(data["answer"])`
                     <TableCell data-label="Manage" className="w-20 pr-6 text-right"><Skeleton className="ml-auto size-8" /></TableCell>
                   </TableRow>
                 ))
-              ) : keys.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={6}
-                    className="py-10 text-center text-muted-foreground"
-                  >
-                    <KeyRound className="mx-auto mb-2 size-6" />
-                    No keys yet - create one to call your RAG API.
-                  </TableCell>
-                </TableRow>
               ) : (
                 sortedKeys.map((key) => (
                   <TableRow key={key.id} className={styles.keyRow}>
@@ -630,7 +636,7 @@ print(data["answer"])`
                 ))
               )}
             </TableBody>
-          </Table>
+          </Table>}
         </CardContent>
       </Card>
 
