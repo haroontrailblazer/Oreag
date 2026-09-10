@@ -10,6 +10,8 @@ export type ProjectHealth = {
   failed_files: number
   review_files: number
   indexing_files: number
+  queued_files?: number
+  processing_files?: number
   empty_indexed_files: number
   unknown_files: number
   duplicate_copies: number
@@ -29,14 +31,16 @@ export type KnowledgeHealth = {
   projects: ProjectHealth[]
 }
 
-export type HealthState = "attention" | "paused" | "indexing" | "empty" | "ready"
+export type HealthState = "attention" | "paused" | "queued" | "indexing" | "empty" | "ready"
 export const HEALTH_LABELS: Record<HealthState, string> = {
-  attention: "Needs attention", paused: "Paused", indexing: "Indexing", empty: "No searchable files", ready: "Ready",
+  attention: "Needs attention", paused: "Paused", queued: "Queued", indexing: "Indexing", empty: "No searchable files", ready: "Ready",
 }
 
 export function healthState(project: ProjectHealth): HealthState {
   if (project.failed_files || project.review_files || project.empty_indexed_files || project.unknown_files) return "attention"
   if (project.suspended) return "paused"
+  if (project.processing_files) return "indexing"
+  if (project.queued_files) return "queued"
   if (project.indexing_files) return "indexing"
   if (!project.searchable_files) return "empty"
   return "ready"
@@ -64,7 +68,7 @@ export function healthSimilarity(value: number | null) {
   return value == null ? "Not measured" : value.toFixed(3)
 }
 
-const priority: Record<HealthState, number> = { attention: 0, empty: 1, indexing: 2, paused: 3, ready: 4 }
+const priority: Record<HealthState, number> = { attention: 0, empty: 1, indexing: 2, queued: 3, paused: 4, ready: 5 }
 export function sortedHealthProjects(projects: ProjectHealth[], search: string, state: string) {
   return projects.filter(project => project.name.toLowerCase().includes(search.trim().toLowerCase()) && (state === "all" || healthState(project) === state))
     .sort((a, b) => priority[healthState(a)] - priority[healthState(b)] || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))

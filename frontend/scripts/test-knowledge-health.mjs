@@ -31,3 +31,13 @@ test("filters and attention ordering leave the source report untouched", () => {
   assert.equal(sortedHealthProjects(rows, "Beta", "ready").length, 0)
   assert.equal(healthProjectLink("a/b", "files"), "/projects/a%2Fb?tab=files")
 })
+
+test("queued and processing states stay distinct, with attention taking priority", () => {
+  const queued = { ...project, indexing_files: 2, queued_files: 2, processing_files: 0 }
+  const indexing = { ...queued, indexing_files: 3, processing_files: 1 }
+  assert.equal(healthState(queued), "queued")
+  assert.equal(healthState(indexing), "indexing")
+  assert.equal(healthState({ ...indexing, failed_files: 1 }), "attention")
+  assert.equal(healthState({ ...queued, suspended: true }), "paused")
+  assert.equal(sortedHealthProjects([queued, indexing], "", "queued").length, 1)
+})

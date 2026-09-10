@@ -90,7 +90,7 @@ only measured, uncached queries; missing measurements stay null.
 Queries refreshes its first page every 30 seconds while visible and online;
 older pages keep their pagination position. Health refreshes on the same
 interval, so activity from an external application appears without a browser
-reload. Both also refresh on window focus and support manual refresh. Failed or
+reload. Both also refresh on window focus. Failed or
 interrupted requests that do not produce a query log are not listed as completed
 queries. These owner reports require a dashboard session; a project API key does
 not grant access to account-wide monitoring data.

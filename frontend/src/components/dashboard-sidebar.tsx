@@ -414,7 +414,7 @@ function SidebarBody() {
 
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="flex shrink-0 items-center justify-between px-3">
-          <span className="text-xs font-medium uppercase tracking-wide text-sidebar-foreground/55">
+          <span className={cn("font-medium uppercase tracking-wide text-sidebar-foreground/55", inProject ? "text-xs" : "text-[10px]")}>
             {inProject ? "Files" : "Projects"}
           </span>
           {!inProject && Boolean(projects?.length) ? (
@@ -424,7 +424,7 @@ function SidebarBody() {
           ) : null}
         </div>
 
-        <div className="relative shrink-0">
+        <div className="relative mx-3 shrink-0">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-sidebar-foreground/45" />
           <Input
             type="search"
@@ -432,7 +432,7 @@ function SidebarBody() {
             placeholder={inProject ? "Search files" : "Search projects"}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="h-7 bg-background pl-7 text-base placeholder:text-[13px] md:text-[13px]"
+            className="h-7 bg-background py-0.5 pl-8 pr-3 text-base leading-5 placeholder:text-[13px] md:text-[13px]"
           />
         </div>
 

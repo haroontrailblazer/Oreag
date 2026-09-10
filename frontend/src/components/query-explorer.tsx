@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import useSWR from "swr"
-import { ArrowClockwiseIcon, ArrowRightIcon, MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr"
+import { ArrowRightIcon, MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -51,7 +51,7 @@ export function QueryExplorer() {
   const [selected, setSelected] = useState<string | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const { data: projects, error: projectsError } = useSWR<Project[]>("/api/projects", fetcher)
-  const { data, error, isLoading, isValidating, mutate } = useSWR<QueryPage>(queryExplorerKey(filters, cursors.at(-1)), fetcher, {
+  const { data, error, isLoading, mutate } = useSWR<QueryPage>(queryExplorerKey(filters, cursors.at(-1)), fetcher, {
     refreshInterval: cursors.length ? 0 : 30_000,
     refreshWhenHidden: false, refreshWhenOffline: false,
   })
@@ -73,7 +73,7 @@ export function QueryExplorer() {
   const activeFilterCount = (["days", "project", "cache", "latency", "feedback"] as const)
     .filter(key => filters[key] !== DEFAULT_QUERY_FILTERS[key]).length
   const filterControls = <div className="space-y-4">
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <FilterSelect label="Project" value={filters.project} onChange={value => changeFilter("project", value)} options={[{ value: "", label: "All projects" }, ...(projects ?? []).map(project => ({ value: project.id, label: project.name }))]} />
       <FilterSelect label="Time range" value={filters.days} onChange={value => changeFilter("days", value)} options={[7, 30, 90].map(days => ({ value: String(days), label: `Last ${days} days` }))} />
       <FilterSelect label="Cache result" value={filters.cache} onChange={value => changeFilter("cache", value)} options={[{ value: "all", label: "All results" }, { value: "fresh", label: "Fresh" }, { value: "l1", label: "Exact cache" }, { value: "l2", label: "Semantic cache" }]} />
@@ -84,21 +84,18 @@ export function QueryExplorer() {
   </div>
 
   return <div className="flex h-[calc(100dvh-6.25rem)] min-h-0 min-w-0 flex-col gap-4 md:h-full">
-    <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4">
-      <div><h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Queries</h1><p className="mt-1 text-sm text-muted-foreground">Monitor API queries and Playground tests: latency, caching, and feedback.</p></div>
-      <Button variant="outline" size="sm" disabled={isValidating} onClick={() => { if (cursors.length) setCursors([]); else void mutate() }}><ArrowClockwiseIcon className={isValidating ? "size-4 animate-spin" : "size-4"} />Refresh</Button>
+    <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b pb-4">
+      <h1 className="text-[1.75rem] font-semibold tracking-[-0.035em]">Queries</h1>
+      <div role="search" aria-label="Search and filter queries" className="flex w-[min(52vw,16rem)] min-w-0 items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <MagnifyingGlassIcon aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input aria-label="Search questions" placeholder="Search questions…" maxLength={200} value={search} onChange={event => setSearch(event.target.value)} className="h-8 pl-8 pr-2 text-base placeholder:text-[13px] md:text-[13px]" />
+        </div>
+        <MobileFilters title="Query filters" activeCount={activeFilterCount} onReset={reset} desktop compact>{filterControls}</MobileFilters>
+      </div>
+      <p className="col-span-2 text-xs text-muted-foreground md:text-sm">Monitor API queries and Playground tests: latency, caching, and feedback.</p>
     </header>
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-0.5 pb-3">
-      <section aria-label="Query filters" className="shrink-0 rounded-xl border bg-card p-4 md:max-h-[40%] md:space-y-4 md:overflow-y-auto md:[@media(max-height:700px)]:max-h-[30%]">
-        <div className="flex items-center gap-3">
-          <div className="relative min-w-0 flex-1"><MagnifyingGlassIcon aria-hidden="true" className="absolute top-2.5 left-3 size-4 text-muted-foreground" /><Input aria-label="Search questions" placeholder="Search questions…" maxLength={200} value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div>
-          <MobileFilters title="Query filters" activeCount={activeFilterCount} onReset={reset}>{filterControls}</MobileFilters>
-        </div>
-        <div className="hidden space-y-4 md:block">
-          {filterControls}
-          {filtered && <Button size="sm" variant="ghost" onClick={reset}>Reset filters</Button>}
-        </div>
-      </section>
       {/* Natural height for short lists; only the rows shrink and scroll when
           the card reaches the space left below the filters, like FilesTab. */}
       <section aria-label="Query results" aria-busy={isLoading} className="flex max-h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
@@ -114,7 +111,7 @@ export function QueryExplorer() {
         </div>
         <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-4 py-3"><span className="text-xs text-muted-foreground">Page {cursors.length + 1}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={!cursors.length || isLoading} onClick={() => setCursors(current => current.slice(0, -1))}>Previous</Button><Button size="sm" variant="outline" disabled={!data?.next_cursor || isLoading || !!error || search !== filters.search} onClick={() => { if (data?.next_cursor) setCursors(current => [...current, data.next_cursor!]) }}>Next</Button></div></footer>
       </section>
-      <p className="shrink-0 px-1 text-xs leading-5 text-muted-foreground">API queries and Playground tests refresh every 30 seconds on the first page. Failed requests and other API operations are not included. Times are shown in your local timezone.</p>
+      <p className="shrink-0 px-1 text-xs leading-5 text-muted-foreground">Failed requests and other API operations are not included. Times are shown in your local timezone.</p>
     </div>
     <Sheet open={selected !== null} onOpenChange={open => { if (!open) setSelected(null) }}><SheetContent side="right" className="w-full max-w-full bg-background sm:w-[540px]" onCloseAutoFocus={event => { event.preventDefault(); triggerRef.current?.focus() }}><SheetHeader className="p-6 pr-12"><SheetTitle className="text-lg">Query details</SheetTitle><SheetDescription>Recorded question and performance measurements.</SheetDescription></SheetHeader>{selected && <QueryDetail key={selected} id={selected} />}</SheetContent></Sheet>
   </div>

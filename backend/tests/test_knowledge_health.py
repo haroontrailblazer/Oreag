@@ -87,6 +87,7 @@ def test_current_file_states_and_superseded_exclusion(health):
     assert result["current_files"] == 7
     assert result["searchable_files"] == 1 and result["indexed_chunks"] == 8
     assert result["indexing_files"] == 2
+    assert result["queued_files"] == result["processing_files"] == 1
     assert result["failed_files"] == result["review_files"] == result["empty_indexed_files"] == result["unknown_files"] == 1
     assert result["last_indexed_at"] is not None
 

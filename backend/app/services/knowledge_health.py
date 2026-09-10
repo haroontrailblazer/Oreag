@@ -19,6 +19,8 @@ class ProjectHealth(BaseModel):
     failed_files: int = 0
     review_files: int = 0
     indexing_files: int = 0
+    queued_files: int = 0
+    processing_files: int = 0
     empty_indexed_files: int = 0
     unknown_files: int = 0
     duplicate_copies: int = 0
@@ -62,6 +64,8 @@ def read_health(db: Session, *, scope: ColumnElement[bool]) -> KnowledgeHealth:
         _count(File.status == "failed").label("failed_files"),
         _count(File.status == "review").label("review_files"),
         _count(File.status.in_(["pending", "processing"])).label("indexing_files"),
+        _count(File.status == "pending").label("queued_files"),
+        _count(File.status == "processing").label("processing_files"),
         _count(and_(File.status == "indexed", File.chunk_count == 0)).label("empty_indexed_files"),
         _count(File.status.not_in(["pending", "processing", "indexed", "failed", "review"])).label("unknown_files"),
         func.max(case((searchable, File.indexed_at), else_=None)).label("last_indexed_at"),
