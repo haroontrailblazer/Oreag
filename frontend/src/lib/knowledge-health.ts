@@ -14,6 +14,10 @@ export type ProjectHealth = {
   unknown_files: number
   duplicate_copies: number
   last_indexed_at: string | null
+  total_queries?: number
+  cached_queries?: number
+  helpful_queries?: number
+  not_helpful_queries?: number
   fresh_queries: number
   measured_queries: number
   avg_retrieval_similarity: number | null
@@ -48,7 +52,7 @@ export function healthIssues(project: ProjectHealth) {
   if (project.indexing_files) issues.push({ title: `${project.indexing_files} queued or indexing`, description: "Processing is still in progress. Open Files to follow the current status.", tab: "files" })
   if (!project.searchable_files && !project.indexing_files) issues.push({ title: "No searchable files", description: "Add documents or resolve the file issues so this project has indexed content to retrieve.", tab: "files" })
   if (project.duplicate_copies) issues.push({ title: `${project.duplicate_copies} extra identical upload${project.duplicate_copies === 1 ? "" : "s"}`, description: "These current files have matching original-upload hashes within this project. Review whether the copies are intentional before removing anything.", tab: "files" })
-  if (!project.measured_queries) issues.push({ title: "No recent retrieval measurements", description: "Try representative questions in the playground. Only uncached queries with a recorded similarity contribute to this measurement.", tab: "playground" })
+  if (!project.measured_queries) issues.push({ title: "No recent retrieval measurements", description: "Send representative questions through the query API, or test them in Playground. Only uncached queries with a recorded similarity contribute to this measurement.", tab: "playground" })
   return issues
 }
 

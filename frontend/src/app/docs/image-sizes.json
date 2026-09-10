@@ -239,5 +239,25 @@
     "width": 1504,
     "height": 1058,
     "pixelRatio": 2
+  },
+  "/docs/queries-monitoring.png": {
+    "width": 1280,
+    "height": 860
+  },
+  "/docs/health-monitoring.png": {
+    "width": 1280,
+    "height": 860
+  },
+  "/docs/health-query-detail.png": {
+    "width": 1280,
+    "height": 860
+  },
+  "/docs/playground-answer-feedback.png": {
+    "width": 1280,
+    "height": 860
+  },
+  "/docs/monitoring-api-reference.png": {
+    "width": 1192,
+    "height": 1270
   }
 }

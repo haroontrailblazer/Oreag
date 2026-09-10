@@ -78,7 +78,7 @@ function SidebarLink({
     <Link
       href={href}
       className={cn(
-        "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex h-9 items-center gap-2 rounded-md px-3 text-[13px] font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:h-8",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
@@ -380,14 +380,14 @@ function SidebarBody() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-5 p-4 md:sticky md:top-0 md:h-dvh">
+    <div className="flex h-full min-h-0 flex-col gap-3 p-4 md:sticky md:top-0 md:h-dvh">
       <Link
         href="/dashboard"
         className="group flex min-w-0 items-center gap-3"
       >
-        <BrandMark className="size-11" />
+        <BrandMark className="size-9" />
         <span className="min-w-0 leading-tight">
-          <span className="block truncate text-xl font-bold tracking-[-0.045em] text-foreground">
+          <span className="block truncate text-lg font-bold tracking-[-0.045em] text-foreground">
             Oreag
           </span>
           <span className="block truncate text-xs text-sidebar-foreground/55">
@@ -396,7 +396,7 @@ function SidebarBody() {
         </span>
       </Link>
 
-      <nav className="grid gap-1">
+      <nav className="grid shrink-0 gap-0.5" aria-label="Main navigation">
         {mainNav.map((item) => (
           <SidebarLink
             key={item.href}
@@ -412,8 +412,8 @@ function SidebarBody() {
 
       <Separator />
 
-      <div className="min-h-0 flex-1 space-y-2">
-        <div className="flex items-center justify-between px-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-2">
+        <div className="flex shrink-0 items-center justify-between px-3">
           <span className="text-xs font-medium uppercase tracking-wide text-sidebar-foreground/55">
             {inProject ? "Files" : "Projects"}
           </span>
@@ -424,7 +424,7 @@ function SidebarBody() {
           ) : null}
         </div>
 
-        <div className="relative">
+        <div className="relative shrink-0">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-foreground/45" />
           <Input
             type="search"
@@ -435,7 +435,7 @@ function SidebarBody() {
           />
         </div>
 
-        <div className="grid gap-1 overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden max-h-[calc(100dvh-22rem)]">
+        <div className="grid min-h-0 flex-1 content-start gap-1 overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {(inProject ? filesLoading : projectsLoading) && (
             <>
               {[0, 1].map(index => <div key={index} className="flex h-9 items-center gap-2 rounded-md px-3"><Skeleton className="size-4 shrink-0" /><Skeleton className="h-3 min-w-0 flex-1" /><Skeleton className="size-1.5 shrink-0 rounded-full" /></div>)}

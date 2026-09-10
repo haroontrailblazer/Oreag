@@ -49,6 +49,20 @@ function HealthDetail({ project }: { project: ProjectHealth }) {
         <dd className="mt-2 text-lg font-semibold tabular-nums">{value}</dd>
       </div>)}
     </dl>
+    <section className="space-y-3 rounded-xl border p-4">
+      <h3 className="text-sm font-medium">Query activity · Last 30 days</h3>
+      <p className="text-xs leading-5 text-muted-foreground">Includes queries and feedback from your application and Playground tests.</p>
+      <dl className="grid grid-cols-2 gap-3">
+        {[
+          ["Total queries", project.total_queries], ["Cached queries", project.cached_queries],
+          ["Helpful", project.helpful_queries], ["Not helpful", project.not_helpful_queries],
+        ].map(([label, value]) => <div key={label} className="min-w-0">
+          <dt className="text-xs text-muted-foreground">{label}</dt>
+          <dd className="mt-1 text-lg font-semibold tabular-nums">{value ?? "Not reported"}</dd>
+        </div>)}
+      </dl>
+      <p className="text-xs leading-5 text-muted-foreground">Feedback counts reflect the current rating on queries made in this period. Unrated answers are not treated as helpful.</p>
+    </section>
     <section className="space-y-2 rounded-xl border p-4">
       <h3 className="text-sm font-medium">Retrieval · Last 30 days</h3>
       <p className="text-2xl font-semibold tabular-nums">{healthSimilarity(project.avg_retrieval_similarity)}</p>
@@ -75,7 +89,9 @@ function HealthDetail({ project }: { project: ProjectHealth }) {
 }
 
 export function KnowledgeHealthDashboard() {
-  const { data, error, isValidating, mutate } = useSWR<KnowledgeHealth>(KNOWLEDGE_HEALTH_KEY, fetcher)
+  const { data, error, isValidating, mutate } = useSWR<KnowledgeHealth>(KNOWLEDGE_HEALTH_KEY, fetcher, {
+    refreshInterval: 30_000, refreshWhenHidden: false, refreshWhenOffline: false,
+  })
   const [search, setSearch] = useState("")
   const [state, setState] = useState("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -95,7 +111,7 @@ export function KnowledgeHealthDashboard() {
     <header className="flex shrink-0 items-start justify-between gap-3 border-b pb-3 md:flex-wrap md:items-center md:pb-4">
       <div className="min-w-0 flex-1">
         <h1 className="text-2xl font-semibold tracking-[-0.035em] md:text-[1.75rem]">Health</h1>
-        <p className="mt-1 text-xs text-muted-foreground md:text-sm">Check indexing readiness and find documents that need attention.</p>
+        <p className="mt-1 text-xs text-muted-foreground md:text-sm">Monitor API knowledge readiness, query activity, and answer feedback.</p>
       </div>
       <Button size="sm" variant="outline" className="shrink-0" aria-label={isValidating ? "Checking health" : "Refresh health"} disabled={isValidating} onClick={() => void mutate()}>
         <ArrowClockwiseIcon className="size-4" /><span className="hidden md:inline">{isValidating ? "Checking…" : "Refresh"}</span>
@@ -142,6 +158,7 @@ export function KnowledgeHealthDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{project.name}</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">{project.searchable_files} / {project.current_files} current files searchable · {project.indexed_chunks.toLocaleString()} chunks</p>
+                  {project.total_queries !== undefined && <p className="mt-1 text-xs leading-5 text-muted-foreground">{project.total_queries.toLocaleString()} queries · {(project.not_helpful_queries ?? 0).toLocaleString()} not helpful · Last 30 days</p>}
                   {project.duplicate_copies > 0 && <p className="mt-1 text-xs text-muted-foreground">{project.duplicate_copies} identical extra upload{project.duplicate_copies === 1 ? "" : "s"} to review</p>}
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
@@ -152,8 +169,8 @@ export function KnowledgeHealthDashboard() {
             </li>)}
           </ul>}
         </section>
-        <p className="text-xs leading-5 text-muted-foreground">Current files only; superseded versions are excluded. Readiness reflects indexing status, not answer accuracy. Retrieval measurements cover the last {data.query_window_days} days.</p>
-        <p className="text-xs text-muted-foreground">Checked {new Date(data.generated_at).toLocaleString()}</p>
+        <p className="text-xs leading-5 text-muted-foreground">Current files only; superseded versions are excluded. Readiness reflects indexing status, not answer accuracy. Query activity and feedback include API calls and Playground tests from the last {data.query_window_days} days. Retrieval similarity uses uncached queries only.</p>
+        <p className="text-xs text-muted-foreground">Checked {new Date(data.generated_at).toLocaleString()} · Refreshes every 30 seconds while visible</p>
         </div>
       </div>}
     </div>

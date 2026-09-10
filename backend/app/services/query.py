@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 
@@ -610,20 +610,22 @@ def run_query(
     # the LLM call, so the session holds none and has to take one back under
     # db_pool_timeout. Losing an analytics row is the cheap failure; turning a
     # finished answer into a 503 from main.py's PoolTimeoutError handler is not.
+    query_id = None
     try:
-        db.add(
-            QueryLog(
-                project_id=project_id,
-                api_key_id=api_key_id,
-                question=question,
-                top_k=top_k,
-                latency_ms=latency_ms,
-                cache_layer=cache_layer,
-                retrieval_similarity=_mean_similarity(result.sources),
-                cache_similarity=cache_similarity,
-            )
+        query_log = QueryLog(
+            project_id=project_id,
+            api_key_id=api_key_id,
+            question=question,
+            top_k=top_k,
+            latency_ms=latency_ms,
+            cache_layer=cache_layer,
+            retrieval_similarity=_mean_similarity(result.sources),
+            cache_similarity=cache_similarity,
         )
+        db.add(query_log)
         db.commit()
+        identity = inspect(query_log).identity
+        query_id = str(identity[0]) if identity else None
     except Exception:
         logger.warning(
             "Query log write failed for project %s - the answer is still served",
@@ -643,6 +645,7 @@ def run_query(
         _conversations.append_turn(project_key, conversation_id, question, answer)
 
     return QueryResponse(
+        query_id=query_id,
         answer=answer,
         sources=[SourceChunk(**s) for s in _mark_cited(answer, result.sources)],
         model=model,
@@ -1014,20 +1017,22 @@ def run_query_stream(
 
     latency_ms = int((time.perf_counter() - started) * 1000)
     _fill_usage_out(usage_out, request_usage, cache_layer, final, latency_ms)
+    query_id = None
     try:
-        db.add(
-            QueryLog(
-                project_id=project_id,
-                api_key_id=api_key_id,
-                question=question,
-                top_k=top_k,
-                latency_ms=latency_ms,
-                cache_layer=cache_layer,
-                retrieval_similarity=_mean_similarity(final.sources),
-                cache_similarity=cache_similarity,
-            )
+        query_log = QueryLog(
+            project_id=project_id,
+            api_key_id=api_key_id,
+            question=question,
+            top_k=top_k,
+            latency_ms=latency_ms,
+            cache_layer=cache_layer,
+            retrieval_similarity=_mean_similarity(final.sources),
+            cache_similarity=cache_similarity,
         )
+        db.add(query_log)
         db.commit()
+        identity = inspect(query_log).identity
+        query_id = str(identity[0]) if identity else None
     except Exception:
         logger.warning(
             "Query log write failed for project %s - the answer is still streamed",
@@ -1046,6 +1051,7 @@ def run_query_stream(
     yield {
         "type": "done",
         "response": {
+            "query_id": query_id,
             "answer": answer,
             "sources": [dict(s) for s in _mark_cited(answer, final.sources)],
             "model": model,

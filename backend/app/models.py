@@ -413,6 +413,9 @@ class QueryLog(Base):
     # How close the L2 match was. Without it nobody can tell whether
     # semantic_cache_min_similarity (0.75) is too loose.
     cache_similarity: Mapped[float | None] = mapped_column(Float)
+    feedback_rating: Mapped[str | None] = mapped_column(Text)
+    feedback_note: Mapped[str | None] = mapped_column(NulSafeText)
+    feedback_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

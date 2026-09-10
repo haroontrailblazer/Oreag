@@ -57,6 +57,7 @@ class TestQueryResponseSchema:
         assert resp.needs_clarification is False
         assert resp.clarification_questions == []
         assert resp.conversation_id is None
+        assert resp.query_id is None
 
     def test_request_accepts_optional_conversation_id(self):
         from app.schemas import QueryRequest
@@ -296,6 +297,7 @@ class TestRunQueryStream:
         assert len(done) == 1
         resp = done[0]["response"]
         assert resp["answer"] == "Hello world"
+        assert resp["query_id"] is None
         assert len(resp["sources"]) == 2
         assert resp["cache_layer"] is None
 

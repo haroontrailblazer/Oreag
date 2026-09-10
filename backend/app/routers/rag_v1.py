@@ -3,8 +3,9 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, Query
 from fastapi import File as FastAPIFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
@@ -14,12 +15,14 @@ from sqlalchemy.orm import Session
 from ..auth.api_keys import require_api_key
 from ..config import settings
 from ..db import get_db
-from ..models import ApiKey, File, Project, SuspendedAccount, SuspendedAccount
+from ..models import ApiKey, File, Project, QueryLog, SuspendedAccount
 from ..providers.base import ProviderUnavailableError, is_provider_rate_limit
 from ..schemas import (
     BrainExploreRequest,
     BrainExploreResponse,
     FileOut,
+    FeedbackInput,
+    FeedbackResponse,
     ProjectInfo,
     QueryRequest,
     QueryResponse,
@@ -31,6 +34,9 @@ from ..services import document_events, explore, retrieval, storage
 from ..services.conversion import content_type_for, is_ingestable, source_extension
 from ..services.ingestion import find_duplicate
 from ..services.query import run_query, run_query_stream
+from ..services.feedback import write_feedback
+from ..services.query_history import QueryPage, QueryRecord, read_queries, read_query
+from ..services.knowledge_health import KnowledgeHealth, read_health
 from ..services.rate_limit import enforce_rate_limit
 from ..services import judges, tracing
 from ..services.usage import record_usage
@@ -59,6 +65,78 @@ def _get_project(db: Session, project_id: uuid.UUID) -> Project:
     ):
         raise HTTPException(403, "This account is suspended. Contact support.")
     return project
+
+
+@router.get("/queries", response_model=QueryPage)
+def public_list_queries(
+    project_id: uuid.UUID,
+    days: int = Query(default=30, ge=7, le=90),
+    search: str = Query(default="", max_length=200),
+    cache: Literal["all", "fresh", "l1", "l2"] = "all",
+    feedback: Literal["all", "helpful", "not_helpful", "unrated"] = "all",
+    min_latency_ms: int | None = Query(default=None, ge=0, le=3_600_000),
+    before: int | None = Query(default=None, gt=0, le=9_223_372_036_854_775_807),
+    limit: int = Query(default=25, ge=1, le=100),
+    api_key: ApiKey = Depends(require_api_key), db: Session = Depends(get_db),
+):
+    """List this project's API and Playground query logs, newest first."""
+    project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
+    return read_queries(
+        db, scope=Project.id == project.id, days=days, search=search, cache=cache,
+        feedback=feedback, min_latency_ms=min_latency_ms, before=before, limit=limit,
+    )
+
+
+@router.get("/queries/{query_id}", response_model=QueryRecord)
+def public_query_detail(
+    project_id: uuid.UUID, query_id: int,
+    api_key: ApiKey = Depends(require_api_key), db: Session = Depends(get_db),
+):
+    """Read a recorded question, measurements, and full feedback note."""
+    project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
+    return read_query(db, query_id, scope=Project.id == project.id)
+
+
+@router.get("/health", response_model=KnowledgeHealth)
+def public_project_health(
+    project_id: uuid.UUID,
+    api_key: ApiKey = Depends(require_api_key), db: Session = Depends(get_db),
+):
+    """Read indexing, retrieval, and feedback diagnostics for this project only."""
+    project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
+    return read_health(db, scope=Project.id == project.id)
+
+
+@router.put("/queries/{query_id}/feedback", response_model=FeedbackResponse)
+def public_save_feedback(
+    project_id: uuid.UUID, query_id: int, body: FeedbackInput,
+    api_key: ApiKey = Depends(require_api_key), db: Session = Depends(get_db),
+):
+    """Replace a query's feedback. Any active key for its project may submit."""
+    project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
+    return write_feedback(
+        db, query_id, scope=QueryLog.project_id == project.id,
+        feedback_rating=body.rating, feedback_note=body.note or None,
+        feedback_updated_at=datetime.now(timezone.utc),
+    )
+
+
+@router.delete("/queries/{query_id}/feedback", status_code=204)
+def public_clear_feedback(
+    project_id: uuid.UUID, query_id: int,
+    api_key: ApiKey = Depends(require_api_key), db: Session = Depends(get_db),
+):
+    """Remove the project's feedback for a query; repeated removal is safe."""
+    project = _get_project(db, project_id)
+    enforce_rate_limit(api_key.id, project.id)
+    write_feedback(
+        db, query_id, scope=QueryLog.project_id == project.id,
+        feedback_rating=None, feedback_note=None, feedback_updated_at=None,
+    )
 
 
 @router.post("/query", response_model=QueryResponse)

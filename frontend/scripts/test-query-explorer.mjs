@@ -4,12 +4,13 @@ import { DEFAULT_QUERY_FILTERS, queryExplorerKey, queryLatency, querySimilarity 
 
 test("prefetch and page share the default key; filter values are encoded", () => {
   assert.equal(queryExplorerKey(), "/api/account/queries?days=30&limit=25")
-  const url = new URL(queryExplorerKey({ ...DEFAULT_QUERY_FILTERS, project: "a", search: "  a&b %_  ", cache: "l2", latency: "3000" }, "9007199254740993"), "https://test.local")
+  const url = new URL(queryExplorerKey({ ...DEFAULT_QUERY_FILTERS, project: "a", search: "  a&b %_  ", cache: "l2", latency: "3000", feedback: "not_helpful" }, "9007199254740993"), "https://test.local")
   assert.equal(url.searchParams.get("search"), "a&b %_")
   assert.equal(url.searchParams.get("before"), "9007199254740993")
   assert.equal(url.searchParams.get("project_id"), "a")
   assert.equal(url.searchParams.get("cache"), "l2")
   assert.equal(url.searchParams.get("min_latency_ms"), "3000")
+  assert.equal(url.searchParams.get("feedback"), "not_helpful")
 })
 
 test("missing measurements are distinct from measured zero", () => {

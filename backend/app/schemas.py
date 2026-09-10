@@ -472,6 +472,8 @@ class SourceChunk(BaseModel):
 
 
 class QueryResponse(BaseModel):
+    # Identity of this invocation, including cache hits; absent if logging failed.
+    query_id: str | None = None
     answer: str
     sources: list[SourceChunk]
     model: str
@@ -734,3 +736,23 @@ class UsageReport(BaseModel):
     by_project: list[UsageByProject]
     daily: list[UsageDaily]
     caveats: UsageCaveats
+
+
+class FeedbackInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rating: Literal["helpful", "not_helpful"]
+    note: str = Field(default="", max_length=1000)
+
+    @field_validator("note")
+    @classmethod
+    def clean_note(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("Notes cannot contain null characters")
+        return value.strip()
+
+
+class FeedbackResponse(BaseModel):
+    query_id: str
+    rating: Literal["helpful", "not_helpful"] | None
+    note: str | None
+    updated_at: datetime | None

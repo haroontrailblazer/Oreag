@@ -142,6 +142,8 @@ function CopyRow({ value, label }: { value: string; label: string }) {
 
 const METHOD_STYLES: Record<string, string> = {
   GET: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  PUT: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  DELETE: "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400",
   POST: "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
 }
 
@@ -152,7 +154,7 @@ function EndpointRow({
   url,
   description,
 }: {
-  method: "GET" | "POST"
+  method: "GET" | "POST" | "PUT" | "DELETE"
   path: string
   url: string
   description: string
@@ -268,6 +270,31 @@ export function ApiTab({ project }: { project: Project }) {
         "Same answer, streamed token by token over Server-Sent Events",
     },
     {
+      method: "GET" as const,
+      path: `${basePath}/queries`,
+      description: "Query history with time, search, cache, latency, feedback filters and cursor pagination",
+    },
+    {
+      method: "GET" as const,
+      path: `${basePath}/queries/{query_id}`,
+      description: "Recorded question, performance measurements, and full feedback note",
+    },
+    {
+      method: "GET" as const,
+      path: `${basePath}/health`,
+      description: "This project's indexing readiness, query activity, and answer feedback over 30 days",
+    },
+    {
+      method: "PUT" as const,
+      path: `${basePath}/queries/{query_id}/feedback`,
+      description: "Save or replace helpful / not helpful feedback and an optional note",
+    },
+    {
+      method: "DELETE" as const,
+      path: `${basePath}/queries/{query_id}/feedback`,
+      description: "Remove a query's feedback (204 No Content)",
+    },
+    {
       method: "POST" as const,
       path: `${basePath}/retrieve`,
       description: "Retrieval only - top-matching chunks, no LLM call",
@@ -318,7 +345,7 @@ export function ApiTab({ project }: { project: Project }) {
   }
 );
 
-const { answer, sources, needs_clarification } = await res.json();`
+const { answer, sources, needs_clarification, query_id } = await res.json();`
 
   const pythonExample = `import requests
 
@@ -334,6 +361,7 @@ data = res.json()
 print(data["answer"])`
 
   const responseExample = `{
+  "query_id": "12345",
   "answer": "This document describes... [1]",
   "sources": [
     {
@@ -354,6 +382,24 @@ print(data["answer"])`
   "cache_layer": "l2",
   "cache_similarity": 0.82
 }`
+
+  const feedbackExample = `const queryId = "12345"; // query_id from /query or the stream's done.response
+const feedback = await fetch(
+  "${apiBase}${basePath}/queries/" + queryId + "/feedback",
+  {
+    method: "PUT",
+    headers: {
+      Authorization: "Bearer YOUR_API_KEY",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      rating: "not_helpful", // or "helpful"
+      note: "The answer missed the cancellation policy.",
+    }),
+  }
+);
+if (!feedback.ok) throw new Error(await feedback.text());
+console.log(await feedback.json());`
 
   const uploadExample = `curl -X POST ${apiBase}${basePath}/files \\
   -H "Authorization: Bearer YOUR_UPLOAD_KEY" \\
@@ -662,7 +708,7 @@ print(data["answer"])`
           </div>
           {endpoints.map((ep) => (
             <EndpointRow
-              key={ep.path}
+              key={`${ep.method} ${ep.path}`}
               method={ep.method}
               path={ep.path}
               url={`${apiBase}${ep.path}`}
@@ -679,7 +725,7 @@ print(data["answer"])`
                 <span className="font-medium text-foreground">
                   Standard endpoints
                 </span>{" "}
-                (query, query/stream, retrieve, memory):{" "}
+                (query, query/stream, queries, health, feedback, retrieve, memory):{" "}
                 <span className="font-mono text-foreground">120 req/min per key</span>
                 {" · "}
                 <span className="font-mono text-foreground">
@@ -760,6 +806,33 @@ print(data["answer"])`
             </div>
             <CodePanel title="application/json" code={responseExample} />
           </div>
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-sm font-medium">Monitor your application</span>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              GET /queries returns items and next_cursor. Pass next_cursor as before
+              to load the next page. Filters: days (7, 30, 90), search, cache
+              (all, fresh, l1, l2), feedback (all, helpful, not_helpful, unrated),
+              min_latency_ms, and limit (1–100). GET /health returns generated_at,
+              query_window_days, and a projects array containing this project only.
+              Any active project key can read its API and Playground history,
+              including questions and feedback notes. Keep these calls server-side.
+            </p>
+            <a href="/docs#queries" className="text-xs underline underline-offset-4">Queries, Health, and feedback guide</a>
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-sm font-medium">Answer feedback</span>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Keep the response&apos;s query_id as a string. Send feedback from
+              your server after a user rates an answer; skip it when query_id is
+              null. Notes are optional, up to 1,000 characters. Saving replaces
+              the previous rating and note; DELETE the same URL to remove them.
+              Any active key for this project can update its query feedback,
+              which appears in Queries. No upload permission is needed.
+            </p>
+            <CodePanel title="feedback.ts (server)" code={feedbackExample} />
           </div>
 
           <div className="space-y-2">

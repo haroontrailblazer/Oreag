@@ -67,6 +67,8 @@ def test_owner_isolation_and_empty_defaults(health):
     assert len(rows) == 1 and rows[0]["id"] == str(mine.id)
     assert rows[0]["current_files"] == 0
     assert rows[0]["fresh_queries"] == 0
+    assert rows[0]["total_queries"] == rows[0]["cached_queries"] == 0
+    assert rows[0]["helpful_queries"] == rows[0]["not_helpful_queries"] == 0
     assert rows[0]["avg_retrieval_similarity"] is None
     assert rows[0]["last_indexed_at"] is None
     assert "private" not in response.text.lower()
@@ -127,6 +129,29 @@ def test_all_unknown_measurements_remain_null(health):
     assert result["fresh_queries"] == 1
     assert result["measured_queries"] == 0
     assert result["avg_retrieval_similarity"] is None
+
+
+def test_activity_and_feedback_cover_all_surfaces_and_respect_window(health):
+    client, db, mine, other = health
+    stamp = datetime.now(timezone.utc)
+    key = ApiKey(project_id=mine.id, key_prefix="test", key_hash="test")
+    db.add(key)
+    db.commit()
+    query(db, mine, api_key_id=key.id, cache_layer="l1", feedback_rating="not_helpful", feedback_updated_at=stamp)
+    query(db, mine, api_key_id=key.id, cache_layer="l2", feedback_rating="helpful", feedback_updated_at=stamp)
+    query(db, mine, retrieval_similarity=0.0)  # Playground contributes too.
+    for date in [stamp - timedelta(days=31), stamp + timedelta(days=1)]:
+        query(db, mine, created_at=date, feedback_rating="not_helpful", feedback_updated_at=stamp)
+    query(db, other, feedback_rating="not_helpful", feedback_updated_at=stamp)
+    # Removing an API key must not remove its activity from the owner reports.
+    db.execute(sa.update(QueryLog).where(QueryLog.api_key_id == key.id).values(api_key_id=None))
+    db.delete(key)
+    db.commit()
+    result = client.get(URL).json()["projects"][0]
+    assert result["total_queries"] == 3 and result["cached_queries"] == 2
+    assert result["helpful_queries"] == result["not_helpful_queries"] == 1
+    assert result["fresh_queries"] == result["measured_queries"] == 1
+    assert result["avg_retrieval_similarity"] == 0.0
 
 
 def test_constant_query_count_and_no_writes(health):

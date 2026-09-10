@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { AnswerMarkdown } from "@/components/project/answer-markdown"
+import { AnswerFeedback } from "@/components/answer-feedback"
 import {
   CacheViz,
   ChipsViz,
@@ -275,6 +276,7 @@ const TurnView = memo(function TurnView({ question, result }: Turn) {
             />
           </div>
         ) : null}
+        {!result.needs_clarification && result.answer && result.query_id && <AnswerFeedback queryId={result.query_id} />}
       </div>
     </div>
   )

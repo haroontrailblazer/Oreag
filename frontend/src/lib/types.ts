@@ -194,6 +194,7 @@ export interface SourceChunk {
 }
 
 export interface QueryResponse {
+  query_id?: string | null
   answer: string
   sources: SourceChunk[]
   model: string
