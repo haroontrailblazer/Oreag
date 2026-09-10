@@ -108,7 +108,9 @@ export function EvaluationPlayground({ project, onBack }: { project: Project; on
   }
   const busy = running || saving || starting
   const ready = !!saved && !!models && !loadError
-  return <div className="min-w-0 space-y-5 pb-5">
+  // Anchor hidden labels inside this content so they cannot extend the page
+  // beyond the evaluator's scroll container, especially on mobile.
+  return <div className="relative min-w-0 space-y-5 pb-5">
     <header className="space-y-3 border-b pb-4">
       <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={onBack}><ArrowLeftIcon />Back to conversation</Button>
       <div className="flex flex-wrap items-center justify-between gap-3">
