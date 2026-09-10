@@ -10,16 +10,16 @@ export type EvaluationRun = { id: string; status: "preparing" | "running" | "com
 export class OreagError extends Error { status: number; detail: unknown; retryAfter: string | null }
 export class OreagClient {
   constructor(options: { apiKey: string; projectId: string; baseUrl?: string; fetch?: typeof fetch });
-  query(question: string, options?: QueryOptions): Promise<QueryResponse>;
+  query(question: string, options?: QueryOptions & { idempotencyKey?: string }): Promise<QueryResponse>;
   streamQuery(question: string, options?: QueryOptions): AsyncGenerator<StreamEvent>;
-  uploadFiles(files: { data: Blob; name: string }[], options?: { signal?: AbortSignal }): Promise<UploadedFile[]>;
+  uploadFiles(files: { data: Blob; name: string }[], options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<UploadedFile[]>;
   feedback(queryId: string, rating: "helpful" | "not_helpful", note?: string): Promise<Feedback>;
   clearFeedback(queryId: string): Promise<void>;
   getQuery(queryId: string): Promise<QueryRecord>;
   health(): Promise<Record<string, unknown>>;
   getTestSet(): Promise<{ revision: number; suite: EvaluationSuite | null }>;
   addToTestSet(queryId: string, expected: string, revision: number, options?: { source?: string; match?: "contains" | "exact" }): Promise<{ revision: number; suite: EvaluationSuite }>;
-  startEvaluation(id: string, suite: EvaluationSuite, referenceRunId?: string | null): Promise<EvaluationRun>;
+  startEvaluation(id: string, suite: EvaluationSuite, referenceRunId?: string | null, options?: { idempotencyKey?: string }): Promise<EvaluationRun>;
   getEvaluation(id: string): Promise<EvaluationRun>;
   cancelEvaluation(id: string): Promise<EvaluationRun>;
 }

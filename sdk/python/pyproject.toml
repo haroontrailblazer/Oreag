@@ -1,11 +1,21 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "oreag-sdk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Typed Oreag API client"
+readme = "README.md"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["httpx>=0.27,<1"]
 [tool.setuptools.package-data]
 oreag = ["py.typed"]
+
+[project.urls]
+Repository = "https://github.com/haroontrailblazer/Oreag"
+Issues = "https://github.com/haroontrailblazer/Oreag/issues"
+
+[tool.setuptools.packages.find]
+include = ["oreag*"]

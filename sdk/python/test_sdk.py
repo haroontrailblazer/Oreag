@@ -7,6 +7,19 @@ from oreag import Oreag, OreagError, verify_webhook
 
 
 class SDKTests(unittest.TestCase):
+    def test_idempotency_headers(self):
+        calls=[]
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200,json={"answer":"ok"})
+        with Oreag("test","project",transport=httpx.MockTransport(handler)) as c:
+            c.query("Hi",top_k=3,idempotency_key="logical-query")
+            self.assertEqual(calls[-1].headers["Idempotency-Key"],"logical-query")
+            self.assertNotIn("idempotency_key",json.loads(calls[-1].content))
+            c.upload_files([("fixture.txt",b"fixture")],idempotency_key="logical-upload")
+            self.assertEqual(calls[-1].headers["Idempotency-Key"],"logical-upload")
+            c.start_evaluation("run",{"cases":[],"variants":[]},idempotency_key="logical-eval")
+            self.assertEqual(calls[-1].headers["Idempotency-Key"],"logical-eval")
     def test_query_feedback_upload(self):
         calls = []
         def handler(request):

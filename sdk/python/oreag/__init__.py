@@ -102,8 +102,8 @@ class Oreag:
         self._check(response)
         return None if response.status_code == 204 else response.json()
 
-    def query(self, question: str, *, top_k: int | None = None, conversation_id: str | None = None) -> QueryResponse:
-        return self._request("POST", "/query", json={"question": question, "top_k": top_k, "conversation_id": conversation_id})
+    def query(self, question: str, *, top_k: int | None = None, conversation_id: str | None = None, idempotency_key: str | None = None) -> QueryResponse:
+        return self._request("POST", "/query", headers={"Idempotency-Key": idempotency_key} if idempotency_key else {}, json={"question": question, "top_k": top_k, "conversation_id": conversation_id})
 
     def stream_query(self, question: str, *, top_k: int | None = None, conversation_id: str | None = None) -> Iterator[TokenEvent | DoneEvent | PingEvent]:
         try:
@@ -146,8 +146,8 @@ class Oreag:
         except httpx.HTTPError as exc:
             raise OreagError("Stream connection failed; it was not retried") from exc
 
-    def upload_files(self, files: Sequence[tuple[str, BinaryIO | bytes]]) -> list[UploadedFile]:
-        return self._request("POST", "/files", files=[("uploads", (name, data)) for name, data in files])
+    def upload_files(self, files: Sequence[tuple[str, BinaryIO | bytes]], *, idempotency_key: str | None = None) -> list[UploadedFile]:
+        return self._request("POST", "/files", headers={"Idempotency-Key": idempotency_key} if idempotency_key else {}, files=[("uploads", (name, data)) for name, data in files])
 
     def feedback(self, query_id: str, rating: Literal["helpful", "not_helpful"], note: str = "") -> FeedbackResponse:
         return self._request("PUT", f"/queries/{quote(query_id, safe='')}/feedback", json={"rating": rating, "note": note})
@@ -167,8 +167,8 @@ class Oreag:
     def add_to_test_set(self, query_id: str, expected: str, revision: int, *, source: str = "", match: Literal["contains", "exact"] = "contains") -> dict[str, Any]:
         return self._request("POST", "/evaluations/cases/from-query", json={"query_id": query_id, "expected": expected, "revision": revision, "source": source, "match": match})
 
-    def start_evaluation(self, run_id: str, suite: dict[str, Any], reference_run_id: str | None = None) -> dict[str, Any]:
-        return self._request("POST", "/evaluations/runs", json={"id": run_id, "suite": suite, "background": True, "reference_run_id": reference_run_id})
+    def start_evaluation(self, run_id: str, suite: dict[str, Any], reference_run_id: str | None = None, *, idempotency_key: str | None = None) -> dict[str, Any]:
+        return self._request("POST", "/evaluations/runs", headers={"Idempotency-Key": idempotency_key} if idempotency_key else {}, json={"id": run_id, "suite": suite, "background": True, "reference_run_id": reference_run_id})
 
     def get_evaluation(self, run_id: str) -> dict[str, Any]:
         return self._request("GET", f"/evaluations/runs/{quote(run_id, safe='')}")

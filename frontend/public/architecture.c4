@@ -416,6 +416,15 @@ model {
             endpoints '/v1/projects/{project_id}/evaluations/cases/from-query · /v1/projects/{project_id}/evaluations/suite · /v1/projects/{project_id}/evaluations/runs · /v1/projects/{project_id}/evaluations/runs/{run_id} · /v1/projects/{project_id}/evaluations/runs/{run_id}/advance · /v1/projects/{project_id}/evaluations/runs/{run_id}/cancel · /v1/projects/{project_id}/evaluations/runs/{run_id}/resume · /v1/projects/{project_id}/evaluations/runs/{run_id}/results/{result_index}/feedback'
           }
         }
+        evaluationRetention = component 'Evaluation retention' 'Archives older terminal runs while preserving references and compressed results.' {
+          technology 'services/evaluation_retention.py · migration 0047'
+        }
+        idempotency = component 'Safe request replay' 'Encrypted completed responses scoped to API key and request content; uncertain work is never replayed as new work.' {
+          technology 'services/idempotency.py · idempotency_requests · migration 0047'
+        }
+        operationalMetrics = component 'Operational monitoring' 'Asynchronous request metrics, worker heartbeats, owner snapshots and cached readiness.' {
+          technology 'services/operations.py · routers/operations.py · migration 0047'
+        }
         quality = component 'Automatic checks' 'Durable scheduled evaluation jobs and explicit reference regression warnings.' {
           technology 'services/quality.py · evaluation_schedules · migration 0046'
           metadata { execution 'Frozen saved configurations; isolated corpus; background leased steps; null metrics remain unmeasured.' }

@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
+import { OperationsPanel } from "@/components/operations-panel"
 import Link from "next/link"
 import useSWR from "swr"
 import { ArrowRightIcon, HeartbeatIcon, MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr"
@@ -126,6 +127,7 @@ export function KnowledgeHealthDashboard() {
       </div>
       <p className="col-span-2 text-xs text-muted-foreground md:text-sm">Monitor API knowledge readiness, query activity, and answer feedback.</p>
     </header>
+    <OperationsPanel compact />
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden pr-0.5 md:block md:overflow-y-auto md:pb-3">
       {error && !isSessionExpired(error) && <div role="alert" className="mb-4 shrink-0 space-y-2 rounded-xl border p-4 text-sm">
         <p>Could not refresh health data.{data ? " Showing the last available snapshot." : " Please try again."}</p>

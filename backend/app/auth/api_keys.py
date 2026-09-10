@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,6 +31,7 @@ def require_api_key(
     project_id: uuid.UUID,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
+    request: Request = None,
 ) -> ApiKey:
     """Authenticate a public /v1 request against the project's API keys."""
     if creds is None or not creds.credentials.startswith(KEY_PREFIX):
@@ -44,6 +45,8 @@ def require_api_key(
     )
     if api_key is None:
         raise HTTPException(status_code=401, detail="Invalid API key")
+    if request is not None:
+        request.state.metric_project_id = api_key.project_id
     # last_used_at is a dashboard display field with minute granularity - don't
     # pay a write transaction (WAL fsync + row lock, serializing concurrent
     # requests on the same key) on EVERY request to maintain it. Refresh only

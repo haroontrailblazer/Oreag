@@ -9,11 +9,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from .config import settings
-from .services import embedding_usage, tracing
+from .services import embedding_usage, tracing, operations as ops_service
 from .routers import (
     account,
     budgets,
     evaluations,
+    operations,
     webhooks,
     files,
     keys,
@@ -58,10 +59,14 @@ async def lifespan(app: FastAPI):
         from .services.quality import quality_loop
         from .services.webhooks import webhook_loop
 
-        start_workers(stop_workers)
-        threading.Thread(target=quality_loop, args=(stop_workers,), name="evaluation-jobs", daemon=True).start()
-        threading.Thread(target=webhook_loop, args=(stop_workers,), name="webhook-delivery", daemon=True).start()
-        threading.Thread(target=budget_loop, args=(stop_workers,), name="budget-alerts", daemon=True).start()
+        managed_workers = start_workers(stop_workers)
+        for target, name in ((quality_loop, "evaluation-jobs"), (webhook_loop, "webhook-delivery"), (budget_loop, "budget-alerts")):
+            worker = threading.Thread(target=target, args=(stop_workers,), name=name, daemon=True)
+            worker.start()
+            managed_workers.append(worker)
+        ops_service.configure_workers(managed_workers)
+        threading.Thread(target=ops_service.operations_loop, args=(stop_workers,), name="operations", daemon=True).start()
+        threading.Thread(target=ops_service.snapshot_loop, args=(stop_workers,), name="operations-snapshots", daemon=True).start()
         threading.Thread(
             target=maintenance_loop,
             args=(stop_workers,),
@@ -246,6 +251,7 @@ class EmbeddingUsageMiddleware:
 
 
 app.add_middleware(EmbeddingUsageMiddleware)
+app.add_middleware(ops_service.RequestMetricsMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -256,7 +262,7 @@ app.add_middleware(
     allow_headers=["*"],
     # Retry-After is part of the documented 429 contract (api-tab.tsx) but is
     # unreadable by cross-origin JS unless it is explicitly exposed.
-    expose_headers=[h.strip() for h in settings.cors_expose_headers.split(",") if h.strip()],
+    expose_headers=[h.strip() for h in settings.cors_expose_headers.split(",") if h.strip()] + ["Idempotency-Replayed"],
 )
 
 # The engine fails DB-connection checkout fast (pool_timeout=5) under
@@ -284,6 +290,7 @@ app.include_router(memory.owner_router)
 app.include_router(memory_graph.owner_router)
 app.include_router(playground.router)
 app.include_router(evaluations.router)
+app.include_router(operations.router)
 app.include_router(webhooks.router)
 app.include_router(evaluations.public_router)
 app.include_router(meta.router)
@@ -299,3 +306,9 @@ app.include_router(memory_graph.public_router)
 @app.api_route("/healthz", methods=["GET", "HEAD"])
 async def healthz():
     return {"status": "ok"}
+
+
+@app.api_route("/readyz", methods=["GET", "HEAD"])
+async def readyz():
+    healthy = ops_service.ready()
+    return JSONResponse({"status": "ready" if healthy else "not_ready"}, status_code=200 if healthy else 503)

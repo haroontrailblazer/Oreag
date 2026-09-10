@@ -81,7 +81,11 @@ def get_run(db, project_id, run_id):
 
 
 def run_out(run):
+    if run.archived_at:
+        import gzip
+        return {**json.loads(gzip.decompress(run.archived_payload)), "archived_at": run.archived_at}
     return {"id": str(run.id), "status": run.status, "suite": run.suite, "corpus_count": run.corpus_count,
+            "archived_at": None,
             "execution": run.execution, "reference_run_id": str(run.reference_run_id) if run.reference_run_id else None,
             "quality_report": run.quality_report,
             "content_version": run.content_version, "prepared": run.prepared, "results": run.results,
@@ -111,8 +115,8 @@ def create_run(db, project, body, *, commit=True, quality_limits=None, api_key_i
             raise HTTPException(409, "This run ID already belongs to a different configuration.")
         return run_out(previous)
     validate_reference(db, project.id, body.reference_run_id, body.suite.model_dump())
-    if db.scalar(select(func.count()).select_from(EvaluationRun).where(EvaluationRun.project_id == project.id)) >= 20:
-        raise HTTPException(409, "This project has 20 saved runs. Delete an old run before starting another.")
+    from .evaluation_retention import make_room
+    make_room(db, project.id)
     version = project.content_version
     rows = db.execute(select(Chunk.content, File.filename, Chunk.page_number).join(File, Chunk.file_id == File.id)
                       .where(Chunk.project_id == project.id, File.in_force_to.is_(None), File.status == "indexed")
@@ -278,7 +282,10 @@ def advance(db: Session, project, run_id, api_key_id=None):
 
 
 def cancel(db, project_id, run_id):
-    get_run(db, project_id, run_id)
+    db.execute(select(Project.id).where(Project.id == project_id).with_for_update()).one()
+    run = get_run(db, project_id, run_id)
+    if run.archived_at:
+        raise HTTPException(409, "Archived results are read-only.")
     db.execute(update(EvaluationRun).where(EvaluationRun.id == run_id, EvaluationRun.status.in_(["preparing", "running", "failed"]))
                .values(status="cancelled", updated_at=datetime.now(timezone.utc)))
     db.commit()
@@ -286,7 +293,10 @@ def cancel(db, project_id, run_id):
 
 
 def resume(db, project_id, run_id):
+    db.execute(select(Project.id).where(Project.id == project_id).with_for_update()).one()
     run = get_run(db, project_id, run_id)
+    if run.archived_at:
+        raise HTTPException(409, "Archived results are read-only. Start a new run to evaluate again.")
     # Cancelled is final: restarting requires a new snapshot and run identity.
     if run.status == "failed":
         db.execute(update(EvaluationRun).where(EvaluationRun.id == run_id, EvaluationRun.status == "failed")
@@ -296,6 +306,7 @@ def resume(db, project_id, run_id):
 
 
 def delete_run(db, project_id, run_id):
+    db.execute(select(Project.id).where(Project.id == project_id).with_for_update()).one()
     run = get_run(db, project_id, run_id)
     if run.status in ("preparing", "running") or (run.lease_until and run.lease_until.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc)):
         raise HTTPException(409, "Stop this run and wait for its active step to finish before deleting it.")
@@ -309,6 +320,8 @@ def write_result_feedback(db, project_id, run_id, result_index, feedback):
                     .with_for_update().execution_options(populate_existing=True))
     if run is None:
         raise HTTPException(404, "Evaluation run not found")
+    if run.archived_at:
+        raise HTTPException(409, "Archived results are read-only.")
     if run.status in ("preparing", "running"):
         raise HTTPException(409, "Finish or stop the run before rating its results.")
     if result_index < 0 or result_index >= len(run.results) or not run.results[result_index].get("response"):

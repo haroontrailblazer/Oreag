@@ -10,11 +10,11 @@ export class OreagClient {
     this.base = `${baseUrl.replace(/\/$/, "")}/v1/projects/${encodeURIComponent(projectId)}`;
     this.apiKey = apiKey; this.fetch = transport;
   }
-  async request(path, { method = "GET", body, signal, stream = false } = {}) {
+  async request(path, { method = "GET", body, signal, stream = false, idempotencyKey } = {}) {
     let response;
     try {
       response = await this.fetch(this.base + path, { method, signal, redirect: "error",
-        headers: { Authorization: `Bearer ${this.apiKey}`, ...(body !== undefined && !(body instanceof FormData) ? { "Content-Type": "application/json" } : {}) },
+        headers: { ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}), Authorization: `Bearer ${this.apiKey}`, ...(body !== undefined && !(body instanceof FormData) ? { "Content-Type": "application/json" } : {}) },
         ...(body !== undefined ? { body: body instanceof FormData ? body : JSON.stringify(body) } : {}) });
     } catch (e) {
       if (signal?.aborted) throw e;
@@ -28,7 +28,7 @@ export class OreagClient {
     if (stream) return response;
     return response.status === 204 ? undefined : response.json();
   }
-  query(question, options = {}) { const { signal, ...body } = options; return this.request("/query", { method: "POST", body: { ...body, question }, signal }); }
+  query(question, options = {}) { const { signal, idempotencyKey, ...body } = options; return this.request("/query", { method: "POST", body: { ...body, question }, signal, idempotencyKey }); }
   async *streamQuery(question, options = {}) {
     const { signal, ...body } = options;
     const response = await this.request("/query/stream", { method: "POST", body: { ...body, question }, signal, stream: true });
@@ -63,10 +63,10 @@ export class OreagClient {
       }
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
-  uploadFiles(files, { signal } = {}) {
+  uploadFiles(files, { signal, idempotencyKey } = {}) {
     const form = new FormData();
     for (const { data, name } of files) form.append("uploads", data, name);
-    return this.request("/files", { method: "POST", body: form, signal });
+    return this.request("/files", { method: "POST", body: form, signal, idempotencyKey });
   }
   feedback(queryId, rating, note = "") { return this.request(`/queries/${encodeURIComponent(queryId)}/feedback`, { method: "PUT", body: { rating, note } }); }
   clearFeedback(queryId) { return this.request(`/queries/${encodeURIComponent(queryId)}/feedback`, { method: "DELETE" }); }
@@ -74,7 +74,7 @@ export class OreagClient {
   health() { return this.request("/health"); }
   getTestSet() { return this.request("/evaluations/suite"); }
   addToTestSet(queryId, expected, revision, options = {}) { return this.request("/evaluations/cases/from-query", { method: "POST", body: { ...options, query_id: queryId, expected, revision } }); }
-  startEvaluation(id, suite, referenceRunId = null) { return this.request("/evaluations/runs", { method: "POST", body: { id, suite, background: true, reference_run_id: referenceRunId } }); }
+  startEvaluation(id, suite, referenceRunId = null, { idempotencyKey } = {}) { return this.request("/evaluations/runs", { method: "POST", body: { id, suite, background: true, reference_run_id: referenceRunId }, idempotencyKey }); }
   getEvaluation(id) { return this.request(`/evaluations/runs/${encodeURIComponent(id)}`); }
   cancelEvaluation(id) { return this.request(`/evaluations/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }); }
 }

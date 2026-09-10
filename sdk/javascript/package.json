@@ -1,1 +1,48 @@
-{"name":"@oreag/sdk","version":"0.1.0","type":"module","main":"index.js","types":"index.d.ts","exports":{".":{"types":"./index.d.ts","import":"./index.js"},"./webhooks":{"types":"./webhooks.d.ts","import":"./webhooks.js"}},"files":["index.js","index.d.ts","webhooks.js","webhooks.d.ts","README.md"],"engines":{"node":">=18"},"scripts":{"test":"node --test test.mjs"}}
+{
+  "name": "@haroontrailblazer/oreag-sdk",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./webhooks": {
+      "types": "./webhooks.d.ts",
+      "import": "./webhooks.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "webhooks.js",
+    "webhooks.d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "examples.mjs"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test.mjs"
+  },
+  "description": "Typed Oreag client for uploading, answers, streaming, feedback and evaluations",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haroontrailblazer/Oreag.git",
+    "directory": "sdk/javascript"
+  },
+  "homepage": "https://github.com/haroontrailblazer/Oreag",
+  "bugs": {
+    "url": "https://github.com/haroontrailblazer/Oreag/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "license": "SEE LICENSE IN LICENSE"
+}

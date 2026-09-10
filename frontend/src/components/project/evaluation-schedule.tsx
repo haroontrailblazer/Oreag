@@ -9,6 +9,7 @@ import type { EvaluationRun } from "@/lib/evaluation"
 
 type Schedule = { revision: number; enabled: boolean; interval_hours: number; reference_run_id: string | null; quality_limits: { quality_drop_pp: number; latency_increase_percent: number; cost_increase_percent: number }; next_run_at: string | null; last_run_at: string | null; last_error: string | null }
 export function EvaluationSchedule({ base, history }: { base: string; history: EvaluationRun[] }) {
+  const { data: retained } = useSWR<EvaluationRun[]>(`${base}/runs`, fetcher)
   const { data, error, mutate } = useSWR<Schedule>(`${base}/schedule`, fetcher, { refreshInterval: 30000 })
   const [draft, setDraft] = useState<Schedule | null>(null)
   const [message, setMessage] = useState("")
@@ -32,10 +33,10 @@ export function EvaluationSchedule({ base, history }: { base: string; history: E
         <label className="flex items-center gap-2"><input type="checkbox" checked={value.enabled} onChange={e => setDraft({ ...value, enabled: e.target.checked })} />Enable scheduled checks</label>
         <div className="grid min-w-0 gap-3 sm:grid-cols-2">
           <FilterSelect label="Check frequency" value={String(value.interval_hours)} onChange={v => setDraft({ ...value, interval_hours: Number(v) })} options={[6, 12, 24, 168].map(n => ({ value: String(n), label: n === 168 ? "Weekly" : `Every ${n} hours` }))} />
-          <FilterSelect label="Reference run" value={value.reference_run_id ?? ""} onChange={v => setDraft({ ...value, reference_run_id: v || null })} options={[{ value: "", label: "No reference — record metrics only" }, ...history.filter(r => r.status === "completed").map(r => ({ value: r.id, label: new Date(r.created_at).toLocaleString() }))]} />
+          <FilterSelect label="Reference run" value={value.reference_run_id ?? ""} onChange={v => setDraft({ ...value, reference_run_id: v || null })} options={[{ value: "", label: "No reference — record metrics only" }, ...(retained ?? history).filter(r => r.status === "completed").map(r => ({ value: r.id, label: new Date(r.created_at).toLocaleString() }))]} />
         </div>
         <div className="grid gap-3 sm:grid-cols-3">{([['quality_drop_pp', 'Pass rate drop (points)', 100], ['latency_increase_percent', 'Latency rise (%)', 1000], ['cost_increase_percent', 'Cost rise (%)', 1000]] as const).map(([key, label, max]) => <label key={key} className="space-y-1.5">{label}<Input type="number" min={0} max={max} step="any" value={value.quality_limits[key]} onChange={e => setDraft({ ...value, quality_limits: { ...value.quality_limits, [key]: Number(e.target.value) } })} /></label>)}</div>
-        <p className="leading-5 text-muted-foreground">The reference must contain the same questions and configurations. Warnings appear in run history and can be delivered through the evaluation.regressed webhook. Unmeasured metrics are excluded. Run history holds 20 runs; delete old runs to keep schedules running.</p>
+        <p className="leading-5 text-muted-foreground">The reference must contain the same questions and configurations. Warnings appear in run history and can be delivered through the evaluation.regressed webhook. Unmeasured metrics are excluded. The latest 20 runs stay active. Older finished runs are archived automatically; reference runs are protected.</p>
         <Button size="sm" variant="outline" onClick={() => void save()}>Save schedule</Button>
         {data?.next_run_at && <p>Next check: {new Date(data.next_run_at).toLocaleString()}</p>}
         {data?.last_error && <p role="alert" className="text-destructive">{data.last_error}</p>}

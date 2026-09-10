@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, Query, Header
 from fastapi import File as FastAPIFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
@@ -31,6 +31,7 @@ from ..schemas import (
 )
 from ..sse import sse_response
 from ..services import document_events, explore, retrieval, storage
+from ..services import idempotency
 from ..services.conversion import content_type_for, is_ingestable, source_extension
 from ..services.ingestion import find_duplicate
 from ..services.query import run_query, run_query_stream
@@ -140,11 +141,13 @@ def public_clear_feedback(
 
 
 @router.post("/query", response_model=QueryResponse)
+@idempotency.protect("query")
 def public_query(
     project_id: uuid.UUID,
     body: QueryRequest,
     api_key: ApiKey = Depends(require_api_key),
     db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     project = _get_project(db, project_id)
     enforce_rate_limit(api_key.id, project.id)
@@ -237,6 +240,7 @@ def public_query_stream(
     body: QueryRequest,
     api_key: ApiKey = Depends(require_api_key),
     db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """Same as /query, streamed token by token over Server-Sent Events.
 
@@ -244,6 +248,8 @@ def public_query_stream(
     a final `data: {"type":"done","response":{...}}` frame with the full payload
     (sources, model, latency, cache info), and `{"type":"error"}` on failure.
     """
+    if idempotency_key is not None:
+        raise HTTPException(422, "Idempotency-Key is supported for buffered queries, uploads and evaluation creation, not streaming queries.")
     project = _get_project(db, project_id)
     enforce_rate_limit(api_key.id, project.id)
     # The usage event is written when the stream FINISHES (see the wrapper
@@ -346,11 +352,13 @@ def retrieve_docs(
 
 
 @router.post("/files", response_model=list[FileOut], status_code=201)
+@idempotency.protect("files")
 async def public_upload_files(
     project_id: uuid.UUID,
     uploads: list[UploadFile] = FastAPIFile(...),
     api_key: ApiKey = Depends(require_api_key),
     db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """Ingest documents with an API key, using the project's default chunking and
     embedding settings.

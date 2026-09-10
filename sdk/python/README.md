@@ -1,7 +1,7 @@
 # Oreag Python SDK
 
-Python 3.10+. From the repository root: `pip install ./sdk/python`.
-This is a source-distributed package; it has not been published to PyPI.
+Python 3.10+. Install a published release with `pip install oreag-sdk`.
+For a source checkout, run `pip install ./sdk/python` from the repository root.
 
 ```python
 import os
@@ -30,3 +30,13 @@ event = verify_webhook(raw_request_bytes, request_headers, signing_secret)
 ```
 
 Verify the exact raw bytes before parsing JSON. Verification allows five minutes of clock skew. Events can repeat and arrive out of order. Run `python -m unittest test_sdk.py` from this directory.
+
+## Safe retries (0.2.0)
+
+Pass `idempotency_key="one-logical-request"` to `query`, `upload_files`, or `start_evaluation`. Reuse the same key and content after a lost response. The server retains encrypted completed responses for 24 hours, scoped to the API key and operation. Different content returns 409; pending or uncertain work also returns 409 and is never executed again with that key within the retention window. Inspect the resource before creating a new key for an uncertain operation. Streaming does not support this header. These clients never retry automatically.
+
+See `CHANGELOG.md` for release changes. Versioned packages are built and checked by the repository SDK release workflow.
+
+## License
+
+The SDK retains the Oreag proprietary, viewing-only license in `LICENSE`. Publication or download does not grant application-use rights; obtain the owner's written permission for use beyond that license.

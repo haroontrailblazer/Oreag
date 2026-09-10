@@ -17,7 +17,7 @@ from sqlalchemy import text as sql_text
 
 from ..config import settings
 from ..db import SessionLocal
-from ..models import QueryLog, UsageEvent
+from ..models import QueryLog, UsageEvent, RequestMetric, IdempotencyRequest, WorkerHeartbeat, WebhookDelivery
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,10 @@ def prune_old_rows() -> None:
         )
         logs = db.execute(sql_delete(QueryLog).where(QueryLog.created_at < cutoff))
         events = db.execute(sql_delete(UsageEvent).where(UsageEvent.created_at < cutoff))
+        db.execute(sql_delete(RequestMetric).where(RequestMetric.created_at < cutoff))
+        db.execute(sql_delete(IdempotencyRequest).where(IdempotencyRequest.expires_at < datetime.now(timezone.utc)))
+        db.execute(sql_delete(WorkerHeartbeat).where(WorkerHeartbeat.last_seen_at < datetime.now(timezone.utc)-timedelta(days=1)))
+        db.execute(sql_delete(WebhookDelivery).where(WebhookDelivery.created_at < cutoff, WebhookDelivery.status.in_(["delivered", "failed"])))
         expired = db.execute(
             sql_text("DELETE FROM semantic_query_cache WHERE expires_at <= now()")
         )

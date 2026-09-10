@@ -28,3 +28,14 @@ skills-lock.json
 # skill. .claude/skills/ holds symlinks into it.
 .agents/
 .claude/skills/
+
+# Private recovery snapshots and generated release/test artifacts
+*.oreag-backup
+recovery-report.json
+recovery-fixture-report.json
+load-report.json
+load-fixture-*.json
+sdk/python/build/
+sdk/python/dist/
+*.egg-info/
+artifacts/

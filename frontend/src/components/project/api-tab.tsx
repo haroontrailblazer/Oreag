@@ -687,7 +687,36 @@ console.log(await feedback.json());`
         </CardContent>
       </Card>
       <WebhooksPanel projectId={project.id} />
-      <div className="rounded-xl border p-4 text-sm"><h3 className="font-medium">Python & JavaScript SDKs</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Typed query, streaming, upload, feedback, and evaluation methods with runnable examples. Install the extracted folder locally; packages are not yet published to registries.</p><div className="mt-3 flex flex-wrap gap-4 text-xs"><a className="underline" href="/downloads/oreag-python-sdk.zip">Download Python SDK</a><a className="underline" href="/downloads/oreag-javascript-sdk.zip">Download JavaScript SDK</a><a className="underline" href="/docs#reference-python-and-javascript-sdks">SDK guide</a></div></div>
+      <div className="rounded-xl border p-4 text-sm"><h3 className="font-medium">Safe retries</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Use the same Idempotency-Key and content for buffered queries, uploads or evaluation creation after a lost response. Completed results replay for 24 hours. Pending, uncertain or changed requests return 409. Streaming does not support replay.</p><a className="mt-2 inline-block text-xs underline" href="/docs#reference-safe-retries">Retry guide</a></div>
+      <section aria-labelledby="sdk-install-title" className="min-w-0 rounded-xl border p-4 text-sm">
+        <h3 id="sdk-install-title" className="font-medium">Python & JavaScript SDKs</h3>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          Install an SDK, then configure it on your server with this project&apos;s API key and project ID.
+          Version 0.2.0 supports queries, streaming, uploads, feedback, evaluations and safe retries.
+        </p>
+        <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-2">
+          <div className="min-w-0 space-y-2">
+            <h4 className="text-xs font-medium">JavaScript / TypeScript · npm</h4>
+            <CopyRow value="npm install @haroontrailblazer/oreag-sdk" label="Copy npm install command" />
+            <a className="inline-block break-all text-xs underline" href="https://www.npmjs.com/package/@haroontrailblazer/oreag-sdk" target="_blank" rel="noreferrer">
+              npmjs.com/package/@haroontrailblazer/oreag-sdk
+            </a>
+          </div>
+          <div className="min-w-0 space-y-2">
+            <h4 className="text-xs font-medium">Python · PyPI</h4>
+            <CopyRow value="pip install oreag-sdk" label="Copy pip install command" />
+            <a className="inline-block break-all text-xs underline" href="https://pypi.org/project/oreag-sdk/" target="_blank" rel="noreferrer">
+              pypi.org/project/oreag-sdk
+            </a>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-4 text-xs">
+          <a className="underline" href="/docs#reference-python-and-javascript-sdks">SDK setup guide</a>
+          <a className="underline" href="/downloads/oreag-python-sdk.zip">Download Python source</a>
+          <a className="underline" href="/downloads/oreag-javascript-sdk.zip">Download JavaScript source</a>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">The proprietary viewing-only license is unchanged.</p>
+      </section>
 
       <Card id="project-api-reference">
         <CardHeader>

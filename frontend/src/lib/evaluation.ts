@@ -4,7 +4,7 @@ export type EvaluationConfig = Pick<Project, "llm_provider" | "llm_model" | "emb
 export type EvaluationDefinition = { version: 2; cases: EvaluationCase[]; variants: EvaluationConfig[] }
 export type SavedEvaluation = { revision: number; suite: EvaluationDefinition | null }
 export type QualityReport = { state: string; warnings: { variant: number; metric: string; change: number; limit: number }[] }
-export type EvaluationRun = { execution?: "manual" | "background"; quality_report?: QualityReport | null; id: string; status: "preparing" | "running" | "completed" | "cancelled" | "failed"; suite: EvaluationDefinition; corpus_count: number; content_version: number; prepared: number; results: EvaluationResult[]; error: string | null; created_at: string; updated_at: string }
+export type EvaluationRun = { archived_at?: string | null; execution?: "manual" | "background"; quality_report?: QualityReport | null; id: string; status: "preparing" | "running" | "completed" | "cancelled" | "failed"; suite: EvaluationDefinition; corpus_count: number; content_version: number; prepared: number; results: EvaluationResult[]; error: string | null; created_at: string; updated_at: string }
 
 export function projectEvaluationConfig(project: Project): EvaluationConfig {
   return { llm_provider: project.llm_provider, llm_model: project.llm_model, embedding_provider: project.embedding_provider, embedding_model: project.embedding_model,

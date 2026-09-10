@@ -15,7 +15,7 @@ def build():
             for file in sorted(source.rglob("*")):
                 if not file.is_file() or any(p in ("__pycache__", "node_modules", ".pytest_cache", "build", "dist") or p.endswith(".egg-info") for p in file.relative_to(source).parts):
                     continue
-                if file.suffix not in (".py", ".md", ".toml", ".js", ".mjs", ".ts", ".json", ".typed"):
+                if file.name != "LICENSE" and file.suffix not in (".py", ".md", ".toml", ".js", ".mjs", ".ts", ".json", ".typed", ".in"):
                     continue
                 info = ZipInfo(f"{prefix}/{file.relative_to(source).as_posix()}", (2026, 1, 1, 0, 0, 0))
                 info.compress_type = ZIP_DEFLATED

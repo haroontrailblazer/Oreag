@@ -1,5 +1,7 @@
 "use client"
 
+import { OperationsPanel } from "@/components/operations-panel"
+
 import dynamic from "next/dynamic"
 import { useState } from "react"
 import useSWR from "swr"
@@ -83,6 +85,7 @@ export function UsageDashboard() {
 
       <div className="usage-scroll relative min-h-0 flex-1 overflow-y-auto pb-3 pr-0.5">
       <UsageBudgets />
+      <OperationsPanel />
       {isLoading && !data && (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 sm:gap-6">
           <UsageInsightsSkeleton />

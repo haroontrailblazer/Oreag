@@ -1,0 +1,102 @@
+name: Release SDKs
+on:
+  push:
+    tags: ['sdk-v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish to npm (PyPI only when explicitly enabled)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - id: version
+        run: python scripts/check_sdk_release.py --github-output
+      - run: node --test sdk/javascript/test.mjs
+      - run: pip install build twine ./sdk/python
+      - run: python -m unittest test_sdk.py
+        working-directory: sdk/python
+      - run: python -m build sdk/python --outdir artifacts/python
+      - run: python -m twine check artifacts/python/*
+      - run: mkdir -p artifacts/javascript && npm pack ./sdk/javascript --pack-destination artifacts/javascript
+      - name: Install the built wheel and tarball
+        run: |
+          python -m venv /tmp/sdk-wheel
+          /tmp/sdk-wheel/bin/pip install artifacts/python/*.whl
+          cd /tmp
+          /tmp/sdk-wheel/bin/python -c "from oreag import Oreag, OreagError, verify_webhook; from importlib.metadata import version; print(version('oreag-sdk'))"
+          npm install --prefix /tmp/sdk-npm "$GITHUB_WORKSPACE"/artifacts/javascript/*.tgz
+          node --input-type=module -e "import('/tmp/sdk-npm/node_modules/@haroontrailblazer/oreag-sdk/index.js').then(m => { if (!m.OreagClient) process.exit(1) })"
+      - name: Source downloads match
+        run: python scripts/package_sdks.py && git diff --exit-code -- frontend/public/downloads
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-release
+          path: artifacts/
+          retention-days: 30
+  npm:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/sdk-v') || inputs.publish == true
+    runs-on: ubuntu-latest
+    environment: sdk-publishing
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g npm@11.12.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-release
+          path: artifacts
+      - run: npm publish artifacts/javascript/*.tgz --access public --provenance
+  pypi:
+    needs: build
+    if: vars.ENABLE_PYPI_PUBLISHING == 'true' && (startsWith(github.ref, 'refs/tags/sdk-v') || inputs.publish == true)
+    runs-on: ubuntu-latest
+    environment: sdk-publishing
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-release
+          path: artifacts
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: artifacts/python/
+  github-release:
+    needs: [build, npm, pypi]
+    if: always() && !cancelled() && needs.build.result == 'success' && needs.npm.result == 'success' && (needs.pypi.result == 'success' || needs.pypi.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-release
+          path: artifacts
+      - name: Create the GitHub release after the enabled registry jobs succeed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: gh release create "sdk-v$VERSION" --target "$GITHUB_SHA" --title "Oreag SDKs $VERSION" --notes-file sdk/javascript/CHANGELOG.md artifacts/javascript/* artifacts/python/*

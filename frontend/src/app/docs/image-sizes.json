@@ -307,5 +307,21 @@
   "/docs/quality-query-mobile.png": {
     "width": 358,
     "height": 502
+  },
+  "/docs/operations-monitoring.png": {
+    "width": 960,
+    "height": 474
+  },
+  "/docs/operations-mobile.png": {
+    "width": 358,
+    "height": 632
+  },
+  "/docs/evaluation-archives.png": {
+    "width": 960,
+    "height": 97
+  },
+  "/docs/evaluation-archives-mobile.png": {
+    "width": 358,
+    "height": 173
   }
 }

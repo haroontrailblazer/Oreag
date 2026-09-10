@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    LargeBinary,
     Numeric,
     Text,
     UniqueConstraint,
@@ -74,6 +75,8 @@ class EvaluationRun(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     status: Mapped[str] = mapped_column(Text, default="preparing")
     execution: Mapped[str] = mapped_column(Text, default="manual")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_payload: Mapped[bytes | None] = deferred(mapped_column(LargeBinary))
     requested_by_key_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     reference_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     quality_limits: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
@@ -145,6 +148,52 @@ class WebhookDelivery(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     history: Mapped[list] = mapped_column(JSON().with_variant(JSONB, "postgresql"), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IdempotencyRequest(Base):
+    __tablename__ = "idempotency_requests"
+    __table_args__ = (UniqueConstraint("api_key_id", "operation", "key_hash"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
+    api_key_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="CASCADE"))
+    operation: Mapped[str] = mapped_column(Text)
+    key_hash: Mapped[str] = mapped_column(Text)
+    request_hash: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    response_encrypted: Mapped[str | None] = mapped_column(Text)
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RequestMetric(Base):
+    __tablename__ = "request_metrics"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    endpoint: Mapped[str] = mapped_column(Text)
+    status_code: Mapped[int] = mapped_column(Integer)
+    outcome: Mapped[str] = mapped_column(Text)
+    latency_ms: Mapped[float] = mapped_column(Float)
+    first_token_ms: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+    instance_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    workers: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    pool_used: Mapped[int | None] = mapped_column(Integer)
+    pool_limit: Mapped[int | None] = mapped_column(Integer)
+    dropped_metrics: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class OperationSnapshot(Base):
+    __tablename__ = "operation_snapshots"
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    report: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Project(Base):

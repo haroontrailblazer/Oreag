@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Header
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,7 @@ from ..schemas import FeedbackInput
 from ..models import ApiKey, EvaluationRun, EvaluationSchedule, Project
 from ..services import evaluations as service
 from ..services import quality
+from ..services import idempotency
 from ..services.rate_limit import enforce_rate_limit
 from .deps import get_owned_project, heavy_dashboard_limit
 from .rag_v1 import _get_project
@@ -56,9 +57,10 @@ def save_suite(body: SaveEvaluation, project: Project = Depends(get_owned_projec
 
 
 @router.get("/runs")
-def list_runs(project: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
-    return [dict(row) for row in db.execute(select(EvaluationRun.id, EvaluationRun.status, EvaluationRun.created_at, EvaluationRun.quality_report)
-            .where(EvaluationRun.project_id == project.id).order_by(EvaluationRun.created_at.desc()).limit(20)).mappings()]
+def list_runs(project: Project = Depends(get_owned_project), db: Session = Depends(get_db), archived: bool = False, offset: int = Query(0, ge=0, le=100000)):
+    return [dict(row) for row in db.execute(select(EvaluationRun.id, EvaluationRun.status, EvaluationRun.created_at, EvaluationRun.quality_report, EvaluationRun.archived_at)
+            .where(EvaluationRun.project_id == project.id, EvaluationRun.archived_at.is_not(None) if archived else EvaluationRun.archived_at.is_(None))
+            .order_by(EvaluationRun.created_at.desc(), EvaluationRun.id.desc()).offset(offset).limit(20)).mappings()]
 
 
 @router.post("/runs", status_code=201)
@@ -102,12 +104,13 @@ def public_save_suite(body: SaveEvaluation, project: Project = Depends(public_pr
 
 
 @public_router.get("/runs")
-def public_list_runs(project: Project = Depends(public_project), db: Session = Depends(get_db)):
-    return list_runs(project, db)
+def public_list_runs(project: Project = Depends(public_project), db: Session = Depends(get_db), archived: bool = False, offset: int = Query(0, ge=0, le=100000)):
+    return list_runs(project, db, archived, offset)
 
 
 @public_router.post("/runs", status_code=201)
-def public_start_run(body: StartEvaluation, project: Project = Depends(public_project), db: Session = Depends(get_db), api_key: ApiKey = Depends(require_api_key)):
+@idempotency.protect("evaluation")
+def public_start_run(body: StartEvaluation, project: Project = Depends(public_project), db: Session = Depends(get_db), api_key: ApiKey = Depends(require_api_key), idempotency_key: str | None = Header(None, alias="Idempotency-Key")):
     enforce_rate_limit(api_key.id, project.id, heavy=True)
     return service.create_run(db, project, body, api_key_id=api_key.id)
 

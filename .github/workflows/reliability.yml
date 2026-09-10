@@ -1,0 +1,75 @@
+name: Reliability and recovery drills
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 3 * * 1'
+permissions:
+  contents: read
+jobs:
+  postgres-and-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: fixture-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      RELIABILITY_DATABASE_URL: postgresql+psycopg://postgres:fixture-only@localhost:5432/postgres
+      RECOVERY_FIXTURE_DATABASE_URL: postgresql+psycopg://postgres:fixture-only@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - name: Race requests against PostgreSQL
+        working-directory: backend
+        run: python -m pytest tests/test_reliability_postgres.py tests/test_reliability.py tests/test_quality_jobs.py tests/test_ingest_queue.py tests/test_webhooks.py -q
+      - name: Dump, encrypt, restore and verify synthetic data and files
+        run: python scripts/recovery_fixture.py
+      - name: Local transport load at 10, 50 and 100 concurrent requests
+        run: python scripts/load_fixture.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-reliability-reports
+          path: |
+            recovery-fixture-report.json
+            load-fixture-*.json
+          retention-days: 30
+  configured-recovery:
+    # Opt in after provisioning an EMPTY matching target with all app workers disabled.
+    if: github.event_name != 'pull_request' && vars.ENABLE_RECOVERY_DRILL == 'true'
+    runs-on: ubuntu-latest
+    environment: recovery
+    timeout-minutes: 120
+    env:
+      SOURCE_DATABASE_URL: ${{ secrets.RECOVERY_SOURCE_DATABASE_URL }}
+      RECOVERY_TARGET_DATABASE_URL: ${{ secrets.RECOVERY_TARGET_DATABASE_URL }}
+      RECOVERY_TARGET_ACK: EMPTY_ISOLATED_TARGET
+      RECOVERY_BACKUP_KEY: ${{ secrets.RECOVERY_BACKUP_KEY }}
+      SUPABASE_URL: ${{ secrets.RECOVERY_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.RECOVERY_STORAGE_KEY }}
+      STORAGE_BUCKET: project-files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install 'psycopg[binary]' sqlalchemy cryptography httpx
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-17
+      - run: python scripts/recovery_drill.py --backup recovery.oreag-backup --report recovery-report.json --disposable-target
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: encrypted-recovery-backup
+          path: |
+            recovery.oreag-backup
+            recovery-report.json
+          retention-days: 7

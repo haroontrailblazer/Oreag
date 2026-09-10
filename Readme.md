@@ -372,7 +372,7 @@ Oreag/
 │       └── models.py, schemas.py, config.py, db.py, main.py
 ├── mcp-server/               # Oreag MCP server (FastMCP) - 9 agent memory + docs tools
 ├── supabase/
-│   ├── migrations/           # 0001…0046 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering, HNSW vector indexes, MFA enforcement, passkey-aware login lookup, MFA recovery codes, per-key model listings, conversion reuse, reversible Matryoshka archive, memory chunking + its HNSW indexes, usage analytics columns, measured cache savings, embedding spend, Matryoshka savings, english text search, per-project answer policy, CJK/Thai lexical search, document versions, document provenance, version chain, document relations, Lao/Khmer/Burmese lexical search, per-project text search, answer-language default, cost precision, per-project cross-lingual floor, answer feedback)
+│   ├── migrations/           # 0001…0047 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering, HNSW vector indexes, MFA enforcement, passkey-aware login lookup, MFA recovery codes, per-key model listings, conversion reuse, reversible Matryoshka archive, memory chunking + its HNSW indexes, usage analytics columns, measured cache savings, embedding spend, Matryoshka savings, english text search, per-project answer policy, CJK/Thai lexical search, document versions, document provenance, version chain, document relations, Lao/Khmer/Burmese lexical search, per-project text search, answer-language default, cost precision, per-project cross-lingual floor, answer feedback)
 │   └── templates/            # branded auth email templates
 ├── scripts/
 │   └── check_docs_sync.py    # documentation drift harness - see below
@@ -406,3 +406,10 @@ MCP tool. It also runs in CI and as part of the backend test suite.
 ### Quality checks, integrations, and SDKs
 
 Evaluator runs now continue in durable background jobs. Saved schedules compare pass rate, latency and measured cost against a reference without modifying live project settings. Project API webhooks provide signed, retried events and delivery history. Queries show measured stage timings and can become evaluator questions via Add to test set. Python and JavaScript source SDKs, runnable examples and transport tests live in `sdk/`. Apply migration `0046_quality_webhooks_timelines.sql` before starting the updated backend. See the in-app documentation for configuration, limits and delivery semantics.
+
+
+## Operational reliability (0047)
+
+Evaluation creation archives older finished runs while preserving references and exportable results. Optional public Idempotency-Key headers provide encrypted 24-hour replay for queries, uploads and evaluation creation. Usage and Health show owner-scoped operational warnings from asynchronous request metrics and worker heartbeats; `/readyz` is separate from process liveness. Apply migration `0047_operational_reliability.sql` before deploying this backend.
+
+Staging load probes, PostgreSQL race tests, encrypted data/file restore drills and SDK 0.2.0 release workflows are documented in [the reliability runbook](docs/reliability.md). Synthetic tests do not establish production capacity or actual-source recovery. JavaScript SDK 0.2.0 is published as `@haroontrailblazer/oreag-sdk` on npm. Python SDK 0.2.0 is published as `oreag-sdk` on PyPI (`pip install oreag-sdk`). Automated future releases require npm and PyPI trusted publishers configured for `haroontrailblazer/Oreag`. The proprietary license terms remain unchanged.

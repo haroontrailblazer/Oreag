@@ -741,3 +741,10 @@ turned session theft into permanent account takeover.
 Migration 0046 adds transactional file/evaluation/project-budget outbox triggers. `services/webhooks.py` claims deliveries with SKIP LOCKED, signs exact bytes, validates and pins public DNS, and retries at most eight times. Project-owner routes configure encrypted secrets and inspect deliveries. Account-wide budget spend never enters project events.
 
 `services/query_timeline.py` collects bounded timing spans across streaming/thread boundaries and persists them only in query details. `evaluations/cases/from-query` copies an owned recorded question plus the user's expected answer into the revision-checked test set. SDKs in `sdk/python` and `sdk/javascript` wrap existing public contracts; ambiguous requests are never silently retried.
+
+
+## Operational reliability (0047)
+
+Evaluation creation archives older finished runs while preserving references and exportable results. Optional public Idempotency-Key headers provide encrypted 24-hour replay for queries, uploads and evaluation creation. Usage and Health show owner-scoped operational warnings from asynchronous request metrics and worker heartbeats; `/readyz` is separate from process liveness. Apply migration `0047_operational_reliability.sql` before deploying this backend.
+
+Staging load probes, PostgreSQL race tests, encrypted data/file restore drills and SDK 0.2.0 release workflows are documented in [the reliability runbook](docs/reliability.md). Synthetic tests do not establish production capacity or actual-source recovery. JavaScript SDK 0.2.0 is published as `@haroontrailblazer/oreag-sdk` on npm. Python SDK 0.2.0 is published as `oreag-sdk` on PyPI (`pip install oreag-sdk`). Automated future releases require npm and PyPI trusted publishers configured for `haroontrailblazer/Oreag`. The proprietary license terms remain unchanged.

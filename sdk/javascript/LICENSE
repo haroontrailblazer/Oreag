@@ -1,0 +1,111 @@
+OREAG PROPRIETARY LICENSE
+Source-Available — View-Only, for Education and Understanding
+
+Copyright (c) 2026 Haroon K M. All rights reserved.
+
+Project: Oreag ("the Software")
+Author and sole owner: Haroon K M ("the Owner")
+
+
+1. OWNERSHIP
+
+   The Software — including all source code, documentation, designs,
+   database schemas, user interfaces, APIs, architecture, algorithms,
+   methods, workflows, and the underlying ideas and concepts (together,
+   "the Work") — is the exclusive property of the Owner. The Work is
+   protected by copyright and other intellectual-property laws. All rights
+   not expressly granted below are reserved by the Owner.
+
+
+2. SOURCE-AVAILABLE, NOT OPEN SOURCE
+
+   This repository is made public solely so that others may READ and STUDY
+   the source code. Publishing the source publicly does NOT place it in the
+   public domain and does NOT grant any license to use it beyond the limited
+   permission in Section 3. This is not an open-source license: it does not
+   meet, and is not intended to meet, the Open Source Definition.
+
+
+3. LIMITED PERMISSION GRANTED
+
+   Subject to the restrictions in Section 4, the Owner grants you a personal,
+   non-exclusive, non-transferable, revocable permission to:
+
+   (a) view and read the source code within this repository; and
+
+   (b) study it privately for your own EDUCATION and UNDERSTANDING only.
+
+   No other rights are granted. No fee is charged for this permission, and
+   the Owner may revoke it at any time.
+
+
+4. RESTRICTIONS
+
+   You may NOT, in whole or in part, without the Owner's prior written
+   permission:
+
+   (a) copy, reproduce, download-to-reuse, store, or republish the Work
+       (beyond the incidental copying your browser or Git client performs to
+       let you view it);
+
+   (b) run, execute, host, deploy, or otherwise operate the Software, for
+       any purpose, commercial or non-commercial;
+
+   (c) modify, adapt, translate, refactor, or create derivative works from
+       the Work;
+
+   (d) distribute, sublicense, sell, rent, lease, or otherwise make the Work
+       available to any third party;
+
+   (e) use the Work, or any portion of it, in or as part of any other
+       software, product, service, or project; or
+
+   (f) use the ideas, concepts, designs, architecture, techniques, or
+       know-how embodied in the Work to build, or to assist anyone else in
+       building, any product or service that is the same as or substantially
+       similar to the Software.
+
+   Reading the code to learn from it is permitted. Copying the code, the
+   ideas, or the design in order to reuse or rebuild them is not.
+
+
+5. NO TRANSFER OF RIGHTS
+
+   Nothing in this License transfers any ownership, copyright, patent,
+   trademark, trade-secret, or other right in the Work to you. The Owner
+   retains all such rights exclusively.
+
+
+6. TERMINATION
+
+   Any breach of this License automatically and immediately terminates the
+   permission granted in Section 3. On termination you must cease all use of
+   the Work and destroy any copies in your possession.
+
+
+7. NO WARRANTY
+
+   THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+
+8. LIMITATION OF LIABILITY
+
+   IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+   FROM, OUT OF, OR IN CONNECTION WITH THE WORK OR ITS USE.
+
+
+9. PERMISSIONS AND LICENSING
+
+   To request any right beyond the limited permission in Section 3 —
+   including any use, deployment, or reuse of the Software or its ideas —
+   contact the Owner in writing at the repository:
+
+       https://github.com/haroontrailblazer/Oreag
+
+   Any such right is valid only if granted by the Owner in a signed writing.
+
+
+All rights reserved © 2026 Haroon K M.

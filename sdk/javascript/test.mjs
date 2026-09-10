@@ -4,6 +4,17 @@ import { createHmac } from "node:crypto";
 import { OreagClient, OreagError } from "./index.js";
 import { verifyWebhook } from "./webhooks.js";
 const options = { apiKey: "test", projectId: "project", baseUrl: "https://example.test" };
+test("idempotency keys are headers and never leak into query bodies", async () => {
+  const calls = [];
+  const client = new OreagClient({ ...options, fetch: async (url, init) => { calls.push(init); return Response.json({answer:"ok"}); } });
+  await client.query("Hi", {idempotencyKey:"logical-query",top_k:3});
+  assert.equal(calls[0].headers["Idempotency-Key"],"logical-query");
+  assert.deepEqual(JSON.parse(calls[0].body),{question:"Hi",top_k:3});
+  await client.uploadFiles([{name:"fixture.txt",data:new Blob(["fixture"])}],{idempotencyKey:"logical-upload"});
+  assert.equal(calls[1].headers["Idempotency-Key"],"logical-upload");
+  await client.startEvaluation("run",{cases:[],variants:[]},null,{idempotencyKey:"logical-eval"});
+  assert.equal(calls[2].headers["Idempotency-Key"],"logical-eval");
+});
 test("query, feedback and uploads preserve the public contract", async () => {
   const calls = [];
   const client = new OreagClient({ ...options, fetch: async (url, init) => { calls.push({ url, ...init }); return Response.json({ answer: "ok" }); } });

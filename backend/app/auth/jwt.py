@@ -1,7 +1,7 @@
 import uuid
 
 import jwt as pyjwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 from sqlalchemy.orm import Session
@@ -81,6 +81,7 @@ def get_user_pending_mfa(
 def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
+    request: Request = None,
 ) -> uuid.UUID:
     """Validate the Supabase access token and return the user id (sub).
 
@@ -117,6 +118,8 @@ def get_current_user(
     # reason as the check above: every authenticated route is covered by
     # construction, and a route added tomorrow cannot forget it. The expensive
     # endpoints additionally take `heavy_dashboard_limit` (see routers/deps.py).
+    if request is not None:
+        request.state.metric_owner_id = user_id
     enforce_user_rate_limit(user_id)
 
     return user_id

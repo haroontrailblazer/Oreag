@@ -33,7 +33,7 @@ def validate_reference(db, project_id, run_id, suite):
     if run_id is None:
         return None
     ref = db.scalar(select(EvaluationRun).where(EvaluationRun.id == run_id, EvaluationRun.project_id == project_id))
-    if ref is None or ref.status != "completed":
+    if ref is None or ref.status != "completed" or ref.archived_at:
         raise HTTPException(422, "Choose a completed reference run from this project.")
     if ref.suite != suite:
         raise HTTPException(422, "The reference must use the same questions and model configurations.")
@@ -145,7 +145,7 @@ def assess(db, run):
 
 
 def finish_one(db):
-    row = db.scalar(select(EvaluationRun).where(EvaluationRun.status == "completed", EvaluationRun.quality_report.is_(None))
+    row = db.scalar(select(EvaluationRun).where(EvaluationRun.status == "completed", EvaluationRun.archived_at.is_(None), EvaluationRun.quality_report.is_(None))
                     .order_by(EvaluationRun.created_at).with_for_update(skip_locked=True).limit(1))
     if row is None:
         db.rollback(); return False
