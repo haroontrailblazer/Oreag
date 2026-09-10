@@ -262,6 +262,10 @@
   },
   "/docs/evaluation-playground.png": {
     "width": 1280,
-    "height": 1440
+    "height": 1200
+  },
+  "/docs/evaluation-results.png": {
+    "width": 1120,
+    "height": 610
   }
 }

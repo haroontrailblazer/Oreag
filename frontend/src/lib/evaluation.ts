@@ -1,8 +1,41 @@
-import type { QueryResponse } from "./types"
+import type { Project, QueryResponse } from "./types"
+
+export type EvaluationConfig = Pick<Project, "llm_provider" | "llm_model" | "embedding_provider" | "embedding_model" | "embedding_dimensions" | "top_k" | "min_similarity" | "min_strong" | "cross_lingual_floor" | "answer_language" | "answer_language_strict" | "answer_disclaimer" | "document_language"> & { hybrid_search: boolean; include_memories: boolean }
+export type EvaluationDefinition = { version: 2; cases: EvaluationCase[]; variants: EvaluationConfig[] }
+export type SavedEvaluation = { revision: number; suite: EvaluationDefinition | null }
+export type EvaluationRun = { id: string; status: "preparing" | "running" | "completed" | "cancelled" | "failed"; suite: EvaluationDefinition; corpus_count: number; content_version: number; prepared: number; results: EvaluationResult[]; error: string | null; created_at: string; updated_at: string }
+
+export function projectEvaluationConfig(project: Project): EvaluationConfig {
+  return { llm_provider: project.llm_provider, llm_model: project.llm_model, embedding_provider: project.embedding_provider, embedding_model: project.embedding_model,
+    embedding_dimensions: project.embedding_dimensions, top_k: project.top_k, min_similarity: project.min_similarity, min_strong: project.min_strong,
+    cross_lingual_floor: project.cross_lingual_floor, answer_language: project.answer_language, answer_language_strict: project.answer_language_strict,
+    answer_disclaimer: project.answer_disclaimer, document_language: project.document_language, hybrid_search: true, include_memories: true }
+}
+
+export function importEvaluation(value: unknown, baseline: EvaluationConfig): EvaluationDefinition {
+  if (!value || typeof value !== "object") throw new Error("Choose an evaluation JSON test set.")
+  if ((value as { version?: number }).version === 1) {
+    const old = parseSuite(value)
+    return { version: 2, cases: old.cases, variants: old.topK.slice(0, old.compare ? 2 : 1).map(top_k => ({ ...baseline, top_k })) }
+  }
+  const suite = value as EvaluationDefinition
+  if (suite.version !== 2 || !Array.isArray(suite.variants) || suite.variants.length < 1 || suite.variants.length > 2) throw new Error("Choose a version 1 or 2 test set with one or two configurations.")
+  const cases = parseSuite({ version: 1, cases: suite.cases, topK: [1, 2], compare: false }).cases
+  const variants = suite.variants.map(config => {
+    if (!config || typeof config !== "object") throw new Error("Invalid evaluation configuration.")
+    const next = { ...baseline, ...config }
+    if ([next.llm_provider, next.llm_model, next.embedding_provider, next.embedding_model].some(v => typeof v !== "string" || !v.trim()) ||
+      !Number.isInteger(next.embedding_dimensions) || next.embedding_dimensions < 1 || next.embedding_dimensions > 8192 ||
+      !Number.isInteger(next.top_k) || next.top_k < 1 || next.top_k > 20 || !Number.isInteger(next.min_strong) || next.min_strong < 0 || next.min_strong > 20 ||
+      typeof next.min_similarity !== "number" || !Number.isFinite(next.min_similarity) || next.min_similarity < 0 || next.min_similarity > 1) throw new Error("Invalid model, dimension, or retrieval settings.")
+    return next
+  })
+  return { version: 2, cases, variants }
+}
 
 export type EvaluationCase = { id: string; question: string; expected: string; match: "contains" | "exact"; source: string }
 export type EvaluationSuite = { version: 1; cases: EvaluationCase[]; topK: [number, number]; compare: boolean }
-export type EvaluationResult = { caseId: string; variant: number; status: "passed" | "failed" | "review" | "error" | "cancelled"; response?: QueryResponse; error?: string }
+export type EvaluationResult = { caseId: string; variant: number; status: "passed" | "failed" | "review" | "error" | "cancelled"; response?: QueryResponse; error?: string; feedback_rating?: "helpful" | "not_helpful" | null; feedback_note?: string | null }
 export const MAX_CASES = 20
 
 export function parseSuite(value: unknown): EvaluationSuite {

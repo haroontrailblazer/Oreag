@@ -823,6 +823,24 @@ console.log(await feedback.json());`
           </div>
 
           <div className="space-y-2">
+            <span className="text-sm font-medium">Saved evaluations</span>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              GET /evaluations/suite reads the saved test set and revision. PUT the same path with
+              revision and a version-2 suite to save model, embedder, vector dimensions, and answer policy.
+              POST /evaluations/runs with a unique UUID id and suite creates an isolated snapshot.
+              POST /evaluations/runs/&#123;run_id&#125;/advance repeatedly until completed or failed:
+              each call embeds one batch or answers one question. GET the run after a disconnect.
+              The cancel and resume actions use POST; DELETE the run removes its saved results and vectors.
+              Evaluation settings, scores, and feedback never update live project configuration,
+              production vectors, Queries, or Health. PUT /evaluations/runs/&#123;run_id&#125;/results/&#123;result_index&#125;/feedback
+              with rating and optional note to rate a finished run result; DELETE clears it.
+              Use the zero-based index in the run&apos;s results array. Evaluation answers have no live query_id.
+              Fresh answers and indexing consume provider quota. Project keys scope every operation.
+            </p>
+            <a href="/docs#querying" className="text-xs underline underline-offset-4">Evaluation configuration and API guide</a>
+          </div>
+
+          <div className="space-y-2">
             <span className="text-sm font-medium">Answer feedback</span>
             <p className="text-xs leading-relaxed text-muted-foreground">
               Keep the response&apos;s query_id as a string. Send feedback from

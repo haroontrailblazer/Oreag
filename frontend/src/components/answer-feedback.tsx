@@ -12,10 +12,12 @@ import { KNOWLEDGE_HEALTH_KEY } from "@/lib/knowledge-health"
 type Rating = "helpful" | "not_helpful"
 
 /** A rating belongs to this invocation, not the cached answer shared by others. */
-export function AnswerFeedback({ queryId, initialRating = null, initialNote = "" }: {
+export function AnswerFeedback({ queryId, initialRating = null, initialNote = "", resourceUrl, onSaved }: {
   queryId: string
   initialRating?: Rating | null
   initialNote?: string | null
+  resourceUrl?: string
+  onSaved?: (rating: Rating | null, note: string | null) => void
 }) {
   const noteId = useId()
   const { mutate } = useSWRConfig()
@@ -34,14 +36,15 @@ export function AnswerFeedback({ queryId, initialRating = null, initialNote = ""
     setMessage("")
     try {
       if (next === null) {
-        await api(`/api/account/queries/${queryId}/feedback`, { method: "DELETE" })
+        await api(resourceUrl ?? `/api/account/queries/${queryId}/feedback`, { method: "DELETE" })
         setRating(null)
         setNote("")
         setSavedNote("")
         setExpanded(false)
         setMessage("Feedback removed")
+        onSaved?.(null, null)
       } else {
-        const result = await api<QueryRecord>(`/api/account/queries/${queryId}/feedback`, {
+        const result = await api<QueryRecord>(resourceUrl ?? `/api/account/queries/${queryId}/feedback`, {
           method: "PUT", body: JSON.stringify({ rating: next, note: note.trim() }),
         })
         setRating(result.feedback_rating ?? next)
@@ -49,9 +52,10 @@ export function AnswerFeedback({ queryId, initialRating = null, initialNote = ""
         setSavedNote(result.feedback_note ?? "")
         if (next === "not_helpful") setExpanded(true)
         setMessage("Feedback saved")
+        onSaved?.(result.feedback_rating ?? next, result.feedback_note ?? "")
       }
       // Keep owner reports in sync with the same feedback the public API writes.
-      void mutate(key => typeof key === "string" &&
+      if (!resourceUrl) void mutate(key => typeof key === "string" &&
         (key.startsWith("/api/account/queries?") || key === `/api/account/queries/${queryId}` || key === KNOWLEDGE_HEALTH_KEY)).catch(() => {})
     } catch {
       setError("Could not save feedback. Please try again.")

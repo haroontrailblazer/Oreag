@@ -367,6 +367,10 @@ def run_query(
     api_key_id: uuid.UUID | None,
     conversation_id: str | None = None,
     usage_out: dict | None = None,
+    *,
+    retrieval_override=None,
+    bypass_cache: bool = False,
+    record_query: bool = True,
 ) -> QueryResponse:
     """Shared by the dashboard playground and the public /v1 endpoint.
 
@@ -387,7 +391,7 @@ def run_query(
             .limit(1)
         )
     )
-    if not has_chunks and not has_memories:
+    if not has_chunks and not has_memories and retrieval_override is None:
         raise HTTPException(
             status_code=409,
             detail="Project has no indexed content yet - upload files (or save memories) and wait for indexing",
@@ -417,6 +421,8 @@ def run_query(
         and compete with chunks on similarity for grounding - one shared query
         vector (via the per-request memo) serves both searches.
         """
+        if retrieval_override is not None:
+            return retrieval_override(query, k, embed_query, _llm, request_usage.add)
         sources = (
             retrieval.retrieve(
                 db,
@@ -557,38 +563,41 @@ def run_query(
             )
             return fresh
 
-        key = (
-            query_cache.cache_key(project, agentic_question, top_k, signature)
-            if settings.query_cache_enabled
-            else None
-        )
-        result = _cache.get(key) if key is not None else None
-        if result is not None:
-            cache_layer = "l1"
+        if bypass_cache:
+            result = compute()
         else:
-            hit, semantic_vector, cache_similarity = semantic_cache.lookup(
-                db, project, agentic_question, top_k, signature, embed_fn=embed_query
+            key = (
+                query_cache.cache_key(project, agentic_question, top_k, signature)
+                if settings.query_cache_enabled
+                else None
             )
-            if semantic_vector is not None:
-                # The lookup embedded through the memo, but seed defensively in
-                # case a caller monkeypatches lookup - retrieval must never
-                # re-embed the same string.
-                embed_memo[agentic_question] = semantic_vector
-            if hit is not None:
-                result = hit
-                cache_layer = "l2"
-                if key is not None:
-                    _cache.set(key, hit)  # promote to the exact-match L1
-            elif key is not None:
-                # single-flight: simultaneous identical asks compute once.
-                # A follower blocks in here for the cache's whole flight wait,
-                # on the LEADER's provider I/O, so give the connection back
-                # before queueing - waiting on someone else's LLM call is no
-                # reason to sit on a pool slot.
-                generation.release_connection(db)
-                result = _cache.get_or_compute(key, compute_and_remember)
+            result = _cache.get(key) if key is not None else None
+            if result is not None:
+                cache_layer = "l1"
             else:
-                result = compute_and_remember()
+                hit, semantic_vector, cache_similarity = semantic_cache.lookup(
+                    db, project, agentic_question, top_k, signature, embed_fn=embed_query
+                )
+                if semantic_vector is not None:
+                    # The lookup embedded through the memo, but seed defensively in
+                    # case a caller monkeypatches lookup - retrieval must never
+                    # re-embed the same string.
+                    embed_memo[agentic_question] = semantic_vector
+                if hit is not None:
+                    result = hit
+                    cache_layer = "l2"
+                    if key is not None:
+                        _cache.set(key, hit)  # promote to the exact-match L1
+                elif key is not None:
+                    # single-flight: simultaneous identical asks compute once.
+                    # A follower blocks in here for the cache's whole flight wait,
+                    # on the LEADER's provider I/O, so give the connection back
+                    # before queueing - waiting on someone else's LLM call is no
+                    # reason to sit on a pool slot.
+                    generation.release_connection(db)
+                    result = _cache.get_or_compute(key, compute_and_remember)
+                else:
+                    result = compute_and_remember()
     except ProviderUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
@@ -611,27 +620,28 @@ def run_query(
     # db_pool_timeout. Losing an analytics row is the cheap failure; turning a
     # finished answer into a 503 from main.py's PoolTimeoutError handler is not.
     query_id = None
-    try:
-        query_log = QueryLog(
-            project_id=project_id,
-            api_key_id=api_key_id,
-            question=question,
-            top_k=top_k,
-            latency_ms=latency_ms,
-            cache_layer=cache_layer,
-            retrieval_similarity=_mean_similarity(result.sources),
-            cache_similarity=cache_similarity,
-        )
-        db.add(query_log)
-        db.commit()
-        identity = inspect(query_log).identity
-        query_id = str(identity[0]) if identity else None
-    except Exception:
-        logger.warning(
-            "Query log write failed for project %s - the answer is still served",
-            project_id,
-        )
-        db.rollback()
+    if record_query:
+        try:
+            query_log = QueryLog(
+                project_id=project_id,
+                api_key_id=api_key_id,
+                question=question,
+                top_k=top_k,
+                latency_ms=latency_ms,
+                cache_layer=cache_layer,
+                retrieval_similarity=_mean_similarity(result.sources),
+                cache_similarity=cache_similarity,
+            )
+            db.add(query_log)
+            db.commit()
+            identity = inspect(query_log).identity
+            query_id = str(identity[0]) if identity else None
+        except Exception:
+            logger.warning(
+                "Query log write failed for project %s - the answer is still served",
+                project_id,
+            )
+            db.rollback()
 
     answer = (
         agentic.clarification_message(result.clarification_questions)

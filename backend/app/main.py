@@ -12,6 +12,7 @@ from .config import settings
 from .services import embedding_usage, tracing
 from .routers import (
     account,
+    evaluations,
     files,
     keys,
     knowledge_health,
@@ -273,6 +274,8 @@ app.include_router(memory.public_router)
 app.include_router(memory.owner_router)
 app.include_router(memory_graph.owner_router)
 app.include_router(playground.router)
+app.include_router(evaluations.router)
+app.include_router(evaluations.public_router)
 app.include_router(meta.router)
 app.include_router(rag_v1.router)
 app.include_router(memory_graph.public_router)

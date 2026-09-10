@@ -1,212 +1,169 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useSWRConfig } from "swr"
-import { PlusIcon, PlayIcon, StopIcon, DownloadSimpleIcon, UploadSimpleIcon, TrashIcon, FlaskIcon } from "@phosphor-icons/react/dist/ssr"
+import useSWR, { useSWRConfig } from "swr"
+import { ArrowLeftIcon, PlusIcon, PlayIcon, StopIcon, DownloadSimpleIcon, UploadSimpleIcon, TrashIcon, FloppyDiskIcon, FlaskIcon } from "@phosphor-icons/react/dist/ssr"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { FilterSelect } from "@/components/filter-select"
 import { AnswerMarkdown } from "./answer-markdown"
 import { AnswerFeedback } from "@/components/answer-feedback"
-import { api, isSessionExpired } from "@/lib/api"
-import { createClient } from "@/lib/supabase/client"
-import { MAX_CASES, parseSuite, runEvaluation, type EvaluationCase, type EvaluationResult, type EvaluationSuite } from "@/lib/evaluation"
-import { queryCacheLabel, queryLatency } from "@/lib/query-explorer"
-import type { Project, QueryResponse } from "@/lib/types"
+import { EvaluationConfigCard } from "./evaluation-config"
+import { api, fetcher, isSessionExpired } from "@/lib/api"
+import { importEvaluation, MAX_CASES, projectEvaluationConfig, type EvaluationCase, type EvaluationDefinition, type EvaluationRun, type SavedEvaluation } from "@/lib/evaluation"
+import { queryLatency } from "@/lib/query-explorer"
+import type { ModelsResponse, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-type Run = { suite: EvaluationSuite; startedAt: string; model: string; results: EvaluationResult[]; finished: boolean }
 const newCase = (): EvaluationCase => ({ id: crypto.randomUUID(), question: "", expected: "", match: "contains", source: "" })
-
+const active = (run: EvaluationRun) => run.status === "preparing" || run.status === "running"
 function download(name: string, value: unknown) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }))
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = name
-  anchor.click()
+  const a = document.createElement("a"); a.href = url; a.download = name; a.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function EvaluationPlayground({ project }: { project: Project }) {
-  const [suite, setSuite] = useState<EvaluationSuite>({ version: 1, cases: [], topK: [project.top_k, project.top_k === 10 ? 5 : 10], compare: true })
-  const [ready, setReady] = useState(false)
-  const [storageKey, setStorageKey] = useState<string | null>(null)
-  const [saveMessage, setSaveMessage] = useState("Loading saved test set…")
+export function EvaluationPlayground({ project, onBack }: { project: Project; onBack: () => void }) {
+  const base = `/api/projects/${project.id}/evaluations`
+  const { data: saved, error: loadError, mutate: reload } = useSWR<SavedEvaluation>(`${base}/suite`, fetcher, { revalidateOnFocus: false })
+  const { data: models, error: modelsError } = useSWR<ModelsResponse>("/api/models", fetcher)
+  const { data: history, mutate: reloadHistory } = useSWR<EvaluationRun[]>(`${base}/runs`, fetcher)
+  const baseline = projectEvaluationConfig(project)
+  const [draft, setDraft] = useState<EvaluationDefinition | null>(null)
+  const [draftRevision, setDraftRevision] = useState<number | null>(null)
+  const suite = draft ?? saved?.suite ?? { version: 2, cases: [], variants: [baseline, { ...baseline, top_k: baseline.top_k === 10 ? 5 : 10 }] } as EvaluationDefinition
   const [error, setError] = useState("")
-  const [run, setRun] = useState<Run | null>(null)
+  const [notice, setNotice] = useState("")
+  const [run, setRun] = useState<EvaluationRun | null>(null)
   const [running, setRunning] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const startingRef = useRef(false)
   const controller = useRef<AbortController | null>(null)
+  const mounted = useRef(true)
   const fileInput = useRef<HTMLInputElement>(null)
   const { mutate } = useSWRConfig()
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; controller.current?.abort() } }, [])
+  function update(next: EvaluationDefinition) { if (draftRevision === null) setDraftRevision(saved?.revision ?? 0); setDraft(next); setError(""); setNotice("") }
+  function edit(id: string, patch: Partial<EvaluationCase>) { update({ ...suite, cases: suite.cases.map(item => item.id === id ? { ...item, ...patch } : item) }) }
+  function showError(err: unknown) { if (!isSessionExpired(err)) setError(err instanceof Error ? err.message : "Request failed.") }
 
-  useEffect(() => {
-    let active = true
-    const client = createClient()
-    void client.auth.getSession().then(({ data }) => {
-      if (!active) return
-      if (!data.session) { setReady(true); setSaveMessage("Export your test set to keep it."); return }
-      const key = `oreag:evaluation:v1:${data.session.user.id}:${project.id}`
-      try {
-        const stored = localStorage.getItem(key)
-        if (stored) setSuite(parseSuite(JSON.parse(stored)))
-        setStorageKey(key)
-        setSaveMessage("Test set saved in this browser. Results stay in this session.")
-      } catch {
-        setSaveMessage("Saved test set could not be loaded. Import a backup or start a new test set.")
+  async function save() {
+    if (suite.cases.some(c => !c.question.trim())) throw new Error("Fill in each question before saving.")
+    setSaving(true)
+    try {
+      const result = await api<SavedEvaluation>(`${base}/suite`, { method: "PUT", body: JSON.stringify({ revision: draftRevision ?? saved?.revision ?? 0, suite }) })
+      await reload(result, { revalidate: false })
+      setDraft(null); setDraftRevision(null); setNotice("Test set and configurations saved to the database.")
+      return result.suite!
+    } finally { setSaving(false) }
+  }
+  async function drive(current: EvaluationRun) {
+    const abort = new AbortController(); controller.current = abort; setRunning(true); setError("")
+    try {
+      while (active(current) && !abort.signal.aborted) {
+        current = await api<EvaluationRun>(`${base}/runs/${current.id}/advance`, { method: "POST", signal: abort.signal })
+        if (mounted.current) setRun(current)
       }
-      setReady(true)
-    }).catch(() => { if (active) { setReady(true); setSaveMessage("Browser saving unavailable. Export your test set to keep it.") } })
-    return () => { active = false; controller.current?.abort() }
-  }, [project.id])
-
-  function update(next: EvaluationSuite) {
-    setSuite(next)
-    setError("")
-    if (storageKey) {
-      try { localStorage.setItem(storageKey, JSON.stringify(next)); setSaveMessage("Test set saved in this browser. Results stay in this session.") }
-      catch { setSaveMessage("Browser saving unavailable. Export your test set to keep it.") }
+    } catch (err) { if (!abort.signal.aborted && mounted.current) showError(err) }
+    finally {
+      if (controller.current === abort) controller.current = null
+      if (mounted.current) { setRunning(false); void reloadHistory() }
+      // Provider spend remains visible, but evaluation does not change live query metrics.
+      void mutate((key: unknown) => typeof key === "string" && key.startsWith("/api/account/usage"))
     }
   }
-
-  function edit(id: string, patch: Partial<EvaluationCase>) {
-    update({ ...suite, cases: suite.cases.map(item => item.id === id ? { ...item, ...patch } : item) })
+  async function start() {
+    if (controller.current || saving || startingRef.current) return
+    startingRef.current = true; setStarting(true)
+    setError("")
+    try {
+      if (!suite.cases.length) throw new Error("Add at least one question.")
+      const snapshot = await save()
+      const current = await api<EvaluationRun>(`${base}/runs`, { method: "POST", body: JSON.stringify({ id: crypto.randomUUID(), suite: snapshot }) })
+      setRun(current); await drive(current)
+    } catch (err) { showError(err) } finally { startingRef.current = false; setStarting(false) }
   }
-
+  async function resume() {
+    if (!run || controller.current) return
+    try { const current = await api<EvaluationRun>(`${base}/runs/${run.id}/resume`, { method: "POST" }); setRun(current); await drive(current) } catch (err) { showError(err) }
+  }
+  async function stop() {
+    if (!run) return
+    // Stop issuing steps immediately; the in-flight server step observes DB cancellation.
+    controller.current?.abort()
+    try { setRun(await api<EvaluationRun>(`${base}/runs/${run.id}/cancel`, { method: "POST" })); void reloadHistory() } catch (err) { showError(err) }
+  }
+  async function selectRun(id: string) {
+    try { setRun(await api<EvaluationRun>(`${base}/runs/${id}`)) } catch (err) { showError(err) }
+  }
+  async function removeRun() {
+    if (!run) return
+    try { await api(`${base}/runs/${run.id}`, { method: "DELETE" }); setRun(null); void reloadHistory() } catch (err) { showError(err) }
+  }
   async function importFile(file?: File) {
     if (!file) return
-    try {
-      if (file.size > 256_000) throw new Error("Choose a test set smaller than 256 KB.")
-      const imported = parseSuite(JSON.parse(await file.text()))
-      update(imported)
-    } catch (err) { setError(err instanceof Error ? err.message : "Could not import test set.") }
+    try { if (file.size > 256_000) throw new Error("Choose a test set smaller than 256 KB."); update(importEvaluation(JSON.parse(await file.text()), baseline)) } catch (err) { showError(err) }
   }
-
-  async function start() {
-    if (controller.current || !ready) return
-    if (!suite.cases.length || suite.cases.some(item => !item.question.trim())) { setError("Add a question to every test case before running."); return }
-    if (suite.compare && suite.topK[0] === suite.topK[1]) { setError("Choose different retrieval counts for A and B."); return }
-    const snapshot = parseSuite(suite)
-    const abort = new AbortController()
-    controller.current = abort
-    setError("")
-    setRunning(true)
-    setRun({ suite: snapshot, startedAt: new Date().toISOString(), model: `${project.llm_provider}/${project.llm_model}`, results: [], finished: false })
-    try {
-      await runEvaluation(snapshot, async (question, topK, signal) => {
-        // Isolated questions, with the exact same contract as public POST /query.
-        return api<QueryResponse>(`/api/projects/${project.id}/query`, {
-          method: "POST", signal, body: JSON.stringify({ question, top_k: topK }),
-        })
-      }, abort.signal, result => {
-        setRun(previous => previous ? { ...previous, results: [...previous.results, result] } : previous)
-      })
-    } catch (err) {
-      if (!isSessionExpired(err)) setError(err instanceof Error ? err.message : "Evaluation failed.")
-    } finally {
-      controller.current = null
-      setRunning(false)
-      setRun(previous => previous ? { ...previous, finished: true } : previous)
-      void mutate((key: unknown) => typeof key === "string" && (key.startsWith("/api/account/queries") || key === "/api/account/knowledge-health" || key === `/api/projects/${project.id}/query-stats`))
-    }
-  }
-
-  const total = suite.cases.length * (suite.compare ? 2 : 1)
-  const runTotal = run ? run.suite.cases.length * (run.suite.compare ? 2 : 1) : 0
-  return <div className="min-w-0 space-y-4 pb-4">
-    <header className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0 space-y-1">
-        <h2 className="text-lg font-semibold">Evaluation playground</h2>
-        <p className="text-xs leading-5 text-muted-foreground">Test expected answers and compare retrieval settings on the same questions.</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <input ref={fileInput} type="file" accept="application/json,.json" aria-label="Import test set file" className="hidden" onChange={event => { void importFile(event.target.files?.[0]); event.target.value = "" }} />
-        <Button variant="outline" size="sm" disabled={!ready || running} onClick={() => fileInput.current?.click()}><UploadSimpleIcon />Import</Button>
-        <Button variant="outline" size="sm" disabled={!ready || !suite.cases.length} onClick={() => download("evaluation-test-set.json", suite)}><DownloadSimpleIcon />Export set</Button>
-        {running ? <Button variant="outline" size="sm" onClick={() => controller.current?.abort()}><StopIcon />Stop</Button> :
-          <Button size="sm" disabled={!ready || !suite.cases.length} onClick={() => void start()}><PlayIcon />Run {total ? `${total} ${total === 1 ? "query" : "queries"}` : "tests"}</Button>}
+  const busy = running || saving || starting
+  const ready = !!saved && !!models && !loadError
+  return <div className="min-w-0 space-y-5 pb-5">
+    <header className="space-y-3 border-b pb-4">
+      <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={onBack}><ArrowLeftIcon />Back to conversation</Button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="text-xl font-semibold tracking-tight">Evaluator</h2><p className="mt-1 text-xs text-muted-foreground">Compare complete model configurations against the same knowledge snapshot.</p></div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" disabled={!ready || busy} onClick={() => void save().catch(showError)}><FloppyDiskIcon />Save set</Button>
+          {running ? <Button variant="outline" size="sm" onClick={() => void stop()}><StopIcon />Stop run</Button> : <Button size="sm" disabled={!ready || busy || !suite.cases.length} onClick={() => void start()}><PlayIcon />Run comparison</Button>}
+        </div>
       </div>
     </header>
-    {error && <p role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">{error}</p>}
-    <fieldset disabled={running || !ready} className="min-w-0 space-y-4 disabled:opacity-70">
-      <legend className="sr-only">Evaluation configuration</legend>
-      <div className="space-y-3 rounded-xl border bg-card p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-medium">Query settings</h3>
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" className="accent-foreground" checked={suite.compare} onChange={event => update({ ...suite, compare: event.target.checked })} />Compare A / B</label>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(suite.compare ? [0, 1] : [0]).map(variant => <div key={variant} className="space-y-2 rounded-lg border p-3 text-xs">
-            <p className="font-medium">{variant === 0 ? "A · Baseline" : "B · Comparison"}</p>
-            <FilterSelect label={`Variant ${variant === 0 ? "A" : "B"} retrieved chunks (top_k)`} value={String(suite.topK[variant])} onChange={value => {
-              const topK: [number, number] = [...suite.topK]
-              topK[variant] = Number(value)
-              update({ ...suite, topK })
-            }} options={Array.from({ length: 20 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} />
-          </div>)}
-        </div>
-        <p className="break-words text-xs leading-5 text-muted-foreground">Both use {project.llm_provider}/{project.llm_model} and the project’s answer policy. Each question runs independently. Normal caching and usage charges apply; completed queries appear in Queries and Health.</p>
-      </div>
+    {(error || loadError || modelsError) && <div role="alert" className="space-y-2 rounded-lg border border-destructive/30 p-3 text-sm"><p>{error || "Could not load saved evaluations or available models."}</p><Button variant="outline" size="sm" onClick={() => { setError(""); void reload(); void mutate("/api/models") }}>Retry loading</Button></div>}
+    {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
+    <fieldset disabled={!ready || busy} className="min-w-0 space-y-4 disabled:opacity-60">
+      <legend className="sr-only">Evaluation settings</legend>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">Configurations</h3><label className="flex items-center gap-2 text-xs"><input type="checkbox" className="accent-foreground" checked={suite.variants.length === 2} onChange={e => update({ ...suite, variants: e.target.checked ? [suite.variants[0], { ...suite.variants[0] }] : [suite.variants[0]] })} />Compare two configurations</label></div>
+      {models && <div className={cn("grid gap-4", suite.variants.length === 2 && "lg:grid-cols-2")}>{suite.variants.map((config, index) => <EvaluationConfigCard key={index} value={config} index={index} models={models} project={project} onChange={value => update({ ...suite, variants: suite.variants.map((v, i) => i === index ? value : v) })} />)}</div>}
+      <p className="text-xs leading-5 text-muted-foreground">Evaluation settings, scores, and feedback stay in this workspace. Live project settings, vectors, query history, and Health metrics are unchanged. Provider spend is still metered separately as evaluation usage.</p>
       <section className="overflow-hidden rounded-xl border bg-card">
-        <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-          <h3 className="text-sm font-medium">Test set <span className="ml-1 text-muted-foreground">{suite.cases.length}/{MAX_CASES}</span></h3>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3"><h3 className="text-sm font-medium">Test set <span className="text-muted-foreground">{suite.cases.length}/{MAX_CASES}</span></h3><div className="flex gap-1">
+          <input ref={fileInput} type="file" accept="application/json,.json" aria-label="Import test set file" className="hidden" onChange={e => { void importFile(e.target.files?.[0]); e.target.value = "" }} />
+          <Button variant="ghost" size="icon" className="size-8" aria-label="Import test set" onClick={() => fileInput.current?.click()}><UploadSimpleIcon /></Button>
+          <Button variant="ghost" size="icon" className="size-8" aria-label="Export test set" onClick={() => download("evaluation-test-set.json", suite)}><DownloadSimpleIcon /></Button>
           <Button variant="outline" size="sm" disabled={suite.cases.length >= MAX_CASES} onClick={() => update({ ...suite, cases: [...suite.cases, newCase()] })}><PlusIcon />Add question</Button>
-        </div>
-        {!suite.cases.length ? <div className="space-y-2 px-5 py-8 text-center">
-          <FlaskIcon className="mx-auto size-6 text-muted-foreground" />
-          <p className="text-sm font-medium">Build a repeatable test set</p>
-          <p className="text-xs leading-5 text-muted-foreground">Add questions your application needs to answer. Include expected text or a source to check automatically.</p>
-        </div> : <ol className="divide-y">{suite.cases.map((item, index) => <li key={item.id} className="space-y-3 p-4">
-          <div className="flex items-center justify-between"><span className="text-xs font-medium">Question {index + 1}</span><Button variant="ghost" size="icon" className="size-8" aria-label={`Remove question ${index + 1}`} onClick={() => update({ ...suite, cases: suite.cases.filter(c => c.id !== item.id) })}><TrashIcon className="size-3.5" /></Button></div>
-          <label className="block space-y-1.5 text-xs">Question<Textarea value={item.question} maxLength={4000} onChange={event => edit(item.id, { question: event.target.value })} placeholder="What should your application ask?" className="min-h-16 text-base md:text-sm" /></label>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="block space-y-1.5 text-xs">Expected answer text (optional)<Textarea value={item.expected} maxLength={4000} onChange={event => edit(item.id, { expected: event.target.value })} placeholder="Text the answer should include" className="min-h-16 text-base md:text-sm" /></label>
-            <div className="space-y-3">
-              <FilterSelect label={`Question ${index + 1} text check`} value={item.match} onChange={value => edit(item.id, { match: value as EvaluationCase["match"] })} options={[{ value: "contains", label: "Contains expected text" }, { value: "exact", label: "Exact text match" }]} />
-              <label className="block space-y-1.5 text-xs">Expected source filename (optional)<Input value={item.source} maxLength={500} onChange={event => edit(item.id, { source: event.target.value })} placeholder="handbook.pdf" className="text-base md:text-sm" /></label>
-            </div>
-          </div>
+        </div></div>
+        {!suite.cases.length ? <div className="space-y-2 px-5 py-8 text-center"><FlaskIcon className="mx-auto size-6 text-muted-foreground" /><p className="text-sm font-medium">Add the questions your application needs to answer</p><p className="text-xs text-muted-foreground">Optional text and source checks make comparisons repeatable.</p></div> : <ol className="divide-y">{suite.cases.map((item, index) => <li key={item.id} className="space-y-3 p-4">
+          <div className="flex items-center justify-between"><h4 className="text-xs font-medium">Question {index + 1}</h4><Button variant="ghost" size="icon" className="size-8" aria-label={`Remove question ${index + 1}`} onClick={() => update({ ...suite, cases: suite.cases.filter(c => c.id !== item.id) })}><TrashIcon /></Button></div>
+          <label className="block space-y-1.5 text-xs">Question<Textarea maxLength={4000} value={item.question} onChange={e => edit(item.id, { question: e.target.value })} placeholder="What should your application ask?" /></label>
+          <div className="grid gap-3 md:grid-cols-2"><label className="block space-y-1.5 text-xs">Expected answer text<Textarea maxLength={4000} value={item.expected} onChange={e => edit(item.id, { expected: e.target.value })} placeholder="Optional expected text" /></label><div className="space-y-3"><FilterSelect label={`Question ${index + 1} text check`} value={item.match} onChange={v => edit(item.id, { match: v as EvaluationCase["match"] })} options={[{ value: "contains", label: "Contains expected text" }, { value: "exact", label: "Exact text match" }]} /><label className="block space-y-1.5 text-xs">Expected source filename<Input maxLength={500} value={item.source} onChange={e => edit(item.id, { source: e.target.value })} placeholder="Optional filename" /></label></div></div>
         </li>)}</ol>}
       </section>
     </fieldset>
-    <p className="text-xs leading-5 text-muted-foreground">{saveMessage} Text checks ignore case and extra whitespace. A source check matches a returned filename. These checks measure your rules; review answers for factual correctness.</p>
-    {run && <section aria-label="Evaluation results" className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold"><span role="status">{running ? "Running" : run.results.length < runTotal || run.results.some(r => r.status === "cancelled") ? "Run stopped" : "Run complete"} · {run.results.length}/{runTotal}</span></h3>
-        <Button variant="outline" size="sm" disabled={running} onClick={() => download("evaluation-results.json", { project_id: project.id, ...run })}><DownloadSimpleIcon />Export results</Button>
-      </div>
-      <p className="text-xs text-muted-foreground">Run started {new Date(run.startedAt).toLocaleString()}. Results use the test set captured at run time.</p>
-      <div className={cn("grid gap-3", run.suite.compare && "sm:grid-cols-2")}>
-        {(run.suite.compare ? [0, 1] : [0]).map(variant => {
-          const results = run.results.filter(r => r.variant === variant)
-          const checked = results.filter(r => r.status === "passed" || r.status === "failed")
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><p>{draft ? "Unsaved changes" : saved?.suite ? "Saved in the project database" : "Create and save a test set"} · Text checks ignore case and extra whitespace.</p>{draft && <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setDraft(null); setDraftRevision(null); void reload() }}>Load saved set</Button>}</div>
+    <section aria-label="Saved evaluation runs" className="space-y-3 border-t pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold">Saved runs</h3><div className="w-full min-w-0 sm:w-72"><FilterSelect label="Choose a saved run" hideLabel value={run?.id ?? ""} onChange={id => { if (id && !running) void selectRun(id) }} options={[{ value: "", label: history?.length ? "Select a run" : "No runs yet" }, ...(history ?? []).map(r => ({ value: r.id, label: `${new Date(r.created_at).toLocaleString()} · ${r.status}` }))]} /></div></div>
+      {run && <>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p role="status" className="text-sm capitalize">{run.status} · {run.prepared}/{run.corpus_count * run.suite.variants.length} vectors · {run.results.length}/{run.suite.cases.length * run.suite.variants.length} answers</p><div className="flex flex-wrap gap-2">
+          {!running && (active(run) || run.status === "failed") && <Button variant="outline" size="sm" onClick={() => void resume()}><PlayIcon />Resume run</Button>}
+          {!running && active(run) && <Button variant="outline" size="sm" onClick={() => void stop()}>Cancel run</Button>}
+          <Button variant="outline" size="sm" onClick={() => download("evaluation-results.json", run)}><DownloadSimpleIcon />Export results</Button>
+          {!running && !active(run) && <Button variant="ghost" size="icon" aria-label="Delete saved run" onClick={() => void removeRun()}><TrashIcon /></Button>}
+        </div></div>
+        {run.error && <p role="alert" className="text-sm text-destructive">{run.error}</p>}
+        <p className="text-xs leading-5 text-muted-foreground">{new Date(run.created_at).toLocaleString()} · {run.corpus_count} source passages. Results use this run’s saved configurations. Pass counts measure text/source rules, not factual accuracy.</p>
+        <div className={cn("grid gap-3", run.suite.variants.length === 2 && "md:grid-cols-2")}>{run.suite.variants.map((config, variant) => {
+          const results = run.results.filter(r => r.variant === variant), checked = results.filter(r => r.status === "passed" || r.status === "failed")
           const measured = results.flatMap(r => r.response?.latency_ms != null ? [r.response.latency_ms] : [])
-          return <div key={variant} className="rounded-xl border p-3 text-xs leading-6">
-            <p className="font-medium">{variant === 0 ? "A · Baseline" : "B · Comparison"} · top_k {run.suite.topK[variant]}</p>
-            <p>{results.filter(r => r.status === "passed").length}/{checked.length} checked passed · {results.filter(r => r.status === "review").length} to review · {results.filter(r => r.status === "error").length} errors</p>
-            <p className="text-muted-foreground">Mean latency {measured.length ? queryLatency(Math.round(measured.reduce((a, b) => a + b, 0) / measured.length)) : "Not measured"} · {results.filter(r => r.response?.cache_layer).length} cached</p>
-          </div>
-        })}
-      </div>
-      {run.suite.cases.map((item, index) => <article key={item.id} className="overflow-hidden rounded-xl border">
-        <div className="space-y-1 border-b bg-muted/20 p-4"><h4 className="break-words text-sm font-medium">{index + 1}. {item.question}</h4>{item.expected && <p className="break-words text-xs text-muted-foreground">Expected ({item.match}): {item.expected}</p>}{item.source && <p className="break-words text-xs text-muted-foreground">Source: {item.source}</p>}</div>
-        <div className={cn("grid", run.suite.compare && "md:grid-cols-2")}>
-          {(run.suite.compare ? [0, 1] : [0]).map(variant => {
-            const result = run.results.find(r => r.caseId === item.id && r.variant === variant)
-            return <div key={variant} className={cn("min-w-0 space-y-3 p-4", variant === 1 && "border-t md:border-t-0 md:border-l")}>
-              <div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{variant === 0 ? "A" : "B"} · top_k {run.suite.topK[variant]}</span><span className={cn("rounded-full bg-muted px-2 py-1 capitalize", result?.status === "passed" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400", (result?.status === "failed" || result?.status === "error") && "bg-red-500/10 text-red-600 dark:text-red-400")}>{result?.status ?? (run.finished ? "Not run" : run.results.length === index * (run.suite.compare ? 2 : 1) + variant ? "Running" : "Pending")}</span></div>
-              {result?.error && <p className="break-words text-sm text-destructive">{result.error}</p>}
-              {result?.response && <>
-                <p className="break-words text-xs text-muted-foreground">{queryLatency(result.response.latency_ms)} · {queryCacheLabel(result.response.cache_layer ?? null)} · {result.response.model}</p>
-                {result.response.needs_clarification && <p className="text-xs text-amber-600 dark:text-amber-400">The answer requests clarification.</p>}
-                <div className="max-h-80 overflow-y-auto break-words text-sm"><AnswerMarkdown>{result.response.answer}</AnswerMarkdown></div>
-                <details className="text-xs"><summary className="cursor-pointer">Sources ({result.response.sources.length})</summary><ul className="mt-2 space-y-2">{result.response.sources.map((source, i) => <li key={i} className="rounded-lg border p-2"><p className="break-words font-medium">{source.filename}{source.page_number != null ? ` · p.${source.page_number}` : ""}{source.cited ? " · Cited" : ""}</p><p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-words leading-5 text-muted-foreground">{source.content}</p></li>)}</ul></details>
-                {result.response.query_id && <AnswerFeedback key={result.response.query_id} queryId={result.response.query_id} />}
-              </>}
-            </div>
-          })}
-        </div>
-      </article>)}
-    </section>}
+          return <div key={variant} className="min-w-0 space-y-1 rounded-xl border p-3 text-xs leading-5"><h4 className="break-words font-medium">{variant === 0 ? "A" : "B"} · {config.llm_provider}/{config.llm_model}</h4><p className="break-words text-muted-foreground">{config.embedding_provider}/{config.embedding_model} · {config.embedding_dimensions} dimensions · top_k {config.top_k}</p><p>{results.filter(r => r.status === "passed").length}/{checked.length} checked passed · {results.filter(r => r.status === "review").length} to review</p><p>Mean latency: {measured.length ? queryLatency(Math.round(measured.reduce((a, b) => a + b, 0) / measured.length)) : "Not measured"}</p></div>
+        })}</div>
+        {run.suite.cases.map((item, index) => <article key={item.id} className="overflow-hidden rounded-xl border"><div className="space-y-1 border-b bg-muted/20 p-4"><h4 className="break-words text-sm font-medium">{index + 1}. {item.question}</h4>{item.expected && <p className="break-words text-xs text-muted-foreground">Expected ({item.match}): {item.expected}</p>}{item.source && <p className="break-words text-xs text-muted-foreground">Source: {item.source}</p>}</div><div className={cn("grid", run.suite.variants.length === 2 && "md:grid-cols-2")}>{run.suite.variants.map((config, variant) => {
+          const result = run.results.find(r => r.caseId === item.id && r.variant === variant)
+          return <div key={variant} className={cn("min-w-0 space-y-3 p-4", variant === 1 && "border-t md:border-t-0 md:border-l")}><div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{variant === 0 ? "A" : "B"}</span><span className={cn("rounded-full bg-muted px-2 py-1 capitalize", result?.status === "passed" && "bg-emerald-500/10 text-emerald-600", result?.status === "failed" && "bg-red-500/10 text-red-600")}>{result?.status ?? (active(run) ? "Pending" : "Not run")}</span></div>{result?.response && <><p className="break-words text-xs text-muted-foreground">{queryLatency(result.response.latency_ms)} · {result.response.model} · Fresh answer</p><div className="max-h-80 overflow-y-auto break-words text-sm"><AnswerMarkdown>{result.response.answer}</AnswerMarkdown></div><details className="text-xs"><summary className="cursor-pointer">Sources ({result.response.sources.length})</summary><ul className="mt-2 space-y-2">{result.response.sources.map((source, i) => <li key={i} className="rounded-lg border p-2"><p className="break-words font-medium">{source.filename}{source.page_number != null ? ` · p.${source.page_number}` : ""}</p><p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-words leading-5 text-muted-foreground">{source.content}</p></li>)}</ul></details>{!active(run) && <AnswerFeedback key={`${run.id}:${index}:${variant}`} queryId="evaluation" initialRating={result.feedback_rating} initialNote={result.feedback_note}
+ resourceUrl={`${base}/runs/${run.id}/results/${run.results.indexOf(result)}/feedback`}
+ onSaved={(feedback_rating, feedback_note) => setRun(current => current ? { ...current, results: current.results.map(r => r.caseId === item.id && r.variant === variant ? { ...r, feedback_rating, feedback_note } : r) } : current)} /> }</>}</div>
+        })}</div></article>)}
+      </>}
+    </section>
   </div>
 }

@@ -77,6 +77,23 @@ def _src(content, similarity, chunk_index=0):
 
 
 class TestRunQueryWiring:
+    def test_evaluation_override_uses_shared_generation_without_live_retrieval_or_caches(self, monkeypatch):
+        from app.services import query
+        def forbidden(*args, **kwargs):
+            raise AssertionError("Evaluation must not use live retrieval or answer caches")
+        monkeypatch.setattr(query.retrieval, "retrieve", forbidden)
+        monkeypatch.setattr(query.semantic_cache, "lookup", forbidden)
+        monkeypatch.setattr(query.semantic_cache, "store", forbidden)
+        monkeypatch.setattr(query._cache, "get", forbidden)
+        monkeypatch.setattr(query.generation, "generate_answer", lambda *a, **k: "ISOLATED ANSWER")
+        db = FakeDB([0, 0])
+        response = query.run_query(db, _project(), "what is X", 3, api_key_id=None,
+            retrieval_override=lambda q, k, *rest: [_src("snapshot", .9)], bypass_cache=True, record_query=False)
+        assert response.answer == "ISOLATED ANSWER" and response.cache_layer is None
+        assert response.sources[0].content == "snapshot"
+        assert response.query_id is None
+        assert db.added == [], "Evaluation must not write a live query log"
+
     def test_strong_retrieval_returns_grounded_answer(self, monkeypatch):
         from app.services import query
 

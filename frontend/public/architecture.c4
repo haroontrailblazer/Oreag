@@ -407,6 +407,15 @@ model {
             semantics 'notes are trimmed and limited to 1000 characters; delete clears rating, note and timestamp; feedback does not alter retrieval, generation or cached answers'
           }
         }
+        evaluations = component 'Evaluator' 'Database-backed test sets, model configurations, isolated embedding snapshots and resumable runs.' {
+          technology 'services/evaluations.py · /api/projects/{project_id}/evaluations · /v1/projects/{project_id}/evaluations · migration 0044'
+          metadata {
+            isolation 'Each variant embeds frozen passages at its own model and dimensions. Project settings, production chunks, query logs and live Health metrics are untouched; answer caches are bypassed and language caches are request-local.'
+            feedback 'Ratings and notes persist only in evaluation_runs results JSON. Provider costs remain metered as evaluation_index and evaluation_query.'
+            execution 'One leased step prepares up to 32 vectors or runs one fresh query through shared agentic generation; persisted progress supports resume and cancellation.'
+            endpoints '/v1/projects/{project_id}/evaluations/suite · /v1/projects/{project_id}/evaluations/runs · /v1/projects/{project_id}/evaluations/runs/{run_id} · /v1/projects/{project_id}/evaluations/runs/{run_id}/advance · /v1/projects/{project_id}/evaluations/runs/{run_id}/cancel · /v1/projects/{project_id}/evaluations/runs/{run_id}/resume · /v1/projects/{project_id}/evaluations/runs/{run_id}/results/{result_index}/feedback'
+          }
+        }
         usageReport = component 'Usage Report' 'Account-scoped read side of metering, behind GET /api/account/usage: totals, per-model, per-key and per-project rollups with cache economics and a daily series.' {
           technology 'services/usage_report.py · one grouped cube pass over usage_events + 3 support queries'
           metadata {
@@ -539,7 +548,7 @@ model {
 
     db = containerDb 'Database' 'projects · files · chunks · memories · provider_keys · api_keys · query_logs · semantic_query_cache · usage_events · suspended_accounts' {
       #scale
-      technology 'Supabase Postgres 17 + pgvector 0.8 · 43 migrations'
+      technology 'Supabase Postgres 17 + pgvector 0.8 · 44 migrations'
       icon tech:postgresql
       metadata {
         vector-columns 'chunks.embedding, memories.embedding and semantic_query_cache.embedding are DIMENSIONLESS `vector`, so every project can pick its own model and size in one shared table'
@@ -632,6 +641,10 @@ model {
   ingestion -[internal]-> contentVersion 'bumps, invalidating every cache'
 
   dashboardApi -[internal]-> queryHistory 'owner-scoped query list and detail'
+  dashboardApi -[internal]-> evaluations 'owner-scoped saved sets and runs'
+  publicApi -[internal]-> evaluations 'project-key scoped saved sets and runs'
+  evaluations -[persist]-> db 'evaluation_suites, evaluation_runs and evaluation_vectors'
+  evaluations -[internal]-> agentic 'fresh answers from isolated snapshot retrieval'
   publicApi -[internal]-> queryHistory 'project-scoped query list and detail'
   dashboardApi -[internal]-> knowledgeHealth 'owner-scoped health report'
   publicApi -[internal]-> knowledgeHealth 'project-scoped health report'

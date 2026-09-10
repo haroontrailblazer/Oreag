@@ -1,10 +1,23 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { evaluateAnswer, parseSuite, runEvaluation } from "../src/lib/evaluation.ts"
+import { evaluateAnswer, importEvaluation, parseSuite, runEvaluation } from "../src/lib/evaluation.ts"
 
 const item = { id: "one", question: "What is the policy?", expected: "30 days", match: "contains", source: "policy.pdf" }
 const response = { answer: "Returns within 30 DAYS.", sources: [{ filename: "policy.pdf" }], latency_ms: 100, model: "test" }
 const suite = { version: 1, cases: [item], topK: [5, 10], compare: true }
+
+test("database configuration import upgrades old sets and keeps variants independent", () => {
+  const config = { llm_provider: "openai", llm_model: "gpt-4o-mini", embedding_provider: "openai", embedding_model: "text-embedding-3-small", embedding_dimensions: 1536, top_k: 5, min_similarity: .2, min_strong: 0, hybrid_search: true, include_memories: true }
+  const imported = importEvaluation(suite, config)
+  assert.equal(imported.version, 2)
+  assert.deepEqual(imported.variants.map(v => v.top_k), [5, 10])
+  imported.variants[1].embedding_dimensions = 512
+  assert.equal(imported.variants[0].embedding_dimensions, 1536)
+  assert.equal(config.embedding_dimensions, 1536)
+  assert.equal(importEvaluation(imported, config).variants[1].embedding_dimensions, 512)
+  assert.throws(() => importEvaluation({ ...imported, variants: [] }, config))
+  assert.throws(() => importEvaluation({ ...imported, variants: [{ ...config, embedding_dimensions: 0 }] }, config))
+})
 
 test("text and source rules must both match; missing expectations require review", () => {
   assert.equal(evaluateAnswer(item, response), "passed")

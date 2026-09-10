@@ -11,6 +11,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     Numeric,
     Text,
     func,
@@ -27,6 +28,44 @@ from .config import settings
 
 class Base(DeclarativeBase):
     pass
+
+
+class EvaluationSuiteRecord(Base):
+    __tablename__ = "evaluation_suites"
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    suite: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class EvaluationRun(Base):
+    __tablename__ = "evaluation_runs"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(Text, default="preparing")
+    suite: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    corpus: Mapped[list] = deferred(mapped_column(JSON().with_variant(JSONB, "postgresql")))
+    corpus_count: Mapped[int] = mapped_column(Integer)
+    content_version: Mapped[int] = mapped_column(BigInteger)
+    prepared: Mapped[int] = mapped_column(Integer, default=0)
+    results: Mapped[list] = mapped_column(JSON().with_variant(JSONB, "postgresql"), default=list)
+    error: Mapped[str | None] = mapped_column(Text)
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class EvaluationVector(Base):
+    __tablename__ = "evaluation_vectors"
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="CASCADE"), primary_key=True)
+    variant: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
+    filename: Mapped[str] = mapped_column(Text)
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    is_memory: Mapped[bool] = mapped_column(Boolean, default=False)
+    embedding = mapped_column(Vector)
 
 
 class Project(Base):

@@ -115,6 +115,8 @@ WHAT IS STILL OPEN, stated rather than hidden:
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 import re
 import threading
 
@@ -335,6 +337,27 @@ def reset_caches() -> None:
         _question_languages.clear()
 
 
+_evaluation_caches: ContextVar[dict | None] = ContextVar("evaluation_language_caches", default=None)
+
+
+def _request_cache(name, shared):
+    scoped = _evaluation_caches.get()
+    return scoped[name] if scoped is not None else shared
+
+
+@contextmanager
+def isolated_evaluation(passages):
+    """Profile the frozen corpus and keep all model-derived language caches local."""
+    rows = list(passages)[:settings.cross_lingual_sample]
+    found = frozenset().union(*(scripts(row) for row in rows))
+    sample = max(rows, key=len, default="")[:settings.cross_lingual_sample_chars]
+    token = _evaluation_caches.set({"profile": (found, sample), "languages": {}, "translations": {}, "questions": {}})
+    try:
+        yield
+    finally:
+        _evaluation_caches.reset(token)
+
+
 def corpus_profile(db: Session, project: Project) -> tuple[frozenset[str], str]:
     """The scripts this project's indexed text uses, and a sample of it.
 
@@ -343,6 +366,9 @@ def corpus_profile(db: Session, project: Project) -> tuple[frozenset[str], str]:
     language - Devanagari is Hindi, Marathi or Nepali. `corpus_language`
     identifies it from this sample, once per corpus version.
     """
+    scoped = _evaluation_caches.get()
+    if scoped is not None:
+        return scoped["profile"]
     key = (str(project.id), int(getattr(project, "content_version", 0) or 0))
     with _corpus_lock:
         hit = _corpus_cache.get(key)
@@ -423,9 +449,10 @@ def corpus_language(db: Session, project: Project, llm, on_usage=None) -> str | 
     caller then leaves the question alone - guessing "English" here would
     quietly translate a Tamil question into English for a Hindi corpus.
     """
+    cache = _request_cache("languages", _language_cache)
     key = (str(project.id), int(getattr(project, "content_version", 0) or 0))
     with _language_lock:
-        hit = _language_cache.get(key)
+        hit = cache.get(key)
     if hit is not None:
         return hit or None
 
@@ -448,7 +475,7 @@ def corpus_language(db: Session, project: Project, llm, on_usage=None) -> str | 
     if not name:
         logger.info("Corpus language identification was not a language name")
     with _language_lock:
-        _language_cache[key] = name
+        cache[key] = name
     return name or None
 
 
@@ -611,9 +638,10 @@ def retrieval_query(
     asked = scripts(question)
     corpus_scripts, sample = corpus_profile(db, project)
 
+    cache = _request_cache("translations", _translations)
     cache_key = (question, sample[:64])
     with _translations_lock:
-        cached = _translations.get(cache_key)
+        cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
@@ -683,9 +711,9 @@ def retrieval_query(
         return question
 
     with _translations_lock:
-        if len(_translations) >= _TRANSLATION_CACHE_MAX:
-            _translations.clear()
-        _translations[cache_key] = translated
+        if len(cache) >= _TRANSLATION_CACHE_MAX:
+            cache.clear()
+        cache[cache_key] = translated
     return translated
 
 
@@ -768,9 +796,10 @@ def answer_language_for(
         # language would cost a call and buy nothing.
         return None
 
+    cache = _request_cache("questions", _question_languages)
     key = question.strip()
     with _question_lock:
-        hit = _question_languages.get(key)
+        hit = cache.get(key)
     if hit is not None:
         return hit or fallback
 
@@ -795,7 +824,7 @@ def answer_language_for(
 
     name = _language_name(name)
     with _question_lock:
-        if len(_question_languages) >= _TRANSLATION_CACHE_MAX:
-            _question_languages.clear()
-        _question_languages[key] = name
+        if len(cache) >= _TRANSLATION_CACHE_MAX:
+            cache.clear()
+        cache[key] = name
     return name or fallback

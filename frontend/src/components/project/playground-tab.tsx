@@ -7,6 +7,7 @@ import {
   CheckIcon as Check,
   CopyIcon as Copy,
   FileTextIcon as FileText,
+  FlaskIcon,
   LightningIcon as Lightning,
   PlusIcon as Plus,
   SquareIcon as Square,
@@ -282,7 +283,7 @@ const TurnView = memo(function TurnView({ question, result }: Turn) {
   )
 })
 
-export function PlaygroundTab({ project }: { project: Project }) {
+export function PlaygroundTab({ project, onEvaluate }: { project: Project; onEvaluate?: () => void }) {
   const [question, setQuestion] = useState("")
   const [turns, setTurns] = useState<Turn[]>([])
   // The in-flight answer as it streams in. `text` grows token by token; it
@@ -569,6 +570,7 @@ export function PlaygroundTab({ project }: { project: Project }) {
             </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            {onEvaluate && <Button variant="outline" size="sm" disabled={loading} onClick={onEvaluate}><FlaskIcon className="size-4" /><span className="hidden sm:inline">Open evaluator</span><span className="sm:hidden">Evaluate</span></Button>}
         {cacheStats && cacheStats.queries > 0 ? (
           <details
             ref={cacheDetails}
