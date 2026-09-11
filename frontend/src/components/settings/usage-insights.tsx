@@ -8,15 +8,26 @@ import {
 
 import { Button } from "@/components/ui/button"
 import type { AccountUsage } from "@/lib/types"
-import { getLargestSpender, getUsageComparison, percentChange, usageDailyCsv } from "@/lib/usage-insights"
+import { getLargestSpender, getSpendingInsights, percentChange, usageDailyCsv } from "@/lib/usage-insights"
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6,
 })
+const summaryCurrency = new Intl.NumberFormat("en-US", {
+  style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2,
+})
 
 function money(value: number) {
-  return value > 0 && value < 0.000001 ? `$${value.toPrecision(2)}` : currency.format(value)
+  return Math.abs(value) > 0 && Math.abs(value) < 0.000001 ? `$${value.toPrecision(2)}` : currency.format(value)
+}
+
+function signedMoney(value: number) {
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${summaryMoney(Math.abs(value))}`
+}
+
+function summaryMoney(value: number) {
+  return Math.abs(value) >= 0.01 ? summaryCurrency.format(value) : money(value)
 }
 
 function Change({ value, unit = "%" }: { value: number; unit?: string }) {
@@ -41,8 +52,100 @@ function Insight({ title, icon, value, children }: {
   )
 }
 
+function SpendingChange({ insights }: { insights: ReturnType<typeof getSpendingInsights> }) {
+  const {
+    comparison, incomplete, reasons, spendDelta, previousCostPerRequest,
+    currentCostPerRequest, costPerRequestChange, volumeEffect, rateEffect,
+    forecast30Days, forecastReason,
+  } = insights
+  const headline = incomplete ? "Spending comparison is incomplete"
+    : spendDelta == null ? "Not enough cost data to compare"
+    : spendDelta === 0 ? "Recorded spend is unchanged"
+    : `${summaryMoney(Math.abs(spendDelta))} ${spendDelta > 0 ? "more" : "less"} recorded spend`
+
+  return (
+    <section aria-labelledby="spending-change-heading" className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-background/80">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-3 sm:px-5">
+        <h3 id="spending-change-heading" className="text-sm font-semibold">What changed your spending?</h3>
+        <span className={`rounded-md px-2 py-1 text-[11px] font-medium ${incomplete ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-muted text-muted-foreground"}`}>
+          {incomplete ? "Incomplete measurements" : "Recorded LLM + embedding costs"}
+        </span>
+      </div>
+      <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.65fr)]">
+        <div className="min-w-0 space-y-4 p-4 sm:p-5">
+          <div className="space-y-1.5">
+            <p className="break-words text-lg font-semibold tracking-tight">{headline}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {comparison ? `Across the same ${comparison.periodDays}-day periods shown above.` : "Two periods of complete days are needed."}
+            </p>
+          </div>
+
+          {incomplete ? (
+            <div className="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-relaxed">
+              <ul className="list-disc space-y-1 pl-4 [overflow-wrap:anywhere]">{reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>
+              <p className="text-muted-foreground">Coverage may differ between periods. Spending effects and the forecast are unavailable until measurements are complete.</p>
+            </div>
+          ) : volumeEffect != null && rateEffect != null ? (
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0 rounded-lg border border-border/60 p-3">
+                <dt className="text-xs text-muted-foreground">Request-volume effect</dt>
+                <dd className="mt-2 break-words text-lg font-semibold tabular-nums">{signedMoney(volumeEffect)}</dd>
+                <dd className="mt-1 text-xs leading-relaxed text-muted-foreground">Request change at the previous cost per request.</dd>
+              </div>
+              <div className="min-w-0 rounded-lg border border-border/60 p-3">
+                <dt className="text-xs text-muted-foreground">Cost-per-request effect</dt>
+                <dd className="mt-2 break-words text-lg font-semibold tabular-nums">{signedMoney(rateEffect)}</dd>
+                <dd className="mt-1 text-xs leading-relaxed text-muted-foreground">The remaining change after accounting for request volume.</dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
+              {comparison?.previous.requests === 0 ? "No previous requests to establish a cost-per-request baseline. A breakdown will appear once both periods have comparable usage." : "Recorded costs are needed to calculate the spending breakdown."}
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <p className="leading-relaxed text-muted-foreground">Recorded cost / request: <span className="font-medium text-foreground">
+              {previousCostPerRequest == null ? "Unavailable" : money(previousCostPerRequest)} → {currentCostPerRequest == null ? "Unavailable" : money(currentCostPerRequest)}
+            </span></p>
+            {!incomplete && costPerRequestChange != null && <Change value={costPerRequestChange} />}
+          </div>
+          <details className="text-xs leading-relaxed text-muted-foreground">
+            <summary className="w-fit cursor-pointer rounded-sm font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-4">How to read this breakdown</summary>
+            <div className="mt-2 space-y-2">
+              <p>Request-volume effect = change in requests × previous recorded cost per request. The remaining spend change is the cost-per-request effect. Both effects add up to the recorded spend change before display rounding.</p>
+              <p>Cost per request blends LLM and embedding costs across all recorded requests. Workload, tokens, model prices, and caching can all affect this rate. The cache comparison above is useful context; these totals cannot establish the cause of a change.</p>
+              <p>Unknown costs remain unmeasured. With no requests, cost per request is unavailable.</p>
+            </div>
+          </details>
+        </div>
+
+        <div className="min-w-0 space-y-3 border-t border-border/60 bg-muted/20 p-4 sm:p-5 lg:border-l lg:border-t-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-medium">Next 30 days</h4>
+            <span className="rounded-md border border-border/70 bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground">Estimate</span>
+          </div>
+          <p className="break-words text-2xl font-semibold tracking-tight tabular-nums">{forecast30Days == null ? "Unavailable" : summaryMoney(forecast30Days)}</p>
+          {forecast30Days != null && comparison ? <>
+            <p className="text-xs font-medium">Projected recorded spend</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">{summaryMoney(comparison.current.spend! / comparison.periodDays)} per day across {comparison.periodDays} complete UTC days ({comparison.current.start} – {comparison.current.end}).</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">Estimated daily spend × 30. Assumes the recent spending rate continues; actual costs can change with traffic, models, and caching.</p>
+          </> : (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {forecastReason === "incomplete" ? "Incomplete measurements prevent a reliable projection. Unreported and unpriced costs are never treated as zero."
+                : forecastReason === "no_activity" ? "No requests in the recent complete days to establish a spending rate."
+                : "At least three complete days are needed to estimate a spending rate."}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export function UsageInsights({ data }: { data: AccountUsage }) {
-  const comparison = getUsageComparison(data)
+  const spending = getSpendingInsights(data)
+  const { comparison } = spending
   const periodLabel = comparison ? comparison.periodDays === 7 ? "Weekly" : `${comparison.periodDays}-day` : "Period"
   const largest = getLargestSpender(data)
   const modelCostsUnknown = data.by_model.length > 0 && data.by_model.every((row) => row.cost_usd == null)
@@ -115,6 +218,7 @@ export function UsageInsights({ data }: { data: AccountUsage }) {
           </> : <p>{modelCostsUnknown ? "Model costs are unavailable for this window." : "No model has a positive reported cost in this window."}</p>}
         </Insight>
       </div>
+      <SpendingChange insights={spending} />
       <p className="text-xs leading-relaxed text-muted-foreground">
         {partial ? "Spend figures are partial. " : ""}Recorded spend excludes unmeasured or unpriced usage.
         {" "}CSV includes daily measurements for the selected {data.window_days}-day window; unknown values stay “not measured”.

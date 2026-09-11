@@ -41,6 +41,78 @@ export function percentChange(current: number, previous: number): number | null 
   return previous > 0 ? (current - previous) / previous * 100 : null
 }
 
+function costDifference(current: number, previous: number) {
+  const difference = current - previous
+  // Suppress only floating-point cancellation, never round tiny real costs
+  // to cents (the provider can report costs as small as 1e-10 USD).
+  return Math.abs(difference) <= Number.EPSILON * 4 * Math.max(Math.abs(current), Math.abs(previous))
+    ? 0 : difference
+}
+
+export function getSpendingInsights(
+  data: AccountUsage,
+  comparison = getUsageComparison(data)
+) {
+  const reasons: string[] = []
+  // Caveats are window-wide, not per day. Be conservative: they cannot prove
+  // that measurement coverage stayed the same between the compared periods.
+  if (data.caveats.unmeasured_requests > 0) {
+    reasons.push(`${data.caveats.unmeasured_requests.toLocaleString("en-US")} requests have unreported usage in the selected window.`)
+  }
+  if (data.caveats.unpriced_models?.length) {
+    reasons.push(`Missing prices for: ${data.caveats.unpriced_models.join(", ")}.`)
+  }
+  if (data.caveats.vision_and_audio_excluded) {
+    reasons.push("Some vision or audio costs are excluded.")
+  }
+  const comparedRows = comparison ? data.daily.filter(row =>
+    row.date >= comparison.previous.start && row.date <= comparison.current.end
+  ) : []
+  if (comparedRows.some(row =>
+    (row.cost_usd == null && ((row.prompt_tokens ?? 0) > 0 || (row.completion_tokens ?? 0) > 0)) ||
+    (row.embedding_cost_usd == null && (row.embedding_tokens ?? 0) > 0) ||
+    (row.requests > 0 && row.cost_usd == null && row.embedding_cost_usd == null)
+  )) {
+    reasons.push("Some activity in the comparison has no recorded cost.")
+  }
+  const incomplete = reasons.length > 0
+  const previous = comparison?.previous
+  const current = comparison?.current
+  const previousCostPerRequest = previous?.spend != null && previous.requests > 0
+    ? previous.spend / previous.requests : null
+  const currentCostPerRequest = current?.spend != null && current.requests > 0
+    ? current.spend / current.requests : null
+  const spendDelta = previous?.spend != null && current?.spend != null
+    ? costDifference(current.spend, previous.spend) : null
+
+  // A sequential arithmetic decomposition, not causal attribution. First
+  // change volume at the old blended rate, then change the rate at new volume.
+  // Using the residual preserves the total, including opposing effects and
+  // a current period with no requests (whose rate is undefined, not zero).
+  const volumeEffect = !incomplete && spendDelta != null && previousCostPerRequest != null && previous && current
+    ? (current.requests - previous.requests) * previousCostPerRequest : null
+  const rateEffect = volumeEffect != null && spendDelta != null ? costDifference(spendDelta, volumeEffect) : null
+  const costPerRequestChange = previousCostPerRequest != null && currentCostPerRequest != null
+    ? previousCostPerRequest === 0 ? null
+      : costDifference(currentCostPerRequest, previousCostPerRequest) === 0 ? 0
+      : percentChange(currentCostPerRequest, previousCostPerRequest)
+    : null
+
+  // A fixed 30-day run rate avoids pretending a rolling 7-day report contains
+  // month-to-date spend. Never extrapolate partial or wholly unknown costs.
+  const forecastReason = incomplete || (current && current.spend == null) ? "incomplete"
+    : !comparison || comparison.periodDays < 3 ? "insufficient_history"
+    : !current?.requests ? "no_activity" : null
+  const forecast30Days = forecastReason == null && comparison && current?.spend != null
+    ? current.spend / comparison.periodDays * 30 : null
+
+  return {
+    comparison, incomplete, reasons, spendDelta,
+    previousCostPerRequest, currentCostPerRequest, costPerRequestChange,
+    volumeEffect, rateEffect, forecast30Days, forecastReason,
+  }
+}
+
 export function getLargestSpender(data: AccountUsage) {
   const measured = data.by_model.filter((row) => row.cost_usd != null && row.cost_usd > 0)
   const total = measured.reduce((sum, row) => sum + row.cost_usd!, 0)

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { getLargestSpender, getUsageComparison, percentChange, usageDailyCsv } from "../src/lib/usage-insights.ts"
+import { getLargestSpender, getSpendingInsights, getUsageComparison, percentChange, usageDailyCsv } from "../src/lib/usage-insights.ts"
 
 const now = new Date("2026-09-09T18:30:00Z")
 const day = (date, overrides = {}) => ({
@@ -127,4 +127,149 @@ test("CSV preserves null vs zero, precision, quoted caveats, and chronological o
 test("CSV escapes formula-like string values and supports empty reports", () => {
   assert.ok(usageDailyCsv(report({ daily: [day("=1+1")] })).includes('"\'=1+1"'))
   assert.equal(usageDailyCsv(report()).trim().split("\r\n").length, 1)
+})
+
+const spending = data => getSpendingInsights(data, getUsageComparison(data, now))
+const closeTo = (actual, expected) => assert.ok(
+  Math.abs(actual - expected) <= Math.max(Math.abs(actual), Math.abs(expected)) * Number.EPSILON * 16,
+  `${actual} ≈ ${expected}`,
+)
+
+test("spending breakdown separates volume from the blended rate and reconciles the change", () => {
+  const data = report({ daily: [
+    day("2026-09-01", { requests: 100, cost_usd: 8, embedding_cost_usd: 2 }),
+    day("2026-09-08", { requests: 200, cost_usd: 24, embedding_cost_usd: 6 }),
+    day("2026-09-09", { requests: 999, cost_usd: 999 }),
+  ] })
+  const before = structuredClone(data)
+  const result = spending(data)
+  assert.equal(result.incomplete, false)
+  assert.equal(result.spendDelta, 20)
+  assert.equal(result.volumeEffect, 10)
+  assert.equal(result.rateEffect, 10)
+  closeTo(result.costPerRequestChange, 50)
+  closeTo(result.forecast30Days, 30 / 7 * 30)
+  assert.equal(result.forecastReason, null)
+  assert.deepEqual(data, before)
+})
+
+test("opposing effects can cancel even when total spend is unchanged", () => {
+  const result = spending(report({ daily: [
+    day("2026-09-01", { requests: 100, cost_usd: 10, embedding_cost_usd: 0 }),
+    day("2026-09-08", { requests: 200, cost_usd: 10, embedding_cost_usd: 0 }),
+  ] }))
+  assert.equal(result.spendDelta, 0)
+  assert.equal(result.volumeEffect, 10)
+  assert.equal(result.rateEffect, -10)
+  assert.equal(result.costPerRequestChange, -50)
+})
+
+test("cost per request is weighted by requests and includes both types of spend", () => {
+  const result = spending(report({ daily: [
+    day("2026-09-02", { requests: 1, cost_usd: 8, embedding_cost_usd: 2 }),
+    day("2026-09-08", { requests: 99, cost_usd: 4, embedding_cost_usd: 6 }),
+  ] }))
+  assert.equal(result.currentCostPerRequest, 0.2)
+  assert.equal(result.previousCostPerRequest, null)
+  assert.equal(result.volumeEffect, null)
+  assert.equal(result.rateEffect, null)
+  assert.equal(result.costPerRequestChange, null)
+  assert.ok(result.forecast30Days > 0)
+})
+
+test("no recent requests has an undefined rate and no forecast, not a zero rate", () => {
+  const result = spending(report({ daily: [day("2026-09-01")] }))
+  assert.equal(result.currentCostPerRequest, null)
+  assert.equal(result.costPerRequestChange, null)
+  assert.equal(result.spendDelta, -1.1)
+  assert.equal(result.volumeEffect, -1.1)
+  closeTo(result.rateEffect, 0)
+  assert.equal(result.forecast30Days, null)
+  assert.equal(result.forecastReason, "no_activity")
+})
+
+test("actual zero-cost requests keep a measured zero forecast and handle a zero baseline", () => {
+  const result = spending(report({ daily: [
+    day("2026-09-01", { cost_usd: 0, embedding_cost_usd: 0 }),
+    day("2026-09-08", { cost_usd: 0, embedding_cost_usd: 0 }),
+  ] }))
+  assert.equal(result.currentCostPerRequest, 0)
+  assert.equal(result.forecast30Days, 0)
+  assert.equal(result.volumeEffect, 0)
+  assert.equal(result.rateEffect, 0)
+  assert.equal(result.costPerRequestChange, null)
+})
+
+test("each window-wide measurement caveat suppresses effects and forecasts", () => {
+  for (const caveat of [
+    { unmeasured_requests: 2 },
+    { unpriced_models: ["unpriced-model"] },
+    { vision_and_audio_excluded: true },
+  ]) {
+    const data = report({ daily: [day("2026-09-01"), day("2026-09-08")] })
+    Object.assign(data.caveats, caveat)
+    const result = spending(data)
+    assert.equal(result.incomplete, true)
+    assert.ok(result.reasons.length > 0)
+    assert.equal(result.volumeEffect, null)
+    assert.equal(result.rateEffect, null)
+    assert.equal(result.forecast30Days, null)
+    assert.equal(result.forecastReason, "incomplete")
+    closeTo(result.currentCostPerRequest, 0.11)
+  }
+})
+
+test("missing cost for measured LLM or embedding tokens is incomplete even without caveats", () => {
+  for (const missing of [
+    { cost_usd: null }, { embedding_cost_usd: null },
+    { cost_usd: null, embedding_cost_usd: null },
+  ]) {
+    const result = spending(report({ daily: [day("2026-09-08", missing)] }))
+    assert.equal(result.incomplete, true)
+    assert.equal(result.forecast30Days, null)
+    assert.equal(result.volumeEffect, null)
+  }
+})
+
+test("embedding-only and LLM-only days can be measured without inventing missing activity", () => {
+  for (const row of [
+    { cost_usd: null, prompt_tokens: null, completion_tokens: null, embedding_cost_usd: 1e-10 },
+    { embedding_cost_usd: null, embedding_tokens: null, cost_usd: 1e-10 },
+  ]) {
+    const result = spending(report({ daily: [day("2026-09-08", row)] }))
+    assert.equal(result.incomplete, false)
+    closeTo(result.currentCostPerRequest, 1e-11)
+    assert.ok(result.forecast30Days > 0)
+    closeTo(result.forecast30Days, 1e-10 / 7 * 30)
+  }
+})
+
+test("projection uses complete calendar days, including absent buckets, in every range", () => {
+  for (const window_days of [7, 30, 90]) {
+    const result = spending(report({ window_days, daily: [
+      day("2026-09-08", { cost_usd: 2, embedding_cost_usd: 1 }),
+      day("2026-09-09", { cost_usd: 999 }),
+      day("2026-08-01", { cost_usd: null, embedding_cost_usd: null }),
+    ] }))
+    assert.equal(result.incomplete, false)
+    closeTo(result.forecast30Days, window_days === 7 ? 30 : 3 / 7 * 30)
+  }
+  assert.equal(spending(report({ window_days: 1 })).forecastReason, "insufficient_history")
+  assert.equal(spending(report({ window_days: 3, daily: [day("2026-09-08")] })).forecastReason, "insufficient_history")
+})
+
+test("floating-point cancellation is unchanged spend, while tiny real increases survive", () => {
+  const result = spending(report({ daily: [
+    day("2026-09-01", { cost_usd: 0.3, embedding_cost_usd: 0 }),
+    day("2026-09-08", { cost_usd: 0.1, embedding_cost_usd: 0.2 }),
+  ] }))
+  assert.equal(result.spendDelta, 0)
+  assert.equal(result.rateEffect, 0)
+  assert.equal(result.costPerRequestChange, 0)
+  const tiny = spending(report({ daily: [
+    day("2026-09-01", { cost_usd: 1e-10, embedding_cost_usd: 0 }),
+    day("2026-09-08", { cost_usd: 2e-10, embedding_cost_usd: 0 }),
+  ] }))
+  assert.equal(tiny.spendDelta, 1e-10)
+  assert.equal(tiny.rateEffect, 1e-10)
 })
