@@ -141,8 +141,6 @@ export function KnowledgeHealthDashboard() {
       {!data && (!error || isSessionExpired(error)) && <KnowledgeHealthLoading />}
       {data && <div className="flex min-h-0 flex-1 flex-col gap-3 md:block md:space-y-4">
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-3 md:space-y-4 md:overflow-visible md:pb-0" role="region" aria-label="Health results" tabIndex={0}>
-        <QualityTrends projects={projects} />
-        <DocumentInsights projects={projects} />
         <section aria-label="Project health" className="overflow-hidden rounded-xl border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
             <h2 className="text-sm font-medium">Projects</h2>
@@ -170,6 +168,8 @@ export function KnowledgeHealthDashboard() {
         </section>
         <p className="text-xs leading-5 text-muted-foreground">Current files only; superseded versions are excluded. Readiness reflects indexing status, not answer accuracy. Query activity and feedback include API calls and Playground tests from the last {data.query_window_days} days. Retrieval similarity uses uncached queries only.</p>
         <p className="text-xs text-muted-foreground">Checked {new Date(data.generated_at).toLocaleString()}</p>
+        <QualityTrends projects={projects} />
+        <DocumentInsights projects={projects} />
         </div>
       </div>}
     </div>
