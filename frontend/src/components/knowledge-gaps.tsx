@@ -54,7 +54,7 @@ function GapReview({ item, days, onUpdate }: { item: GapItem; days: string; onUp
       setBaseline(result.item); setNote(result.item.note ?? ""); setConflict(false)
       await onUpdate(result)
       setMessage(result.item.reopened ? "New evidence arrived. This gap still needs review."
-        : status === "resolved" ? "Gap marked resolved. New negative evidence will reopen it." : "Review saved. This gap is open.")
+        : status === "resolved" ? "Review closed. Documents and answers are unchanged." : "Review saved. This gap is open.")
     } catch (error) {
       if (!isSessionExpired(error)) {
         setFailure(error instanceof Error ? error.message : "Could not save this review.")
@@ -79,9 +79,9 @@ function GapReview({ item, days, onUpdate }: { item: GapItem; days: string; onUp
     <h3 className="text-sm font-medium">Review and resolution</h3>
     <label className="block space-y-2 text-xs font-medium">Review note
       <Textarea value={note} onChange={event => setNote(event.target.value)} maxLength={2000} disabled={!!busy}
-        placeholder="What is missing? Which document did you update, and how did you check it?" className="min-h-24 text-base md:text-sm" />
+        placeholder="What did you check or change? If the answer was correct, note that here." className="min-h-24 text-base md:text-sm" />
     </label>
-    <p className="text-xs leading-5 text-muted-foreground">Resolution records your review. New flagged queries or new negative feedback reopen the gap. Status is shared across date ranges.</p>
+    <p className="text-xs leading-5 text-muted-foreground">Mark resolved closes this review. It does not change documents or answers. New flagged queries or negative feedback can reopen it.</p>
     {failure && <p role="alert" className="text-xs text-destructive">{failure}</p>}
     {message && <p role="status" className="text-xs leading-5 text-muted-foreground">{message}</p>}
     <div className="flex flex-wrap gap-2">
@@ -112,9 +112,14 @@ function GapDetailView({ selected, days, onSaved }: { selected: GapItem; days: s
     {data && <>
       <div className="flex flex-wrap items-center gap-2"><StatusBadge item={data.item} /><span className="text-xs text-muted-foreground">{data.item.project_name}</span></div>
       <section><h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Question</h3><p className="whitespace-pre-wrap rounded-xl border bg-background p-4 text-sm leading-7">{data.item.question}</p></section>
+      <p className="text-xs leading-5 text-muted-foreground">{data.item.flagged_count === 0
+        ? "This saved review has no current gap signals."
+        : data.item.weak_evidence_count > 0
+          ? `Flagged for document similarity below ${data.weak_similarity_threshold.toFixed(2)}${data.item.not_helpful_count > 0 ? " and not-helpful feedback" : ""}. A low document match does not mean the answer was wrong.`
+          : "Flagged because an answer received not-helpful feedback. Review the feedback before deciding whether documents need changes."}</p>
       {data.item.reopened && <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5">New evidence appeared after the last resolution{data.item.resolved_at ? ` on ${when(data.item.resolved_at)}` : ""}. Review it before resolving again.</p>}
       <dl className="grid grid-cols-2 gap-3">
-        {[["Matching queries", data.item.query_count], ["Flagged queries", data.item.flagged_count], ["Not helpful", data.item.not_helpful_count], ["Weak evidence", data.item.weak_evidence_count]].map(([label, value]) =>
+        {[["Matching queries", data.item.query_count], ["Flagged queries", data.item.flagged_count], ["Not helpful", data.item.not_helpful_count], ["Low document matches", data.item.weak_evidence_count]].map(([label, value]) =>
           <div key={label} className="min-w-0 rounded-xl border bg-background p-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-2 break-words text-xl font-semibold tabular-nums">{count(Number(value))}</dd></div>)}
       </dl>
       <p className="text-xs leading-5 text-muted-foreground">{count(data.item.helpful_count)} helpful ratings · {count(data.item.unmeasured_count)} fresh queries without a similarity measurement. Signals can overlap on one query. Historical answers and source passages are not retained.</p>
@@ -129,7 +134,7 @@ function GapDetailView({ selected, days, onSaved }: { selected: GapItem; days: s
         <ul className="space-y-3">{data.evidence.map(query => <li key={query.id} className="space-y-3 rounded-xl border bg-background p-4">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {query.not_helpful && <Badge variant="outline">Not helpful</Badge>}
-            {query.weak_evidence && <Badge variant="outline">Weak evidence</Badge>}
+            {query.weak_evidence && <Badge variant="outline">Low document match</Badge>}
             {!query.not_helpful && !query.weak_evidence && <Badge variant="secondary">{query.feedback_rating === "helpful" ? "Helpful" : "No flagged signal"}</Badge>}
             <span className="text-muted-foreground">{when(query.created_at)}</span>
           </div>
@@ -168,7 +173,7 @@ export function KnowledgeGapsDashboard({ initialProject = "" }: { initialProject
   return <div className="flex h-[calc(100dvh-6.3125rem)] min-h-0 min-w-0 flex-col gap-4 md:h-full">
     <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b pb-4">
       <h1 id="knowledge-gaps-heading" tabIndex={-1} className="col-span-2 text-[1.75rem] font-semibold tracking-[-0.035em] lg:col-span-1">Knowledge gaps</h1>
-      <p className="col-span-2 row-start-2 text-xs leading-5 text-muted-foreground md:text-sm">Find repeated questions that need better evidence. Review the queries, improve your documents, and track the fix.</p>
+      <p className="col-span-2 row-start-2 text-xs leading-5 text-muted-foreground md:text-sm">Review potential knowledge gaps from feedback and document matches. A flagged query can still have a correct answer.</p>
       <div role="search" aria-label="Search and filter knowledge gaps" className="col-span-2 row-start-3 flex min-w-0 items-center gap-2 lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:w-72">
         <div className="relative min-w-0 flex-1"><MagnifyingGlassIcon aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search gap questions" placeholder="Search questions…" value={search} maxLength={200} onChange={event => setSearch(event.target.value)} className="h-8 pl-8 pr-2 text-base placeholder:text-[13px] md:text-[13px]" /></div>
         <MobileFilters title="Knowledge gap filters" activeCount={activeFilters} onReset={reset} desktop compact>
@@ -201,27 +206,27 @@ export function KnowledgeGapsDashboard({ initialProject = "" }: { initialProject
           {!data.items.length ? <div className="space-y-3 px-6 py-12 text-center">
             {filters.status === "resolved" ? <CheckCircleIcon aria-hidden="true" className="mx-auto size-7 text-muted-foreground" /> : <TrayIcon aria-hidden="true" className="mx-auto size-7 text-muted-foreground" />}
             <p className="text-sm font-medium">{data.scanned_queries === 0 ? "No query activity in this window" : "No gaps match these filters"}</p>
-            <p className="mx-auto max-w-md text-xs leading-5 text-muted-foreground">Queries with negative feedback or low measured retrieval similarity appear here. An empty inbox does not establish that every answer is correct.</p>
+            <p className="mx-auto max-w-md text-xs leading-5 text-muted-foreground">Questions with negative feedback or low document similarity appear here. Simple greetings are excluded from similarity flags.</p>
             {(activeFilters > 0 || search) && <Button size="sm" variant="outline" onClick={reset}>Reset filters</Button>}
           </div> : <ul className="divide-y">{data.items.map(item => <li key={`${item.project_id}:${item.question_key}`}>
             <button type="button" onClick={event => { trigger.current = event.currentTarget; setSelected(item) }} className="relative block w-full min-w-0 space-y-3 px-4 py-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
               <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:gap-4"><p className="min-w-0 line-clamp-2 break-words text-sm font-medium leading-6 [overflow-wrap:anywhere]">{item.question}</p><StatusBadge item={item} /></div>
               <p className="break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">{item.project_name} · Last seen {when(item.last_seen)}</p>
-              <div className="flex items-end justify-between gap-3"><div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>{count(item.query_count)} {item.query_count === 1 ? "query" : "matching queries"}</span><span>{count(item.not_helpful_count)} not helpful</span><span>{count(item.weak_evidence_count)} weak evidence</span></div><ArrowRightIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /><span className="sr-only">Review gap</span></div>
+              <div className="flex items-end justify-between gap-3"><div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>{count(item.query_count)} {item.query_count === 1 ? "query" : "matching queries"}</span><span>{count(item.not_helpful_count)} not helpful</span><span>{count(item.weak_evidence_count)} low document {item.weak_evidence_count === 1 ? "match" : "matches"}</span></div><ArrowRightIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /><span className="sr-only">Review gap</span></div>
             </button>
           </li>)}</ul>}
         </section>
         {(offset > 0 || data.next_offset !== null) && <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>Page {Math.floor(offset / 25) + 1}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 25))}>Previous</Button><Button size="sm" variant="outline" disabled={data.next_offset === null} onClick={() => setOffset(data.next_offset!)}>Next</Button></div></div>}
         <details className="rounded-xl border p-4 text-xs leading-6 text-muted-foreground"><summary className="cursor-pointer rounded-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">How gaps are identified</summary><div className="mt-2 space-y-2">
           <p>Questions are grouped within one project when wording matches after normalizing case, whitespace, and question-ending marks. Paraphrases remain separate; numbers, negation, and word order are preserved.</p>
-          <p>Signals are a “not helpful” rating or an uncached retrieval similarity below {data.weak_similarity_threshold.toFixed(2)}. This is a review threshold, independent of project answer settings. Cached and missing similarity values do not count as weak evidence; unrated answers do not count as helpful.</p>
+          <p>Signals are a “not helpful” rating or an uncached retrieval similarity below {data.weak_similarity_threshold.toFixed(2)}. This is a review threshold, independent of project answer settings. Simple greetings, thanks, and farewells do not trigger similarity flags. Questions that include a greeting still qualify. Explicit negative feedback always counts. Cached and missing similarity values do not trigger similarity flags.</p>
           <p>Similarity measures retrieval closeness, not answer accuracy. Groups can include helpful answers as context. Lists scan up to {count(data.scan_limit)} recent queries. Evidence follows query-log retention; groups without retained queries in the selected window are hidden. Review notes and status persist until their project is deleted.</p>
         </div></details>
       </>}
     </div>
     <Sheet open={!!selected} onOpenChange={open => { if (!open) setSelected(null) }}>
       <SheetContent side="right" className="w-full max-w-full bg-background sm:w-[540px]" onCloseAutoFocus={event => { event.preventDefault(); if (trigger.current?.isConnected) trigger.current.focus(); else document.getElementById("knowledge-gaps-heading")?.focus() }}>
-        <SheetHeader className="shrink-0 p-6 pr-12"><SheetTitle className="text-lg">Review knowledge gap</SheetTitle><SheetDescription>Inspect the questions and feedback, improve the relevant documents, and record your review.</SheetDescription></SheetHeader>
+        <SheetHeader className="shrink-0 p-6 pr-12"><SheetTitle className="text-lg">Review knowledge gap</SheetTitle><SheetDescription>Check why this was flagged. Improve the documents if needed, or resolve the review if the answer was correct.</SheetDescription></SheetHeader>
         {selected && <GapDetailView key={`${selected.project_id}:${selected.question_key}:${filters.days}`} selected={selected} days={filters.days} onSaved={() => void mutate()} />}
       </SheetContent>
     </Sheet>

@@ -116,6 +116,56 @@ def test_cached_and_unknown_similarity_do_not_flag_and_boundary_is_strict(gaps):
     assert cached["weak_evidence_count"] == 0
 
 
+@pytest.mark.parametrize("question", [
+    "hi", " HI! ", "Hello?!", "👋 hi 👋", "hey there", "Good\n morning!",
+    "Thanks.", "thank you very much", "Bye!", "How are you?", "How’s it going?",
+])
+def test_conversation_without_negative_feedback_is_not_a_document_gap(gaps, question):
+    client, db, mine, _ = gaps
+    row = query(db, mine, question, retrieval_similarity=0.201)
+    result = client.get(URL).json()
+    assert result["scanned_queries"] == 1
+    assert result["items"] == [] and result["flagged_queries"] == 0
+    assert client.get(path(mine, question)).status_code == 404
+    db.refresh(row)
+    assert row.retrieval_similarity == 0.201 and row.question == question
+
+
+def test_negative_feedback_on_a_greeting_still_needs_review(gaps):
+    client, db, mine, _ = gaps
+    query(db, mine, "hi", retrieval_similarity=0.201, feedback_rating="not_helpful")
+    detail = client.get(path(mine, "hi")).json()
+    assert detail["item"]["not_helpful_count"] == detail["item"]["flagged_count"] == 1
+    assert detail["item"]["weak_evidence_count"] == 0
+    assert detail["evidence"][0]["not_helpful"] and not detail["evidence"][0]["weak_evidence"]
+
+
+@pytest.mark.parametrize("question", [
+    "Hi, how do refunds work?", "Hello\nWhere is my order?", "Thanks, but that is wrong",
+    "What is HI?", "refund", "C++?", "Thank you policy", "Hi there, explain billing",
+])
+def test_substantive_questions_are_not_hidden_by_greeting_filter(gaps, question):
+    client, db, mine, _ = gaps
+    query(db, mine, question, retrieval_similarity=0.201)
+    assert client.get(URL).json()["items"][0]["weak_evidence_count"] == 1
+
+
+def test_reviewed_greetings_keep_history_without_reopening_for_low_similarity(gaps):
+    client, db, mine, _ = gaps
+    row = query(db, mine, "hi", feedback_rating="not_helpful")
+    assert review(client, path(mine, "hi"), note="Correct greeting; no document needed").status_code == 200
+    row.feedback_rating = None
+    db.commit()
+    query(db, mine, "hi", retrieval_similarity=0.201)
+    assert client.get(URL).json()["items"] == []
+    item = client.get(path(mine, "hi")).json()["item"]
+    assert item["status"] == "resolved" and not item["reopened"]
+    assert item["flagged_count"] == 0
+    assert item["note"] == "Correct greeting; no document needed"
+    query(db, mine, "hi", feedback_rating="not_helpful")
+    assert client.get(path(mine, "hi")).json()["item"]["reopened"]
+
+
 def test_windows_exclude_future_and_old_queries(gaps):
     client, db, mine, _ = gaps
     now = datetime.now(timezone.utc)

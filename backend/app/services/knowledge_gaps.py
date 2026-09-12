@@ -23,6 +23,22 @@ from ..models import KnowledgeGapReview, Project, QueryLog
 
 SCAN_LIMIT = 5000
 WEAK_SIMILARITY = 0.35  # A review heuristic, not an answer-policy threshold.
+# Conservative, whole-message matches only. A greeting followed by a real
+# question ("Hi, how do refunds work?") must still be checked for evidence.
+CONVERSATIONAL_MESSAGES = frozenset({
+    "hi", "hello", "hey", "greetings", "hi there", "hello there", "hey there",
+    "good morning", "good afternoon", "good evening", "good night",
+    "thanks", "thank you", "thanks a lot", "thank you very much",
+    "bye", "goodbye", "see you", "see you later",
+    "how are you", "how are you doing", "how's it going", "what's up",
+})
+
+
+def _is_conversational_only(question: str) -> bool:
+    normalized = unicodedata.normalize("NFC", question).casefold()
+    normalized = re.sub(r"\s+", " ", normalized).strip().replace("’", "'")
+    normalized = re.sub(r"^[\W_]+|[\W_]+$", "", normalized)
+    return normalized in CONVERSATIONAL_MESSAGES
 
 
 def question_key(question: str) -> str:
@@ -40,7 +56,8 @@ def _flags(row) -> tuple[bool, bool]:
     return (
         row["feedback_rating"] == "not_helpful",
         row["cache_layer"] is None and similarity is not None
-        and math.isfinite(similarity) and similarity < WEAK_SIMILARITY,
+        and math.isfinite(similarity) and similarity < WEAK_SIMILARITY
+        and not _is_conversational_only(row["question"]),
     )
 
 
