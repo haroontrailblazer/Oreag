@@ -56,7 +56,7 @@ const mainNav = [
   { href: "/settings/usage", label: "Usage", icon: ChartBar },
   { href: "/query-explorer", label: "Queries", icon: ChatText },
   { href: "/knowledge-health", label: "Health", icon: Heartbeat },
-  { href: "/knowledge-gaps", label: "Knowledge gaps", icon: Tray },
+  { href: "/knowledge-gaps", label: "Gaps", icon: Tray },
 ]
 
 const statusTone: Record<Project["status"], string> = {

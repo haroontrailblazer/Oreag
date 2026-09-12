@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton"
+import { BudgetForecastSkeleton } from "@/components/settings/budget-forecast"
 
 export function UsageInsightsSkeleton() {
   return (
@@ -75,7 +76,7 @@ export function UsageLoading() {
         <div><h1 className="text-[1.75rem] font-semibold leading-tight tracking-[-0.035em]">Usage</h1><p className="mt-1 text-xs leading-relaxed text-muted-foreground sm:text-sm">Requests, tokens and cost across your API keys, models and projects.</p></div>
         <div className="flex h-10 items-center gap-1 rounded-xl border border-border/80 bg-muted/60 p-1">{[0, 1, 2].map(index => <Skeleton key={index} className="h-8 w-[4.5rem] rounded-lg" />)}</div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 sm:gap-6"><UsageInsightsSkeleton /><UsageDetailsSkeleton /></div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 sm:gap-6"><div className="shrink-0 space-y-4 rounded-xl border bg-card p-4 sm:p-5"><Skeleton className="h-5 w-40" /><BudgetForecastSkeleton /></div><UsageInsightsSkeleton /><UsageDetailsSkeleton /></div>
     </div>
   )
 }
