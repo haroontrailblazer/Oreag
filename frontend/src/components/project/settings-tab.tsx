@@ -16,6 +16,7 @@ import { toast } from "@/lib/toast"
 import useSWR, { mutate as globalMutate } from "swr"
 
 import { ProviderKeyField } from "@/components/project/provider-key-field"
+import { EvaluationSchedule } from "@/components/project/evaluation-schedule"
 import { PolicyKnob } from "@/components/project/policy-knob"
 import policySwitchStyles from "@/components/project/policy-switch.module.css"
 import styles from "@/components/project/settings-tab.module.css"
@@ -1590,6 +1591,8 @@ export function SettingsTab({
           )}
         </CardContent>
       </Card>
+
+      <section id="project-settings-checks"><EvaluationSchedule base={`/api/projects/${project.id}/evaluations`} history={[]} /></section>
 
       <Card id="project-settings-danger" className={styles.dangerCard}>
         <CardHeader>

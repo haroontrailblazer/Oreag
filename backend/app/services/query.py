@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import Chunk, Memory, Project, QueryLog
 from ..providers import resolver
-from . import embedding_usage, query_timeline
+from . import embedding_usage, query_timeline, cache_insights
 from ..providers.base import (
     ProviderUnavailableError,
     TokenUsage,
@@ -557,6 +557,9 @@ def run_query(
         # Both are scoped by models + top_k + content_version, so ANY content
         # write (including in-place edits) instantly orphans stale answers.
         signature = _answer_signature(project, db, question)
+        cache_insights.start(signature=signature, history_turns=len(history), history_unavailable=history_unavailable,
+            bypass=bypass_cache, exact_enabled=settings.query_cache_enabled, semantic_enabled=settings.semantic_cache_enabled,
+            backend="redis" if settings.redis_url else "memory", ttl=settings.query_cache_ttl_seconds)
         semantic_vector: list[float] | None = None
         cache_layer: str | None = None
         cache_similarity: float | None = None
@@ -637,6 +640,7 @@ def run_query(
         try:
             query_log = QueryLog(
                 timeline=query_timeline.snapshot(),
+                cache_details=cache_insights.snapshot(cache_layer),
                 project_id=project_id,
                 api_key_id=api_key_id,
                 question=question,
@@ -837,6 +841,9 @@ def run_query_stream(
     semantic_allowed = not history and not history_unavailable
     # signature was captured with the other Project reads in the guarded
     # pre-flight above - nothing between here and there writes content_version.
+    cache_insights.start(signature=signature, history_turns=len(history), history_unavailable=history_unavailable,
+        bypass=history_unavailable, exact_enabled=settings.query_cache_enabled, semantic_enabled=settings.semantic_cache_enabled,
+        backend="redis" if settings.redis_url else "memory", ttl=settings.query_cache_ttl_seconds)
     cache_layer: str | None = None
     cache_similarity: float | None = None
     semantic_vector: list[float] | None = None
@@ -1046,6 +1053,7 @@ def run_query_stream(
     try:
         query_log = QueryLog(
             timeline=query_timeline.snapshot(),
+            cache_details=cache_insights.snapshot(cache_layer),
             project_id=project_id,
             api_key_id=api_key_id,
             question=question,

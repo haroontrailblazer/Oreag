@@ -146,6 +146,13 @@ def get_schedule(project: Project = Depends(get_owned_project), db: Session = De
     return quality.schedule_out(db.get(EvaluationSchedule, project.id))
 
 
+@router.get("/change-checks")
+def change_checks(project: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
+    rows = db.scalars(select(EvaluationRun).where(EvaluationRun.project_id == project.id, EvaluationRun.trigger_reason == "project_change")
+                      .order_by(EvaluationRun.created_at.desc(), EvaluationRun.id.desc()).limit(5))
+    return [service.run_out(row) for row in rows]
+
+
 @router.put("/schedule")
 def save_schedule(body: SaveSchedule, project: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
     return quality.save_schedule(db, project, body)

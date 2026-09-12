@@ -80,6 +80,7 @@ class QualityLimits(BaseModel):
 class SaveSchedule(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
+    on_changes: bool = False
     interval_hours: Literal[6, 12, 24, 168] = 24
     reference_run_id: uuid.UUID | None = None
     quality_limits: QualityLimits = Field(default_factory=QualityLimits)

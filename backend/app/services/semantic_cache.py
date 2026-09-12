@@ -25,7 +25,7 @@ from ..models import Project, SemanticQueryCache
 from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
 from ..providers.registry import get_embedder
-from . import agentic
+from . import agentic, cache_insights
 from .query_cache import normalize_question
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,7 @@ def lookup(
     shared with retrieval instead of being a separate provider round-trip.
     """
     if not settings.semantic_cache_enabled:
+        cache_insights.record("semantic", "disabled")
         return None, None, None
     try:
         try:
@@ -123,6 +124,7 @@ def lookup(
             # signals with None; retrieval will surface the real 503 later.
             vector = None
         if vector is None:
+            cache_insights.record("semantic", "embedding_unavailable")
             return None, None, None
         qvec = "[" + ",".join(repr(v) for v in vector) + "]"
         row = db.execute(
@@ -139,6 +141,7 @@ def lookup(
             },
         ).first()
         if row is None:
+            cache_insights.record("semantic", "no_entry")
             return None, vector, None
         score = float(row.similarity)
         if (
@@ -146,9 +149,11 @@ def lookup(
             or score < settings.semantic_cache_min_similarity
             or not equivalent_request(question, row.question)
         ):
+            cache_insights.record("semantic", "below_threshold" if not math.isfinite(score) or score < settings.semantic_cache_min_similarity else "different_request")
             return None, vector, None
         result = agentic.AgenticResult(**row.result)
         if result.needs_clarification or not result.answer:
+            cache_insights.record("semantic", "unusable_answer")
             return None, vector, None
         similarity = round(score, 4)
         logger.info(
@@ -156,8 +161,10 @@ def lookup(
             similarity,
             project.id,
         )
+        cache_insights.record("semantic", "hit")
         return result, vector, similarity
     except Exception:
+        cache_insights.record("semantic", "unavailable")
         logger.exception("Semantic cache lookup failed; answering normally")
         db.rollback()
         return None, None, None

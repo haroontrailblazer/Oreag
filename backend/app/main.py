@@ -14,6 +14,9 @@ from .routers import (
     account,
     budgets,
     evaluations,
+    saved_views,
+    gap_verification,
+    source_conflicts,
     operations,
     webhooks,
     files,
@@ -292,6 +295,9 @@ app.include_router(memory.owner_router)
 app.include_router(memory_graph.owner_router)
 app.include_router(playground.router)
 app.include_router(evaluations.router)
+app.include_router(saved_views.router)
+app.include_router(gap_verification.router)
+app.include_router(source_conflicts.router)
 app.include_router(operations.router)
 app.include_router(webhooks.router)
 app.include_router(evaluations.public_router)

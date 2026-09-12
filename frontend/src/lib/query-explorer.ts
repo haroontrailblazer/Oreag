@@ -1,4 +1,6 @@
+export type CacheDetails = { version: number; exact: string; semantic: string; conversation_turns: number; content_version: number | null; exact_backend: string; exact_ttl_seconds: number | null }
 export type QueryRecord = {
+  cache_details?: CacheDetails | null
   timeline?: { trace_id: string; total_ms: number; spans: { stage: string; start_ms: number; duration_ms: number; success: boolean }[] } | null
   id: string
   project_id: string

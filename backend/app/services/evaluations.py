@@ -85,6 +85,7 @@ def run_out(run):
         import gzip
         return {**json.loads(gzip.decompress(run.archived_payload)), "archived_at": run.archived_at}
     return {"id": str(run.id), "status": run.status, "suite": run.suite, "corpus_count": run.corpus_count,
+            "trigger_reason": run.trigger_reason, "gap_key": run.gap_key, "gap_evidence_version": run.gap_evidence_version,
             "archived_at": None,
             "execution": run.execution, "reference_run_id": str(run.reference_run_id) if run.reference_run_id else None,
             "quality_report": run.quality_report,

@@ -1,5 +1,7 @@
 """Durable evaluation jobs and explicit regression checks. Never edits Project."""
 import logging
+import hashlib
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from statistics import mean
@@ -9,7 +11,7 @@ from sqlalchemy import or_, select
 
 from ..db import SessionLocal
 from ..evaluation_schemas import EvaluationSuite, QualityLimits, StartEvaluation, SaveEvaluation, EvaluationConfig
-from ..models import ApiKey, EvaluationRun, EvaluationSchedule, EvaluationSuiteRecord, Project, QueryLog, SuspendedAccount
+from ..models import ApiKey, EvaluationRun, EvaluationSchedule, EvaluationSuiteRecord, File, Project, QueryLog, SuspendedAccount
 from . import embedding_usage
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,8 @@ def validate_reference(db, project_id, run_id, suite):
 
 def schedule_out(row):
     return {"revision": row.revision if row else 0, "enabled": row.enabled if row else False,
+        "on_changes": bool(row.on_changes) if row else False,
+        "change_due_at": row.change_due_at if row and row.on_changes else None,
         "interval_hours": row.interval_hours if row else 24, "reference_run_id": str(row.reference_run_id) if row and row.reference_run_id else None,
         "quality_limits": row.quality_limits if row else QualityLimits().model_dump(),
         "next_run_at": row.next_run_at if row and row.enabled else None, "last_run_at": row.last_run_at if row else None,
@@ -51,27 +55,37 @@ def schedule_out(row):
 def save_schedule(db, project, body):
     from .evaluations import check_credentials
     db.execute(select(Project.id).where(Project.id == project.id).with_for_update()).one()
+    db.refresh(project)
     row = db.get(EvaluationSchedule, project.id, populate_existing=True)
     if (row.revision if row else 0) != body.revision:
         raise HTTPException(409, "Schedule changed in another session. Reload it before saving.")
     # Turning off an existing job must remain possible after its set or reference changes.
-    if not body.enabled:
+    if not body.enabled and not body.on_changes:
         if row:
-            row.enabled, row.last_error = False, None
+            row.enabled, row.on_changes, row.last_error = False, False, None
+            row.change_due_at, row.pending_signature = None, None
             row.revision += 1
         db.commit()
         return schedule_out(row)
     saved = db.get(EvaluationSuiteRecord, project.id)
     if saved is None or not saved.suite.get("cases"):
         raise HTTPException(422, "Save a test set with questions first.")
-    validate_reference(db, project.id, body.reference_run_id, saved.suite)
     if body.enabled:
-        allowed(db, project)
+        validate_reference(db, project.id, body.reference_run_id, saved.suite)
+    allowed(db, project)
+    if body.enabled:
         check_credentials(db, project, EvaluationSuite.model_validate(saved.suite))
+    if body.on_changes:
+        check_credentials(db, project, EvaluationSuite.model_validate({**saved.suite, "variants": [project_config(project).model_dump()]}))
     if row is None:
         row = EvaluationSchedule(project_id=project.id, revision=0)
         db.add(row)
     row.enabled, row.interval_hours = body.enabled, body.interval_hours
+    if body.on_changes and not row.on_changes:
+        row.observed_signature = project_signature(project)
+        row.watch_after = now()
+    row.on_changes = body.on_changes
+    row.change_due_at, row.pending_signature = None, None
     row.suite = saved.suite
     row.reference_run_id, row.quality_limits = body.reference_run_id, body.quality_limits.model_dump()
     row.next_run_at, row.last_error = now() + timedelta(hours=body.interval_hours), None
@@ -126,12 +140,17 @@ def assess(db, run):
     report = {"state": "no_reference", "reference_run_id": str(run.reference_run_id) if run.reference_run_id else None, "metrics": current, "warnings": []}
     if ref is None or ref.project_id != run.project_id or ref.status != "completed":
         return report
-    if ref.suite != run.suite:
+    comparable_change = getattr(run, "trigger_reason", None) == "project_change" and ref.suite["cases"] == run.suite["cases"] and len(ref.suite["variants"]) == len(run.suite["variants"]) == 1
+    if ref.suite != run.suite and not comparable_change:
         report["state"] = "incompatible_reference"
         return report
     baseline = metrics(ref)
     limits = QualityLimits.model_validate(run.quality_limits or {}).model_dump()
     report.update(state="passed", baseline=baseline)
+    if comparable_change:
+        before = {(r["caseId"], r["variant"]): r["status"] for r in ref.results}
+        report["case_changes"] = [{"case_id": r["caseId"], "before": before.get((r["caseId"], r["variant"])), "after": r["status"]} for r in run.results]
+        report["configuration_changed"] = ref.suite["variants"] != run.suite["variants"]
     for variant, (a, b) in enumerate(zip(baseline, current)):
         for metric, threshold in (("pass_percent", "quality_drop_pp"), ("latency_ms", "latency_increase_percent"), ("cost_usd", "cost_increase_percent")):
             if a[metric] is None or b[metric] is None:
@@ -181,6 +200,60 @@ def queue_due(db):
     return True
 
 
+def project_config(project):
+    return EvaluationConfig(**{name: getattr(project, name) for name in EvaluationConfig.model_fields if hasattr(project, name)})
+
+
+def project_signature(project):
+    return hashlib.sha256(json.dumps([project.content_version, project_config(project).model_dump()], sort_keys=True).encode()).hexdigest()
+
+
+def queue_changes(db):
+    """Watch committed state, debounce bursts, and never snapshot mid-indexing."""
+    from .evaluations import create_run
+    instant = now()
+    project = db.scalar(select(Project).join(EvaluationSchedule).where(EvaluationSchedule.on_changes.is_(True),
+        EvaluationSchedule.watch_after <= instant).order_by(EvaluationSchedule.watch_after, Project.id)
+        .with_for_update(of=Project, skip_locked=True).limit(1))
+    if project is None:
+        db.rollback(); return False
+    row = db.get(EvaluationSchedule, project.id, populate_existing=True)
+    if not row.on_changes or row.watch_after.replace(tzinfo=timezone.utc) > instant:
+        db.rollback(); return False
+    row.watch_after = instant + timedelta(seconds=30)
+    signature = project_signature(project)
+    if signature == row.observed_signature:
+        row.pending_signature, row.change_due_at = None, None
+    elif signature != row.pending_signature:
+        row.pending_signature, row.change_due_at = signature, instant + timedelta(seconds=60)
+    elif row.change_due_at and row.change_due_at.replace(tzinfo=timezone.utc) <= instant:
+        indexing = db.scalar(select(File.id).where(File.project_id == project.id, File.status.in_(["pending", "processing", "indexing"])).limit(1))
+        active = db.scalar(select(EvaluationRun.id).where(EvaluationRun.project_id == project.id, EvaluationRun.status.in_(ACTIVE)).limit(1))
+        if not indexing and not active:
+            try:
+                suite = EvaluationSuite.model_validate({**row.suite, "variants": [project_config(project).model_dump()]})
+                # Use the last matching completed check; comparing changed models is
+                # explicit in the report and never presented as a controlled experiment.
+                previous = db.scalars(select(EvaluationRun).where(EvaluationRun.project_id == project.id,
+                    EvaluationRun.status == "completed", EvaluationRun.archived_at.is_(None))
+                    .order_by(EvaluationRun.created_at.desc()).limit(20))
+                baseline = next((run for run in previous if run.suite["cases"] == suite.model_dump()["cases"] and len(run.suite["variants"]) == 1), None)
+                with db.begin_nested():
+                    run_id = uuid.uuid4()
+                    create_run(db, project, StartEvaluation(id=run_id, suite=suite), commit=False, quality_limits=row.quality_limits)
+                    run = db.get(EvaluationRun, run_id)
+                    run.trigger_reason = "project_change"
+                    if baseline and baseline.suite["cases"] == suite.model_dump()["cases"] and len(baseline.suite["variants"]) == 1:
+                        run.reference_run_id = baseline.id
+                row.observed_signature, row.pending_signature, row.change_due_at = signature, None, None
+                row.last_run_at, row.last_error = instant, None
+            except Exception as exc:
+                row.last_error = str(exc.detail) if isinstance(exc, HTTPException) else "Could not start the change check. Review the saved tests and provider settings."
+                row.watch_after = instant + timedelta(minutes=5)
+    db.commit()
+    return True
+
+
 def run_one(db):
     from .evaluations import advance
     instant = now()
@@ -207,7 +280,7 @@ def run_one(db):
 def quality_loop(stop):
     while not stop.is_set():
         did_work = False
-        for task in (queue_due, run_one, finish_one):
+        for task in (queue_due, queue_changes, run_one, finish_one):
             if stop.is_set(): break
             try:
                 with SessionLocal() as db:

@@ -74,6 +74,9 @@ class EvaluationRun(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     status: Mapped[str] = mapped_column(Text, default="preparing")
+    trigger_reason: Mapped[str | None] = mapped_column(Text)
+    gap_key: Mapped[str | None] = mapped_column(Text)
+    gap_evidence_version: Mapped[str | None] = mapped_column(Text)
     execution: Mapped[str] = mapped_column(Text, default="manual")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     archived_payload: Mapped[bytes | None] = deferred(mapped_column(LargeBinary))
@@ -110,6 +113,11 @@ class EvaluationSchedule(Base):
     __tablename__ = "evaluation_schedules"
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    on_changes: Mapped[bool] = mapped_column(Boolean, default=False)
+    observed_signature: Mapped[str | None] = mapped_column(Text)
+    pending_signature: Mapped[str | None] = mapped_column(Text)
+    change_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    watch_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     interval_hours: Mapped[int] = mapped_column(Integer, default=24)
     suite: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     reference_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
@@ -574,6 +582,7 @@ class QueryLog(Base):
     # Which cache served this query: "l1" (exact), "l2" (semantic), or NULL when
     # it was computed fresh. Powers the project-wide cache hit rate.
     cache_layer: Mapped[str | None] = mapped_column(Text)
+    cache_details: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     # Mean similarity of the chunks actually used - the best single signal for
     # "is retrieval working on this project", computed today and discarded.
     retrieval_similarity: Mapped[float | None] = mapped_column(Float)
@@ -611,9 +620,31 @@ class KnowledgeGapReview(Base):
     question_key: Mapped[str] = mapped_column(Text, primary_key=True)
     status: Mapped[str] = mapped_column(Text, default="open")
     note: Mapped[str | None] = mapped_column(NulSafeText)
+    verification_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="SET NULL"))
     revision: Mapped[int] = mapped_column(Integer, default=1)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_through_id: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SavedQueryView(Base):
+    __tablename__ = "saved_query_views"
+    __table_args__ = (UniqueConstraint("owner_id", "kind", "name"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    name: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    filters: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SourceConflictReview(Base):
+    __tablename__ = "source_conflict_reviews"
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    conflict_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    status: Mapped[str] = mapped_column(Text, default="open")
+    note: Mapped[str | None] = mapped_column(NulSafeText)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

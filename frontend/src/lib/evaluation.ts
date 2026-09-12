@@ -3,7 +3,7 @@ import type { Project, QueryResponse } from "./types"
 export type EvaluationConfig = Pick<Project, "llm_provider" | "llm_model" | "embedding_provider" | "embedding_model" | "embedding_dimensions" | "top_k" | "min_similarity" | "min_strong" | "cross_lingual_floor" | "answer_language" | "answer_language_strict" | "answer_disclaimer" | "document_language"> & { hybrid_search: boolean; include_memories: boolean }
 export type EvaluationDefinition = { version: 2; cases: EvaluationCase[]; variants: EvaluationConfig[] }
 export type SavedEvaluation = { revision: number; suite: EvaluationDefinition | null }
-export type QualityReport = { state: string; warnings: { variant: number; metric: string; change: number; limit: number }[] }
+export type QualityReport = { state: string; warnings: { variant: number; metric: string; change: number; limit: number }[]; case_changes?: { case_id: string; before: string | null; after: string }[]; configuration_changed?: boolean }
 export type EvaluationRun = { archived_at?: string | null; execution?: "manual" | "background"; quality_report?: QualityReport | null; id: string; status: "preparing" | "running" | "completed" | "cancelled" | "failed"; suite: EvaluationDefinition; corpus_count: number; content_version: number; prepared: number; results: EvaluationResult[]; error: string | null; created_at: string; updated_at: string }
 
 export function projectEvaluationConfig(project: Project): EvaluationConfig {

@@ -25,6 +25,7 @@ class GapItem(BaseModel):
     resolved_at: datetime | None
     updated_at: datetime | None
     evidence_version: str
+    verification_run_id: uuid.UUID | None = None
 
 
 class GapEvidence(BaseModel):
@@ -72,6 +73,7 @@ class GapReviewInput(BaseModel):
     note: str = Field(default="", max_length=2000)
     revision: int = Field(ge=0, le=2_147_483_646)
     evidence_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verification_run_id: uuid.UUID | None = None
 
     @field_validator("note")
     @classmethod

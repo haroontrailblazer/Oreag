@@ -12,6 +12,7 @@ import type { Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { FilterSelect } from "@/components/filter-select"
 import { MobileFilters } from "@/components/mobile-filters"
+import { SavedQueryViews } from "@/components/saved-query-views"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -86,7 +87,7 @@ export function FailedRequestExplorer({ navigation }: { navigation: ReactNode })
       <div role="search" aria-label="Search and filter failed requests" className="flex w-[min(52vw,16rem)] min-w-0 items-center gap-2"><div className="relative min-w-0 flex-1"><MagnifyingGlassIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input aria-label="Search endpoints" placeholder="Search endpoints…" maxLength={200} value={search} onChange={event => setSearch(event.target.value)} className="h-8 pl-8 pr-2 text-base placeholder:text-[13px] md:text-[13px]" /></div><MobileFilters title="Failed request filters" activeCount={filterCount} onReset={reset} desktop compact>{filterControls}</MobileFilters></div>
       <p className="col-span-2 text-xs text-muted-foreground md:text-sm">Inspect rejected requests, server errors, and interrupted streams.</p>
     </header>
-    <div className="shrink-0">{navigation}</div>
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">{navigation}<SavedQueryViews kind="failures" filters={{ ...filters, search }} onApply={value => { setSearch(value.search); setFilters(value); setCursors([]) }} /></div>
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-3 pr-0.5">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><p className="min-w-0 flex-1 break-words leading-5">{FAILURE_PERIODS.find(period => period.value === filters.hours)?.label}{filters.project ? ` · ${projects?.find(project => project.id === filters.project)?.name ?? "Selected project"}` : ""} · {filters.outcome === "all" ? "All failures" : FAILURE_OUTCOMES[filters.outcome as keyof typeof FAILURE_OUTCOMES].label}{filters.status ? ` · HTTP ${filters.status}` : ""}{filters.latency ? ` · At least ${Number(filters.latency) / 1000} s` : ""}</p><Button size="sm" variant="outline" disabled={isValidating} onClick={() => { if (cursors.length) setCursors([]); else void mutate() }}><ArrowsClockwiseIcon className={cn("size-3.5", isValidating && "motion-safe:animate-spin")} aria-hidden="true" />Refresh</Button></div>
       {error && !isSessionExpired(error) && <div role="alert" className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border p-4 text-xs"><p>Could not refresh failed requests.{data ? " Showing the last available snapshot." : " Please try again."}</p><Button variant="outline" size="sm" onClick={() => void mutate()}>Retry</Button></div>}

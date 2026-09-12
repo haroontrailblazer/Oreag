@@ -326,12 +326,12 @@ model {
             sufficiency 'is_sufficient: at least 1 source at or above 0.2 cosine; otherwise widen top_k and retry, then clarify'
           }
         }
-        answerCache = component 'Answer Cache' 'Two layers. L1 hits an identical question, L2 hits one that merely means the same. Fleet-wide single-flight so simultaneous identical asks compute once across every instance, not once each.' {
+        answerCache = component 'Answer Cache' 'L1 reuses identical requests and conversation context. L2 requires standalone questions with conservatively equivalent wording. Fleet-wide single-flight combines simultaneous identical requests.' {
           #cache #readpath #scale
-          technology 'L1 exact TTL 1 h · L2 semantic TTL 24 h · cosine >= 0.75 · Redis SET NX single-flight'
+          technology 'L1 exact TTL 1 h · L2 semantic TTL 24 h · cosine >= 0.9 plus request equivalence · Redis SET NX single-flight'
           metadata {
             l1 'normalize_question (lowercase, collapse whitespace, strip trailing punctuation) then an exact key lookup in Redis'
-            l2 'embeds the question and runs pgvector cosine over cached questions; a hit is promoted into L1'
+            l2 'embeds standalone questions and runs pgvector cosine over cached questions; reuse also requires conservative request equivalence; a hit is promoted into L1'
             key 'project + llm provider/model + embedding provider/model + top_k + content_version + normalized question'
             isolation 'project.id is the FIRST key element, so cache and lock are scoped per project and two projects asking the identical question can never collide. A project has exactly one owner, so accounts cannot share an answer either. The dashboard /api and the public /v1 deliberately DO share, because both run the same run_query.'
             invalidation 'content_version bumps on any chunk or memory write, so the whole key space rolls over'
@@ -391,6 +391,21 @@ model {
             retention 'string bigint IDs; list previews shorten questions and omit feedback notes; detail returns the full question and note; historical answers and source passages are not retained'
           }
         }
+        cacheInsights = component 'Cache inspector' 'Records observed exact and semantic cache decisions in the request timeline without extra cache reads.' {
+          technology 'services/cache_insights.py · query_logs.cache_details · migration 0050'
+        }
+        sourceConflicts = component 'Source conflict review' 'Bounded comparisons of matching English statements with different numbers or explicit negation; revision-checked owner reviews.' {
+          technology 'services/source_conflicts.py · source_conflict_reviews · migration 0050'
+        }
+        documentInsights = component 'Document impact and freshness' 'Owner-scoped document attribution and explicit review dates, preserving missing measurements.' {
+          technology 'services/document_insights.py · document_reviews · migration 0049'
+        }
+        qualityTrends = component 'Quality trends' 'Live feedback and document-match trends alongside comparable completed evaluation runs.' {
+          technology 'services/quality_trends.py · query_logs · evaluation_runs'
+        }
+        requestFailures = component 'Failed request explorer' 'Owner-scoped retained failure measurements with filters and pagination; private request bodies are not reconstructed.' {
+          technology 'services/request_failures.py · request_metrics'
+        }
         knowledgeHealth = component 'Knowledge Health' 'Shared file readiness, query activity and feedback diagnostics; grouped reads without provider calls.' {
           #readpath
           technology 'services/knowledge_health.py · GET /api/account/knowledge-health · GET /v1/projects/{project_id}/health'
@@ -404,7 +419,7 @@ model {
           technology 'services/knowledge_gaps.py · GET /api/account/knowledge-gaps · GET/PUT /api/account/knowledge-gaps/{project_id}/{key} · migration 0048'
           metadata {
             scope 'Owner-scoped query and review reads; bounded samples preserve missing evidence measurements; no provider calls or changes to retrieval.'
-            workflow 'Revision and evidence checks protect review updates. New flagged evidence reopens resolved groups; review notes do not modify query feedback.'
+            workflow 'Revision and evidence checks protect review updates. New flagged evidence reopens resolved groups. Selected evidence can be checked through the evaluator; attaching verification requires complete passing checks against current documents, settings and evidence.'
           }
         }
         feedback = component 'Answer Feedback' 'One mutable helpful or not_helpful rating and optional note per query, shared by API consumers and Playground.' {
@@ -433,9 +448,9 @@ model {
         operationalMetrics = component 'Operational monitoring' 'Asynchronous request metrics, worker heartbeats, owner snapshots and cached readiness.' {
           technology 'services/operations.py · routers/operations.py · migration 0047'
         }
-        quality = component 'Automatic checks' 'Durable scheduled evaluation jobs and explicit reference regression warnings.' {
-          technology 'services/quality.py · evaluation_schedules · migration 0046'
-          metadata { execution 'Frozen saved configurations; isolated corpus; background leased steps; null metrics remain unmeasured.' }
+        quality = component 'Automatic checks' 'Durable scheduled and after-change evaluations with explicit regression warnings.' {
+          technology 'services/quality.py · evaluation_schedules · migrations 0046 and 0050'
+          metadata { execution 'Scheduled runs retain saved configurations. Change checks watch current document, memory and answer settings with a 60-second debounce and wait for indexing; both use isolated snapshots and preserve missing measurements.' }
         }
         webhooks = component 'Webhooks' 'Transactional event outbox with signed delivery, retries and owner-visible history.' {
           technology 'services/webhooks.py · webhook_endpoints · webhook_deliveries · migration 0046'
@@ -678,6 +693,12 @@ model {
   ingestion -[internal]-> contentVersion 'bumps, invalidating every cache'
 
   dashboardApi -[internal]-> queryHistory 'owner-scoped query list and detail'
+  dashboardApi -[internal]-> sourceConflicts 'read comparisons and save review decisions'
+  dashboardApi -[internal]-> documentInsights 'read document impact and save content reviews'
+  dashboardApi -[internal]-> qualityTrends 'read observed live and evaluation trends'
+  dashboardApi -[internal]-> requestFailures 'inspect retained failures'
+  cacheInsights -[internal]-> queryTimeline 'attach observed cache decisions to request context'
+  sourceConflicts -[persist]-> db 'read indexed passages and persist review state'
   quality -[internal]-> evaluations 'drive isolated saved runs and assess regressions'
   webhooks -[persist]-> db 'claim transactional events and persist attempts'
   dashboardApi -[internal]-> webhooks 'owner-scoped endpoints and delivery history'

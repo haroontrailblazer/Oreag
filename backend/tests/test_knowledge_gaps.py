@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.jwt import get_current_user
 from app.db import get_db
-from app.models import ApiKey, Base, KnowledgeGapReview, Project, QueryLog
+from app.models import ApiKey, Base, EvaluationRun, KnowledgeGapReview, Project, QueryLog
 from app.routers.knowledge_gaps import router
 from app.services import knowledge_gaps as service
 
@@ -28,7 +28,7 @@ def gaps():
     engine = sa.create_engine("sqlite://", poolclass=sa.pool.StaticPool, connect_args={"check_same_thread": False})
     with engine.connect() as connection:
         connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-    Base.metadata.create_all(engine, tables=[Project.__table__, ApiKey.__table__, QueryLog.__table__, KnowledgeGapReview.__table__])
+    Base.metadata.create_all(engine, tables=[Project.__table__, ApiKey.__table__, QueryLog.__table__, EvaluationRun.__table__, KnowledgeGapReview.__table__])
     with Session(engine) as db:
         owner = uuid.uuid4()
         mine, other = Project(owner_id=owner, name="Mine"), Project(owner_id=uuid.uuid4(), name="Other")

@@ -6,6 +6,7 @@ export type GapItem = {
   helpful_count: number; unmeasured_count: number; first_seen: string; last_seen: string
   status: "open" | "resolved"; reopened: boolean; revision: number; note: string | null
   resolved_at: string | null; updated_at: string | null; evidence_version: string
+  verification_run_id?: string | null
 }
 export type GapEvidence = {
   id: string; question: string; created_at: string; feedback_rating: string | null

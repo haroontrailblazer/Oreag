@@ -15,6 +15,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { FilterSelect } from "@/components/filter-select"
 import { MobileFilters } from "@/components/mobile-filters"
 import { AddQueryToSet } from "@/components/query-tools"
+import { GapVerification } from "@/components/gap-verification"
 import { api, ApiError, fetcher, isSessionExpired } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Project } from "@/lib/types"
@@ -33,7 +34,7 @@ function StatusBadge({ item }: { item: GapItem }) {
     : "border-amber-500/30 text-amber-700 dark:text-amber-400")}><Icon aria-hidden="true" />{gapStatus(item)}</Badge>
 }
 
-function GapReview({ item, days, onUpdate }: { item: GapItem; days: string; onUpdate: (result: GapDetail) => Promise<void> }) {
+function GapReview({ item, days, verificationId, onUpdate }: { item: GapItem; days: string; verificationId: string | null; onUpdate: (result: GapDetail) => Promise<void> }) {
   // Retain the reviewed evidence version and draft through background refreshes
   // or evidence pagination. A conflict requires an explicit refresh to save.
   const [baseline, setBaseline] = useState(item)
@@ -44,17 +45,18 @@ function GapReview({ item, days, onUpdate }: { item: GapItem; days: string; onUp
   const [message, setMessage] = useState("")
   const endpoint = gapDetailKey(item.project_id, item.question_key, days)
 
-  async function save(status: "open" | "resolved") {
+  async function save(status: "open" | "resolved", verification = baseline.verification_run_id) {
     if (busy) return
     setBusy("save"); setFailure(""); setMessage("")
     try {
       const result = await api<GapDetail>(endpoint, { method: "PUT", body: JSON.stringify({
         status, note, revision: baseline.revision, evidence_version: baseline.evidence_version,
+        verification_run_id: status === "resolved" ? verification : null,
       }) })
       setBaseline(result.item); setNote(result.item.note ?? ""); setConflict(false)
       await onUpdate(result)
       setMessage(result.item.reopened ? "New evidence arrived. This gap still needs review."
-        : status === "resolved" ? "Review closed. Documents and answers are unchanged." : "Review saved. This gap is open.")
+        : status === "resolved" ? verification ? "Review resolved with verification attached." : "Review closed. Documents and answers are unchanged." : "Review saved. This gap is open.")
     } catch (error) {
       if (!isSessionExpired(error)) {
         setFailure(error instanceof Error ? error.message : "Could not save this review.")
@@ -82,9 +84,11 @@ function GapReview({ item, days, onUpdate }: { item: GapItem; days: string; onUp
         placeholder="What did you check or change? If the answer was correct, note that here." className="min-h-24 text-base md:text-sm" />
     </label>
     <p className="text-xs leading-5 text-muted-foreground">Mark resolved closes this review. It does not change documents or answers. New flagged queries or negative feedback can reopen it.</p>
+    {baseline.verification_run_id && <p className="flex items-center gap-2 text-xs text-muted-foreground"><CheckCircleIcon aria-hidden="true" className="size-4" />A verification run is attached to this resolution.</p>}
     {failure && <p role="alert" className="text-xs text-destructive">{failure}</p>}
     {message && <p role="status" className="text-xs leading-5 text-muted-foreground">{message}</p>}
     <div className="flex flex-wrap gap-2">
+      {verificationId && baseline.status !== "resolved" && <Button size="sm" disabled={!!busy || conflict} onClick={() => void save("resolved", verificationId)}><CheckCircleIcon aria-hidden="true" />Resolve with verification</Button>}
       <Button size="sm" disabled={!!busy || conflict} onClick={() => void save(baseline.status === "resolved" ? "open" : "resolved")}>
         {busy === "save" ? <Spinner size={16} /> : baseline.status === "resolved" ? <ArrowsClockwiseIcon aria-hidden="true" className="size-4" /> : <CheckCircleIcon aria-hidden="true" className="size-4" />}
         {busy === "save" ? "Saving…" : baseline.status === "resolved" ? "Reopen gap" : "Mark resolved"}
@@ -97,6 +101,7 @@ function GapReview({ item, days, onUpdate }: { item: GapItem; days: string; onUp
 
 function GapDetailView({ selected, days, onSaved }: { selected: GapItem; days: string; onSaved: () => void }) {
   const [offset, setOffset] = useState(0)
+  const [verificationId, setVerificationId] = useState<string | null>(null)
   const { mutate: updateCache } = useSWRConfig()
   const { data, error, isLoading, mutate } = useSWR<GapDetail>(gapDetailKey(selected.project_id, selected.question_key, days, offset), fetcher, { revalidateOnFocus: false, keepPreviousData: true })
   async function update(result: GapDetail) {
@@ -128,7 +133,8 @@ function GapDetailView({ selected, days, onSaved }: { selected: GapItem; days: s
         <Button asChild variant="outline" size="sm"><Link href={`/projects/${encodeURIComponent(data.item.project_id)}?tab=files`}>Review documents<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>
         <Button asChild variant="outline" size="sm"><Link href={`/projects/${encodeURIComponent(data.item.project_id)}?tab=playground`}>Test in Playground<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>
       </div>
-      <GapReview item={data.item} days={days} onUpdate={update} />
+      <GapVerification gap={data} days={days} onSelect={setVerificationId} />
+      <GapReview item={data.item} days={days} verificationId={verificationId} onUpdate={update} />
       <section className="space-y-3" aria-label="Queries behind this gap" aria-busy={isLoading}>
         <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">Queries behind this gap</h3><span className="text-xs text-muted-foreground">Flagged first · Last {days} days</span></div>
         <ul className="space-y-3">{data.evidence.map(query => <li key={query.id} className="space-y-3 rounded-xl border bg-background p-4">

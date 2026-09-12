@@ -16,7 +16,11 @@ def make_room(db, project_id):
     if count < ACTIVE_LIMIT:
         return
     from .evaluations import run_out
-    protected = set(db.scalars(select(EvaluationRun.reference_run_id).where(EvaluationRun.project_id == project_id, EvaluationRun.reference_run_id.is_not(None))))
+    # Finished change checks already retain their comparison in quality_report.
+    # Keeping every link protected would fill history with an unarchivable chain.
+    protected = set(db.scalars(select(EvaluationRun.reference_run_id).where(EvaluationRun.project_id == project_id, EvaluationRun.reference_run_id.is_not(None),
+        or_(EvaluationRun.trigger_reason.is_(None), EvaluationRun.trigger_reason != "project_change",
+            EvaluationRun.status.in_(["preparing", "running"]), EvaluationRun.quality_report.is_(None)))))
     protected.update(db.scalars(select(EvaluationSchedule.reference_run_id).where(EvaluationSchedule.project_id == project_id, EvaluationSchedule.reference_run_id.is_not(None))))
     instant = datetime.now(timezone.utc)
     statement = select(EvaluationRun).where(EvaluationRun.project_id == project_id, EvaluationRun.archived_at.is_(None),

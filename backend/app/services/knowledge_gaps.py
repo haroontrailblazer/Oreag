@@ -183,6 +183,7 @@ def _item(key, rows, review: KnowledgeGapReview | None, *, full_question: bool =
         reopened=reopened, revision=review.revision if review else 0,
         note=review.note if review else None, resolved_at=resolved_at,
         updated_at=_utc(review.updated_at) if review else None, evidence_version=version,
+        verification_run_id=review.verification_run_id if review else None,
     )
 
 
@@ -244,9 +245,26 @@ def save_review(db: Session, owner: uuid.UUID, project_id: uuid.UUID, key: str, 
     item, rows = _selected(snapshot, project_id, key)
     if body.revision != item.revision or body.evidence_version != item.evidence_version:
         raise HTTPException(409, "Evidence or review changed. Refresh this gap before saving.")
+    if body.verification_run_id and (item.status != "resolved" or body.verification_run_id != item.verification_run_id):
+        from ..models import EvaluationRun
+        from .evaluations import run_out
+        from .quality import project_config
+        run = db.get(EvaluationRun, body.verification_run_id)
+        project = db.get(Project, project_id)
+        if run is None or run.project_id != project_id or run.gap_key != key:
+            raise HTTPException(422, "Choose a verification from this gap")
+        saved_run = run_out(run)
+        results = saved_run["results"]
+        expected_cases = {(case["id"], 0) for case in saved_run["suite"]["cases"]}
+        if (run.status != "completed" or not results or len(results) != len(expected_cases)
+            or {(r["caseId"], r["variant"]) for r in results} != expected_cases or any(r["status"] != "passed" for r in results)
+            or run.gap_evidence_version != item.evidence_version or run.content_version != project.content_version
+            or run_out(run)["suite"]["variants"] != [project_config(project).model_dump()]):
+            raise HTTPException(409, "Verification must pass every check on the current evidence and documents. Run verification again.")
     values = dict(
         status=body.status, note=body.note or None, revision=body.revision + 1,
         updated_at=snapshot.now,
+        verification_run_id=body.verification_run_id if body.status == "resolved" else None,
         resolved_at=snapshot.now if body.status == "resolved" else None,
         resolved_through_id=max(row["id"] for row in rows) if body.status == "resolved" else None,
     )

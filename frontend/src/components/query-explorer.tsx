@@ -6,6 +6,8 @@ import { usePathname, useSearchParams } from "next/navigation"
 import useSWR from "swr"
 import { ArrowRightIcon, ChatTextIcon, MagnifyingGlassIcon, WarningCircleIcon } from "@phosphor-icons/react/dist/ssr"
 import { FailedRequestExplorer } from "@/components/failed-request-explorer"
+import { SavedQueryViews } from "@/components/saved-query-views"
+import { CacheInspector } from "@/components/cache-inspector"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -35,6 +37,7 @@ function QueryDetail({ id }: { id: string }) {
     <section><h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Question</h3><p className="whitespace-pre-wrap break-words rounded-xl border bg-background p-4 text-sm leading-7">{data.question}</p></section>
     <dl className="grid grid-cols-2 gap-3">{metrics.map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border bg-background p-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-2 break-words text-sm font-medium tabular-nums">{value}</dd></div>)}</dl>
     <QueryTimeline query={data} />
+    <CacheInspector query={data} />
     <p className="text-xs leading-5 text-muted-foreground">Retrieval similarity is the mean similarity of the retrieved chunks. Cache similarity measures the semantic cache match. Unavailable measurements remain unreported.</p>
     <div className="rounded-xl border p-4 text-sm leading-6 text-muted-foreground">Historical answers and source text are not retained in these query logs.</div>
     <section className="space-y-3 rounded-xl border p-4">
@@ -115,7 +118,7 @@ function QueryHistory({ navigation }: { navigation: ReactNode }) {
       </div>
       <p className="col-span-2 text-xs text-muted-foreground md:text-sm">Monitor API queries and Playground tests: latency, caching, and feedback.</p>
     </header>
-    <div className="shrink-0">{navigation}</div>
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">{navigation}<SavedQueryViews kind="queries" filters={{ ...filters, search }} onApply={value => { setSearch(value.search); setFilters(value); setCursors([]) }} /></div>
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-0.5 pb-3">
       {/* Natural height for short lists; only the rows shrink and scroll when
           the card reaches the space left below the filters, like FilesTab. */}

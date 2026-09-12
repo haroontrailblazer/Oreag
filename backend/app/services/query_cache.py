@@ -29,6 +29,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
+from . import cache_insights
 
 logger = logging.getLogger(__name__)
 
@@ -608,10 +609,14 @@ class QueryCache:
     def get(self, key: str) -> Any:
         raw = self._backend.get(self._namespaced(key))
         if raw is None or raw is UNAVAILABLE:
+            cache_insights.record("exact", "unavailable" if raw is UNAVAILABLE else "no_entry")
             return None
         try:
-            return self._deserialize(raw)
+            result = self._deserialize(raw)
+            cache_insights.record("exact", "hit")
+            return result
         except (ValueError, TypeError, KeyError):
+            cache_insights.record("exact", "unreadable")
             logger.warning("Unreadable cached answer; treating it as a miss")
             return None
 

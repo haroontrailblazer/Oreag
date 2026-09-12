@@ -17,6 +17,7 @@ import { toast } from "@/lib/toast"
 import useSWR from "swr"
 
 import { AddFilesDialog } from "@/components/project/add-files-dialog"
+import { SourceConflicts } from "@/components/source-conflicts"
 import {
   FileVersionDialog,
   lineageOf,
@@ -452,6 +453,7 @@ export function FilesTab({
           </p>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {fileCount > 1 && <SourceConflicts projectId={project.id} />}
           <BestPractices
             tips={[
               {

@@ -30,6 +30,7 @@ sentence-transformers), stored encrypted at rest.
 
 ## Features
 
+- **Review workflows** - verify gap fixes with current evaluator checks, inspect recorded cache decisions, save private Query and Failed request views, run checks after project changes, and review possible source conflicts in Files. Requires migration 0050.
 - **Knowledge gaps inbox** - groups repeated query wording within each project, flags negative feedback and low measured retrieval similarity, and saves review notes with resolve/reopen actions. New negative evidence reopens resolved groups. Inspect source queries, review documents, and add evaluator test cases without changing live retrieval. See [the Knowledge gaps guide](docs/knowledge-gaps.md); requires migration 0048.
 - **Any document to an API** - upload, auto-convert to Markdown, chunk, embed, and serve.
 - **Per-project RAG endpoint** - `POST /v1/projects/{id}/query` returns grounded answers with cited sources.
@@ -373,7 +374,7 @@ Oreag/
 │       └── models.py, schemas.py, config.py, db.py, main.py
 ├── mcp-server/               # Oreag MCP server (FastMCP) - 9 agent memory + docs tools
 ├── supabase/
-│   ├── migrations/           # 0001…0048 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering, HNSW vector indexes, MFA enforcement, passkey-aware login lookup, MFA recovery codes, per-key model listings, conversion reuse, reversible Matryoshka archive, memory chunking + its HNSW indexes, usage analytics columns, measured cache savings, embedding spend, Matryoshka savings, english text search, per-project answer policy, CJK/Thai lexical search, document versions, document provenance, version chain, document relations, Lao/Khmer/Burmese lexical search, per-project text search, answer-language default, cost precision, per-project cross-lingual floor, answer feedback)
+│   ├── migrations/           # 0001…0050 (tables, RLS, pgvector, provider_keys, memories, semantic cache, hybrid search, queue + metering, HNSW vector indexes, MFA enforcement, passkey-aware login lookup, MFA recovery codes, per-key model listings, conversion reuse, reversible Matryoshka archive, memory chunking + its HNSW indexes, usage analytics columns, measured cache savings, embedding spend, Matryoshka savings, english text search, per-project answer policy, CJK/Thai lexical search, document versions, document provenance, version chain, document relations, Lao/Khmer/Burmese lexical search, per-project text search, answer-language default, cost precision, per-project cross-lingual floor, answer feedback)
 │   └── templates/            # branded auth email templates
 ├── scripts/
 │   └── check_docs_sync.py    # documentation drift harness - see below

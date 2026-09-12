@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { FilterSelect } from "@/components/filter-select"
 import { LiveQualityCharts } from "@/components/live-quality-charts"
+import { ChangeChecks } from "@/components/change-checks"
 import { fetcher, isSessionExpired } from "@/lib/api"
 import { evaluationChange, qualityTrendsKey, type EvaluationTrendsReport, type QualityTrendsReport } from "@/lib/quality-trends"
 
@@ -67,6 +68,7 @@ function EvaluationTrends({ days, project }: { days: string; project: string }) 
   const latest = points.at(-1)
   if (!project) return <p className="py-8 text-center text-sm text-muted-foreground">Create a project to start tracking evaluation runs.</p>
   return <div className="space-y-4">
+    <ChangeChecks key={project} base={`/api/projects/${encodeURIComponent(project)}/evaluations`} />
     {error && !isSessionExpired(error) && <Retry stale={!!data} onRetry={() => void mutate()} />}
     {!data && !error && <Loading />}
     {data && <>
