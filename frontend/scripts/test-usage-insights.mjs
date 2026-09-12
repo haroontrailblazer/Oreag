@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { getLargestSpender, getSpendingInsights, getUsageComparison, percentChange, usageDailyCsv } from "../src/lib/usage-insights.ts"
+import { getLargestSpender, getSpendingExplanation, getSpendingInsights, getUsageComparison, percentChange, usageDailyCsv } from "../src/lib/usage-insights.ts"
 
 const now = new Date("2026-09-09T18:30:00Z")
 const day = (date, overrides = {}) => ({
@@ -134,6 +134,47 @@ const closeTo = (actual, expected) => assert.ok(
   Math.abs(actual - expected) <= Math.max(Math.abs(actual), Math.abs(expected)) * Number.EPSILON * 16,
   `${actual} ≈ ${expected}`,
 )
+
+test("spending explanations follow the larger effect in both directions, including offsets", () => {
+  const cases = [
+    [200, 20, /More requests account for the recorded increase; cost per request stayed the same/],
+    [50, 5, /Fewer requests account for the recorded decrease/],
+    [100, 20, /A higher cost per request accounts for the recorded increase/],
+    [100, 5, /A lower cost per request accounts for the recorded decrease/],
+    [200, 30, /contribute equally to the recorded increase/],
+    [200, 15, /More requests account for most.*A lower cost per request partly offsets/],
+    [200, 5, /A lower cost per request accounts for most.*More requests partly offset/],
+    [50, 7, /Fewer requests account for most.*A higher cost per request partly offsets/],
+    [50, 15, /A higher cost per request accounts for most.*Fewer requests partly offset/],
+    [200, 10, /opposite directions, offsetting each other/],
+    [100, 10, /Recorded spend stayed the same/],
+  ]
+  for (const [requests, cost, expected] of cases) {
+    const result = spending(report({ daily: [
+      day("2026-09-01", { requests: 100, cost_usd: 10, embedding_cost_usd: 0 }),
+      day("2026-09-08", { requests, cost_usd: cost, embedding_cost_usd: 0 }),
+    ] }))
+    assert.match(getSpendingExplanation(result), expected, `requests=${requests}, cost=${cost}`)
+  }
+})
+
+test("explanations do not invent a cause for missing measurements or absent baselines", () => {
+  assert.match(getSpendingExplanation(spending(report({ window_days: 1 }))), /Two equal periods/)
+  assert.match(getSpendingExplanation(spending(report())), /Neither period has recorded requests/)
+  assert.match(getSpendingExplanation(spending(report({ daily: [day("2026-09-08")] }))), /Usage started.*no previous cost per request/)
+  assert.match(getSpendingExplanation(spending(report({ daily: [day("2026-09-01")] }))), /no recorded requests in the recent period/)
+  assert.match(getSpendingExplanation(spending(report({ daily: [day("2026-09-08", { cost_usd: null })] }))), /Some costs are missing/)
+})
+
+test("zero-cost traffic changes and tiny measured costs retain honest explanations", () => {
+  const compare = (previousCost, currentCost) => spending(report({ daily: [
+    day("2026-09-01", { requests: 100, cost_usd: previousCost, embedding_cost_usd: 0 }),
+    day("2026-09-08", { requests: 200, cost_usd: currentCost, embedding_cost_usd: 0 }),
+  ] }))
+  assert.match(getSpendingExplanation(compare(0, 0)), /Recorded spend stayed the same/)
+  assert.match(getSpendingExplanation(compare(1e-10, 2e-10)), /More requests account for the recorded increase/)
+  assert.match(getSpendingExplanation(compare(0, 1e-10)), /request-volume effect was zero/)
+})
 
 test("spending breakdown separates volume from the blended rate and reconciles the change", () => {
   const data = report({ daily: [

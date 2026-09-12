@@ -113,6 +113,37 @@ export function getSpendingInsights(
   }
 }
 
+export function getSpendingExplanation(insights: ReturnType<typeof getSpendingInsights>) {
+  const { comparison, incomplete, spendDelta, volumeEffect, rateEffect } = insights
+  if (incomplete) return "Some costs are missing. Changes in measurement coverage could look like changes in spending."
+  if (!comparison || spendDelta == null) return "Two equal periods of complete days with recorded costs are needed to explain a change."
+  if (comparison.previous.requests === 0) {
+    return comparison.current.requests === 0
+      ? "Neither period has recorded requests to compare."
+      : "Usage started in the recent period. There is no previous cost per request to use as a baseline."
+  }
+  if (comparison.current.requests === 0) return "There were no recorded requests in the recent period, so there is no recent cost per request to compare."
+  if (volumeEffect == null || rateEffect == null) return "Recorded costs are needed to separate request volume from cost per request."
+  if (spendDelta === 0) {
+    return volumeEffect === 0 && rateEffect === 0
+      ? "Recorded spend stayed the same across both periods."
+      : "Request volume and cost per request moved in opposite directions, offsetting each other."
+  }
+
+  const volume = volumeEffect > 0 ? "More requests" : "Fewer requests"
+  const rate = rateEffect > 0 ? "A higher cost per request" : "A lower cost per request"
+  const direction = spendDelta > 0 ? "increase" : "decrease"
+  if (rateEffect === 0) return `${volume} account for the recorded ${direction}; cost per request stayed the same.`
+  if (volumeEffect === 0) return `${rate} accounts for the recorded ${direction}; the request-volume effect was zero.`
+
+  const magnitudeDifference = costDifference(Math.abs(volumeEffect), Math.abs(rateEffect))
+  if (magnitudeDifference === 0) return `${volume} and ${rate.toLowerCase()} contribute equally to the recorded ${direction}.`
+  const opposing = Math.sign(volumeEffect) !== Math.sign(rateEffect)
+  return magnitudeDifference > 0
+    ? `${volume} account for most of the recorded ${direction}.${opposing ? ` ${rate} partly offsets that change.` : ""}`
+    : `${rate} accounts for most of the recorded ${direction}.${opposing ? ` ${volume} partly offset that change.` : ""}`
+}
+
 export function getLargestSpender(data: AccountUsage) {
   const measured = data.by_model.filter((row) => row.cost_usd != null && row.cost_usd > 0)
   const total = measured.reduce((sum, row) => sum + row.cost_usd!, 0)

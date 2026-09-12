@@ -2,13 +2,14 @@
 
 import type { ReactNode } from "react"
 import {
-  ArrowDownIcon, ArrowUpIcon, ChartBarIcon, DownloadSimpleIcon,
-  LightningIcon, LightbulbIcon, ReceiptIcon,
+  ArrowDownIcon, ArrowUpIcon, ChartBarIcon, ChartLineUpIcon, DownloadSimpleIcon,
+  InfoIcon, LightningIcon, LightbulbIcon, ReceiptIcon, ScalesIcon, WarningCircleIcon,
 } from "@phosphor-icons/react/dist/ssr"
 
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import type { AccountUsage } from "@/lib/types"
-import { getLargestSpender, getSpendingInsights, percentChange, usageDailyCsv } from "@/lib/usage-insights"
+import { getLargestSpender, getSpendingExplanation, getSpendingInsights, percentChange, usageDailyCsv } from "@/lib/usage-insights"
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
 const currency = new Intl.NumberFormat("en-US", {
@@ -33,10 +34,10 @@ function summaryMoney(value: number) {
 function Change({ value, unit = "%" }: { value: number; unit?: string }) {
   const Icon = value > 0 ? ArrowUpIcon : ArrowDownIcon
   return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs font-medium text-foreground">
+    <Badge variant="secondary" className="max-w-full whitespace-normal">
       {value !== 0 && <Icon aria-hidden="true" className="size-3" />}
       {value === 0 ? "No change" : `${Math.abs(value) < 0.1 ? "<0.1" : number.format(Math.abs(value))}${unit} ${value > 0 ? "increase" : "decrease"}`}
-    </span>
+    </Badge>
   )
 }
 
@@ -45,7 +46,7 @@ function Insight({ title, icon, value, children }: {
 }) {
   return (
     <article className="usage-insight-card min-w-0 space-y-3 rounded-xl border border-border/70 bg-background/80 p-4 sm:p-5">
-      <h3 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">{icon}{title}</h3>
+      <h3 className="flex min-h-8 items-start gap-2 text-xs font-medium leading-4 text-muted-foreground [&>svg]:shrink-0">{icon}{title}</h3>
       <div className="break-words text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">{value}</div>
       <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">{children}</div>
     </article>
@@ -55,30 +56,53 @@ function Insight({ title, icon, value, children }: {
 function SpendingChange({ insights }: { insights: ReturnType<typeof getSpendingInsights> }) {
   const {
     comparison, incomplete, reasons, spendDelta, previousCostPerRequest,
-    currentCostPerRequest, costPerRequestChange, volumeEffect, rateEffect,
+    currentCostPerRequest, volumeEffect, rateEffect,
     forecast30Days, forecastReason,
   } = insights
   const headline = incomplete ? "Spending comparison is incomplete"
     : spendDelta == null ? "Not enough cost data to compare"
     : spendDelta === 0 ? "Recorded spend is unchanged"
     : `${summaryMoney(Math.abs(spendDelta))} ${spendDelta > 0 ? "more" : "less"} recorded spend`
+  const spendChange = !incomplete && spendDelta != null && comparison?.previous.spend != null && comparison.previous.spend > 0
+    ? spendDelta / comparison.previous.spend * 100 : null
 
   return (
     <section aria-labelledby="spending-change-heading" className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-background/80">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-3 sm:px-5">
-        <h3 id="spending-change-heading" className="text-sm font-semibold">What changed your spending?</h3>
-        <span className={`rounded-md px-2 py-1 text-[11px] font-medium ${incomplete ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-muted text-muted-foreground"}`}>
-          {incomplete ? "Incomplete measurements" : "Recorded LLM + embedding costs"}
-        </span>
+        <h3 id="spending-change-heading" className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+          <ScalesIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          Why did spending change?
+        </h3>
+        <Badge variant="outline" className={`max-w-full whitespace-normal ${incomplete ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
+          {incomplete && <WarningCircleIcon aria-hidden="true" className="shrink-0" />}
+          {incomplete ? "Incomplete measurements" : "Recorded costs"}
+        </Badge>
       </div>
-      <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.65fr)]">
+      <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.6fr)]">
         <div className="min-w-0 space-y-4 p-4 sm:p-5">
-          <div className="space-y-1.5">
-            <p className="break-words text-lg font-semibold tracking-tight">{headline}</p>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="break-words text-lg font-semibold tracking-tight [overflow-wrap:anywhere]">{headline}</p>
+              {spendChange != null && <Change value={spendChange} />}
+            </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              {comparison ? `Across the same ${comparison.periodDays}-day periods shown above.` : "Two periods of complete days are needed."}
+              {getSpendingExplanation(insights)}
             </p>
           </div>
+
+          {comparison && <div className="space-y-2">
+            <dl className="grid grid-cols-1 divide-y overflow-hidden rounded-lg border border-border/60 min-[400px]:grid-cols-2 min-[400px]:divide-x min-[400px]:divide-y-0">
+              {([ ["Previous", comparison.previous], ["Recent", comparison.current] ] as const).map(([label, period]) => (
+                <div key={label} className="min-w-0 space-y-1 p-3">
+                  <dt className="text-xs font-medium text-muted-foreground">{label} {comparison.periodDays} days</dt>
+                  <dd className="break-words text-lg font-semibold tabular-nums [overflow-wrap:anywhere]">{period.spend == null ? "Not measured" : summaryMoney(period.spend)}</dd>
+                  <dd className="text-xs text-muted-foreground">{number.format(period.requests)} requests</dd>
+                  <dd className="text-[11px] leading-relaxed text-muted-foreground">{period.start} – {period.end}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">Recorded LLM + embedding costs · complete UTC days · today excluded{incomplete ? " · partial amounts" : ""}</p>
+          </div>}
 
           {incomplete ? (
             <div className="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-relaxed">
@@ -86,16 +110,26 @@ function SpendingChange({ insights }: { insights: ReturnType<typeof getSpendingI
               <p className="text-muted-foreground">Coverage may differ between periods. Spending effects and the forecast are unavailable until measurements are complete.</p>
             </div>
           ) : volumeEffect != null && rateEffect != null ? (
-            <dl className="grid gap-3 sm:grid-cols-2">
-              <div className="min-w-0 rounded-lg border border-border/60 p-3">
-                <dt className="text-xs text-muted-foreground">Request-volume effect</dt>
-                <dd className="mt-2 break-words text-lg font-semibold tabular-nums">{signedMoney(volumeEffect)}</dd>
-                <dd className="mt-1 text-xs leading-relaxed text-muted-foreground">Request change at the previous cost per request.</dd>
+            <dl className="space-y-3">
+              <div className="relative flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pl-11">
+                <dt className="text-xs font-medium">
+                  <span className="absolute left-0 top-0 flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground"><ChartBarIcon aria-hidden="true" className="size-4" /></span>
+                  Request-volume effect
+                </dt>
+                <dd className="break-words text-sm font-semibold tabular-nums [overflow-wrap:anywhere]">{signedMoney(volumeEffect)}</dd>
+                <dd className="basis-full text-xs leading-relaxed text-muted-foreground">Change in requests at the previous cost per request.</dd>
               </div>
-              <div className="min-w-0 rounded-lg border border-border/60 p-3">
-                <dt className="text-xs text-muted-foreground">Cost-per-request effect</dt>
-                <dd className="mt-2 break-words text-lg font-semibold tabular-nums">{signedMoney(rateEffect)}</dd>
-                <dd className="mt-1 text-xs leading-relaxed text-muted-foreground">The remaining change after accounting for request volume.</dd>
+              <div className="relative flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pl-11">
+                <dt className="text-xs font-medium">
+                  <span className="absolute left-0 top-0 flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground"><ReceiptIcon aria-hidden="true" className="size-4" /></span>
+                  Cost-per-request effect
+                </dt>
+                <dd className="break-words text-sm font-semibold tabular-nums [overflow-wrap:anywhere]">{signedMoney(rateEffect)}</dd>
+                <dd className="basis-full text-xs leading-relaxed text-muted-foreground">{previousCostPerRequest == null ? "Unavailable" : money(previousCostPerRequest)} → {currentCostPerRequest == null ? "Unavailable (no requests)" : money(currentCostPerRequest)} per request.</dd>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 border-t border-border/60 pt-3 text-xs font-medium">
+                <dt>Total recorded change</dt>
+                <dd className="break-words text-sm font-semibold tabular-nums [overflow-wrap:anywhere]">{signedMoney(spendDelta!)}</dd>
               </div>
             </dl>
           ) : (
@@ -104,12 +138,10 @@ function SpendingChange({ insights }: { insights: ReturnType<typeof getSpendingI
             </p>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <p className="leading-relaxed text-muted-foreground">Recorded cost / request: <span className="font-medium text-foreground">
-              {previousCostPerRequest == null ? "Unavailable" : money(previousCostPerRequest)} → {currentCostPerRequest == null ? "Unavailable" : money(currentCostPerRequest)}
-            </span></p>
-            {!incomplete && costPerRequestChange != null && <Change value={costPerRequestChange} />}
-          </div>
+          <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+            <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            This breakdown separates volume from the blended cost per request. These totals cannot identify which models, tokens, or cache changes caused the rate to change.
+          </p>
           <details className="text-xs leading-relaxed text-muted-foreground">
             <summary className="w-fit cursor-pointer rounded-sm font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-4">How to read this breakdown</summary>
             <div className="mt-2 space-y-2">
@@ -120,12 +152,12 @@ function SpendingChange({ insights }: { insights: ReturnType<typeof getSpendingI
           </details>
         </div>
 
-        <div className="min-w-0 space-y-3 border-t border-border/60 bg-muted/20 p-4 sm:p-5 lg:border-l lg:border-t-0">
+        <div className="min-w-0 space-y-3 border-t border-border/60 bg-muted/20 p-4 sm:p-5 xl:border-l xl:border-t-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-sm font-medium">Next 30 days</h4>
-            <span className="rounded-md border border-border/70 bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground">Estimate</span>
+            <h4 className="flex items-center gap-2 text-sm font-medium"><ChartLineUpIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />Next 30 days</h4>
+            <Badge variant="outline" className="bg-background text-muted-foreground">Estimate</Badge>
           </div>
-          <p className="break-words text-2xl font-semibold tracking-tight tabular-nums">{forecast30Days == null ? "Unavailable" : summaryMoney(forecast30Days)}</p>
+          <p className="break-words text-2xl font-semibold tracking-tight tabular-nums [overflow-wrap:anywhere]">{forecast30Days == null ? "Unavailable" : summaryMoney(forecast30Days)}</p>
           {forecast30Days != null && comparison ? <>
             <p className="text-xs font-medium">Projected recorded spend</p>
             <p className="text-xs leading-relaxed text-muted-foreground">{summaryMoney(comparison.current.spend! / comparison.periodDays)} per day across {comparison.periodDays} complete UTC days ({comparison.current.start} – {comparison.current.end}).</p>

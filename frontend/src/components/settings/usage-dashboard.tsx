@@ -53,7 +53,7 @@ export function UsageDashboard() {
   return (
     // Fixed frame like the sibling settings pages: the heading and range
     // selector never move, only the content below scrolls.
-    <div className="usage-dashboard flex h-[calc(100dvh-6.25rem)] min-h-0 flex-col gap-4 overflow-hidden md:h-full">
+    <div className="usage-dashboard flex h-[calc(100dvh-6.3125rem)] min-h-0 flex-col gap-4 overflow-hidden md:h-full">
       <div className="usage-dashboard-header flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border/70 pb-4 sm:pb-5">
         <div>
           <h1 className="text-[1.75rem] font-semibold leading-tight tracking-[-0.035em]">Usage</h1>
