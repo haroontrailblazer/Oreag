@@ -12,6 +12,7 @@ const calculate = (overrides = {}, at = now, dates = period) => getBudgetForecas
 test("projects month-to-date spend and the remaining time to reach a budget", () => {
   const result = calculate()
   assert.equal(result.available, true)
+  assert.equal(result.partial, false)
   assert.equal(result.elapsedDays, 10)
   assert.equal(result.dailyAverage, 5)
   assert.equal(result.projectedSpend, 150)
@@ -58,10 +59,25 @@ test("already-reached budgets do not show a fictional historical reach date", ()
   }
 })
 
-test("missing and partially measured costs suppress the forecast, even with recorded spend", () => {
-  for (const overrides of [{spent_usd:null}, {unpriced_requests:1}, {spent_usd:0,unpriced_requests:2}, {spent_usd:NaN}, {spent_usd:-1}]) {
+test("unknown totals and zero with missing costs cannot become a zero forecast", () => {
+  for (const overrides of [{spent_usd:null}, {spent_usd:0,unpriced_requests:2}, {spent_usd:NaN}, {spent_usd:-1}]) {
     assert.deepEqual(calculate(overrides), {available:false,reason:"incomplete"})
   }
+})
+
+test("partly measured spend produces a partial recorded-cost projection without a reach date", () => {
+  for (const spent_usd of [0.10439135, 50, 120]) {
+    const source = budget({spent_usd, unpriced_requests:1, amount_usd:2, requests:7})
+    const before = structuredClone(source)
+    const result = getBudgetForecast(source, period, now)
+    assert.equal(result.available, true)
+    assert.equal(result.partial, true)
+    assert.equal(result.projectedSpend, spent_usd / 10 * 30)
+    assert.equal(result.reachesBudgetAt, null)
+    assert.equal(result.alreadyReached, spent_usd >= 2)
+    assert.deepEqual(source, before)
+  }
+  assert.deepEqual(calculate({unpriced_requests:1}, new Date("2026-09-02T00:00:00Z")), {available:false,reason:"too_early"})
 })
 
 test("requires three elapsed days and measured activity; true zero stays zero", () => {

@@ -83,11 +83,11 @@ function SidebarLink({
     <Link
       href={href}
       className={cn(
-        "flex h-9 items-center gap-2 rounded-md px-3 text-[13px] font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:h-8",
+        "flex h-9 min-w-0 items-center gap-2 rounded-md px-2 text-[13px] font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:h-8",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
-      <Icon className="size-4" />
+      <Icon className="size-4 shrink-0" />
       <span className="truncate">{label}</span>
       {unread > 0 && <span className="ml-auto rounded-full bg-amber-500/15 px-1.5 text-[10px] text-amber-700 dark:text-amber-400" aria-label={`${unread} unread budget alerts`}>{unread}</span>}
     </Link>
@@ -136,7 +136,7 @@ function ProjectLink({
       href={`/projects/${project.id}`}
       prefetch={false}
       className={cn(
-        "flex h-9 items-center gap-2 rounded-md px-3 text-[13px] font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:h-8",
+        "flex h-9 min-w-0 items-center gap-2 rounded-md px-2 text-[13px] font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:h-8",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
@@ -202,7 +202,7 @@ function FileItem({
       href={href}
       title={file.filename}
       onClick={handleClick}
-      className="flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     >
       <FileText className="size-3.5 shrink-0 text-sidebar-foreground/55" />
       <span className="min-w-0 flex-1 truncate">{display}</span>
@@ -387,10 +387,10 @@ function SidebarBody() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4 md:sticky md:top-0 md:h-dvh">
+    <div className="flex h-full min-h-0 flex-col gap-3 px-2 py-4 md:sticky md:top-0 md:h-dvh">
       <Link
         href="/dashboard"
-        className="group flex min-w-0 items-center gap-3"
+        className="group flex min-w-0 items-center gap-3 px-2"
       >
         <BrandMark className="size-9" />
         <span className="min-w-0 leading-tight">
@@ -418,10 +418,10 @@ function SidebarBody() {
         ))}
       </nav>
 
-      <Separator />
+      <Separator className="mx-2 data-[orientation=horizontal]:w-auto" />
 
       <div className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="flex shrink-0 items-center justify-between px-3">
+        <div className="flex shrink-0 items-center justify-between px-2">
           <span className={cn("font-medium uppercase tracking-wide text-sidebar-foreground/55", inProject ? "text-xs" : "text-[10px]")}>
             {inProject ? "Files" : "Projects"}
           </span>
@@ -432,7 +432,7 @@ function SidebarBody() {
           ) : null}
         </div>
 
-        <div className="relative mx-3 shrink-0">
+        <div className="relative mx-2 shrink-0">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-sidebar-foreground/45" />
           <Input
             type="search"
@@ -444,22 +444,22 @@ function SidebarBody() {
           />
         </div>
 
-        <div className="grid min-h-0 flex-1 content-start gap-1 overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="grid min-h-0 min-w-0 flex-1 content-start gap-1 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {(inProject ? filesLoading : projectsLoading) && (
             <>
-              {[0, 1].map(index => <div key={index} className="flex h-9 items-center gap-2 rounded-md px-3"><Skeleton className="size-4 shrink-0" /><Skeleton className="h-3 min-w-0 flex-1" /><Skeleton className="size-1.5 shrink-0 rounded-full" /></div>)}
+              {[0, 1].map(index => <div key={index} className="flex h-9 min-w-0 items-center gap-2 rounded-md px-2"><Skeleton className="size-4 shrink-0" /><Skeleton className="h-3 min-w-0 flex-1" /><Skeleton className="size-1.5 shrink-0 rounded-full" /></div>)}
             </>
           )}
 
           {inProject ? (
             <>
               {files?.length === 0 && (
-                <div className="rounded-md px-3 py-2 text-xs text-sidebar-foreground/55">
+                <div className="rounded-md px-2 py-2 text-xs text-sidebar-foreground/55">
                   No files yet
                 </div>
               )}
               {files && files.length > 0 && filteredFiles.length === 0 && (
-                <div className="rounded-md px-3 py-2 text-xs text-sidebar-foreground/55">
+                <div className="rounded-md px-2 py-2 text-xs text-sidebar-foreground/55">
                   No matching files
                 </div>
               )}
@@ -481,7 +481,7 @@ function SidebarBody() {
                     <button
                       type="button"
                       onClick={() => toggleGroup(group.type)}
-                      className="flex h-8 w-full items-center gap-2 rounded-md px-3 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     >
                       <ChevronRight
                         className={cn(
@@ -519,14 +519,14 @@ function SidebarBody() {
           ) : (
             <>
               {projects?.length === 0 && (
-                <div className="rounded-md px-3 py-2 text-xs text-sidebar-foreground/55">
+                <div className="rounded-md px-2 py-2 text-xs text-sidebar-foreground/55">
                   No projects yet
                 </div>
               )}
               {projects &&
                 projects.length > 0 &&
                 filteredProjects.length === 0 && (
-                  <div className="rounded-md px-3 py-2 text-xs text-sidebar-foreground/55">
+                  <div className="rounded-md px-2 py-2 text-xs text-sidebar-foreground/55">
                     No matching projects
                   </div>
                 )}
@@ -542,7 +542,7 @@ function SidebarBody() {
         </div>
       </div>
 
-      <Separator />
+      <Separator className="mx-2 data-[orientation=horizontal]:w-auto" />
 
       <UserMenu />
     </div>
@@ -572,7 +572,7 @@ export function DashboardSidebar() {
               <List className="size-5" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-72 p-0" onOpenAutoFocus={event => {
+          <SheetContent side="left" className="w-64 p-0" onOpenAutoFocus={event => {
             // Focus the drawer heading, not its search input: opening navigation
             // should not summon a mobile keyboard. Search still focuses on tap.
             event.preventDefault()

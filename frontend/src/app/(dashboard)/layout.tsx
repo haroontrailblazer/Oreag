@@ -17,7 +17,7 @@ export default function DashboardLayout({
     // document - escaping every overflow clip and stretching the page (the
     // phantom body scroll / black band). Anchoring them here keeps them inside
     // the clipped root.
-    <div className="relative min-h-dvh bg-background md:grid md:h-dvh md:grid-cols-[16rem_minmax(0,1fr)] md:overflow-hidden">
+    <div className="relative min-h-dvh bg-background md:grid md:h-dvh md:grid-cols-[14rem_minmax(0,1fr)] md:overflow-hidden">
       <DashboardSidebar />
       <DashboardPrefetch />
       <SessionExpiredOverlay />
