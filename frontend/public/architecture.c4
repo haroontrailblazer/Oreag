@@ -399,6 +399,14 @@ model {
             measurements '30-day query activity and current feedback ratings; retrieval averages use measured uncached queries only, preserving missing values as null'
           }
         }
+        knowledgeGaps = component 'Knowledge Gaps' 'Owner inbox grouping repeated questions with negative feedback or weak measured evidence, with persistent review state.' {
+          #readpath
+          technology 'services/knowledge_gaps.py · GET /api/account/knowledge-gaps · GET/PUT /api/account/knowledge-gaps/{project_id}/{key} · migration 0048'
+          metadata {
+            scope 'Owner-scoped query and review reads; bounded samples preserve missing evidence measurements; no provider calls or changes to retrieval.'
+            workflow 'Revision and evidence checks protect review updates. New flagged evidence reopens resolved groups; review notes do not modify query feedback.'
+          }
+        }
         feedback = component 'Answer Feedback' 'One mutable helpful or not_helpful rating and optional note per query, shared by API consumers and Playground.' {
           #writepath
           technology 'services/feedback.py · PUT/DELETE /v1/projects/{project_id}/queries/{query_id}/feedback · PUT/DELETE /api/account/queries/{query_id}/feedback · migration 0043'

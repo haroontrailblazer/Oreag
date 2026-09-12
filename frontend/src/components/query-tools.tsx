@@ -21,7 +21,7 @@ export function QueryTimeline({ query }: { query: QueryRecord }) {
   </section>
 }
 
-export function AddQueryToSet({ query }: { query: QueryRecord }) {
+export function AddQueryToSet({ query }: { query: Pick<QueryRecord, "id" | "project_id" | "question"> }) {
   const [open, setOpen] = useState(false), [expected, setExpected] = useState(""), [source, setSource] = useState(""), [match, setMatch] = useState("contains")
   const [busy, setBusy] = useState(false), [message, setMessage] = useState("")
   const base = `/api/projects/${query.project_id}/evaluations`

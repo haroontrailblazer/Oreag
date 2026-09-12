@@ -748,3 +748,13 @@ Migration 0046 adds transactional file/evaluation/project-budget outbox triggers
 Evaluation creation archives older finished runs while preserving references and exportable results. Optional public Idempotency-Key headers provide encrypted 24-hour replay for queries, uploads and evaluation creation. Usage and Health show owner-scoped operational warnings from asynchronous request metrics and worker heartbeats; `/readyz` is separate from process liveness. Apply migration `0047_operational_reliability.sql` before deploying this backend.
 
 Staging load probes, PostgreSQL race tests, encrypted data/file restore drills and SDK 0.2.0 release workflows are documented in [the reliability runbook](docs/reliability.md). Synthetic tests do not establish production capacity or actual-source recovery. JavaScript SDK 0.2.0 is published as `@haroontrailblazer/oreag-sdk` on npm. Python SDK 0.2.0 is published as `oreag-sdk` on PyPI (`pip install oreag-sdk`). Automated future releases require npm and PyPI trusted publishers configured for `haroontrailblazer/Oreag`. The proprietary license terms remain unchanged.
+
+## Knowledge gaps (0048)
+
+The owner dashboard reads a bounded recent query sample, groups matching wording
+within each project, and flags negative feedback or uncached measured similarity
+below 0.35. GETs make no writes or provider calls. Resolve/reopen actions store
+only review metadata in `knowledge_gap_reviews`, scoped through project ownership
+and guarded by revision/evidence-version checks. New flagged evidence reopens a
+resolved group; query-log retention governs which groups are visible. See
+[Knowledge gaps](docs/knowledge-gaps.md) for grouping, limits, API and deployment.

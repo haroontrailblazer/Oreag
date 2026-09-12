@@ -5,6 +5,7 @@ import {
   ChartBarIcon as ChartBar,
   ChatTextIcon as ChatText,
   HeartbeatIcon as Heartbeat,
+  TrayIcon as Tray,
   CircleIcon as Circle,
   FileTextIcon as FileText,
   KanbanIcon as FolderKanban,
@@ -55,6 +56,7 @@ const mainNav = [
   { href: "/settings/usage", label: "Usage", icon: ChartBar },
   { href: "/query-explorer", label: "Queries", icon: ChatText },
   { href: "/knowledge-health", label: "Health", icon: Heartbeat },
+  { href: "/knowledge-gaps", label: "Knowledge gaps", icon: Tray },
 ]
 
 const statusTone: Record<Project["status"], string> = {

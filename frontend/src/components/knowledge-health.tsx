@@ -51,7 +51,10 @@ export function KnowledgeHealthLoading() {
 function HealthDetail({ project }: { project: ProjectHealth }) {
   const issues = healthIssues(project)
   return <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6 pt-2">
-    <StateBadge project={project} />
+    <div className="flex flex-wrap items-center gap-2">
+      <StateBadge project={project} />
+      <Button asChild variant="outline" size="sm"><Link href={`/knowledge-gaps?project=${encodeURIComponent(project.id)}`}>Review knowledge gaps<ArrowRightIcon className="size-4" /></Link></Button>
+    </div>
     <dl className="grid grid-cols-2 gap-3">
       {[
         ["Current files", project.current_files], ["Searchable files", project.searchable_files],

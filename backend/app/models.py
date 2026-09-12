@@ -587,6 +587,23 @@ class QueryLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class KnowledgeGapReview(Base):
+    """Review state only; questions and feedback remain in retained query logs."""
+
+    __tablename__ = "knowledge_gap_reviews"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    question_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    status: Mapped[str] = mapped_column(Text, default="open")
+    note: Mapped[str | None] = mapped_column(NulSafeText)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_through_id: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SuspendedAccount(Base):
     """Operator kill switch: an owner listed here has every project's public
     API traffic rejected (403). Inserted manually - there is no UI."""
