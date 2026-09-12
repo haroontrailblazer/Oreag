@@ -1,9 +1,11 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
+import { usePathname, useSearchParams } from "next/navigation"
 import useSWR from "swr"
-import { ArrowRightIcon, MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr"
+import { ArrowRightIcon, ChatTextIcon, MagnifyingGlassIcon, WarningCircleIcon } from "@phosphor-icons/react/dist/ssr"
+import { FailedRequestExplorer } from "@/components/failed-request-explorer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -48,6 +50,21 @@ function QueryDetail({ id }: { id: string }) {
 }
 
 export function QueryExplorer() {
+  const params = useSearchParams()
+  const pathname = usePathname()
+  const view = params.get("view") === "failures" ? "failures" : "queries"
+  function viewHref(next: string) {
+    const updated = new URLSearchParams(params.toString())
+    if (next === "failures") updated.set("view", "failures"); else updated.delete("view")
+    return `${pathname}${updated.size ? `?${updated}` : ""}`
+  }
+  const navigation = <nav aria-label="Request history view" className="inline-flex h-9 max-w-full items-center gap-1 rounded-lg bg-muted p-[3px]">{[
+    { value: "queries", label: "Queries", icon: ChatTextIcon }, { value: "failures", label: "Failed requests", icon: WarningCircleIcon },
+  ].map(({ value, label, icon: Icon }) => <Button key={value} variant="ghost" size="sm" asChild className={view === value ? "h-7 bg-background text-foreground shadow-xs dark:bg-input/30" : "h-7 text-muted-foreground"}><Link href={viewHref(value)} replace scroll={false} aria-current={view === value ? "page" : undefined}><Icon aria-hidden="true" />{label}</Link></Button>)}</nav>
+  return view === "failures" ? <FailedRequestExplorer navigation={navigation} /> : <QueryHistory navigation={navigation} />
+}
+
+function QueryHistory({ navigation }: { navigation: ReactNode }) {
   const [filters, setFilters] = useState<QueryFilters>(DEFAULT_QUERY_FILTERS)
   const [search, setSearch] = useState("")
   const [cursors, setCursors] = useState<string[]>([])
@@ -98,6 +115,7 @@ export function QueryExplorer() {
       </div>
       <p className="col-span-2 text-xs text-muted-foreground md:text-sm">Monitor API queries and Playground tests: latency, caching, and feedback.</p>
     </header>
+    <div className="shrink-0">{navigation}</div>
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-0.5 pb-3">
       {/* Natural height for short lists; only the rows shrink and scroll when
           the card reaches the space left below the filters, like FilesTab. */}
@@ -114,7 +132,7 @@ export function QueryExplorer() {
         </div>
         <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-4 py-3"><span className="text-xs text-muted-foreground">Page {cursors.length + 1}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={!cursors.length || isLoading} onClick={() => setCursors(current => current.slice(0, -1))}>Previous</Button><Button size="sm" variant="outline" disabled={!data?.next_cursor || isLoading || !!error || search !== filters.search} onClick={() => { if (data?.next_cursor) setCursors(current => [...current, data.next_cursor!]) }}>Next</Button></div></footer>
       </section>
-      <p className="shrink-0 px-1 text-xs leading-5 text-muted-foreground">Failed requests and other API operations are not included. Times are shown in your local timezone.</p>
+      <p className="shrink-0 px-1 text-xs leading-5 text-muted-foreground">Open Failed requests for recorded rejections, errors, and interrupted streams. Times are shown in your local timezone.</p>
     </div>
     <Sheet open={selected !== null} onOpenChange={open => { if (!open) setSelected(null) }}><SheetContent side="right" className="w-full max-w-full bg-background sm:w-[540px]" onCloseAutoFocus={event => { event.preventDefault(); triggerRef.current?.focus() }}><SheetHeader className="p-6 pr-12"><SheetTitle className="text-lg">Query details</SheetTitle><SheetDescription>Recorded question and performance measurements.</SheetDescription></SheetHeader>{selected && <QueryDetail key={selected} id={selected} />}</SheetContent></Sheet>
   </div>

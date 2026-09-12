@@ -27,6 +27,7 @@ export function QueryExplorerLoading() {
       <div className="flex w-[min(52vw,16rem)] min-w-0 items-center gap-2"><Skeleton className="h-8 min-w-0 flex-1" /><Skeleton className="size-8 shrink-0" /></div>
       <p className="col-span-2 text-xs text-muted-foreground md:text-sm">Monitor API queries and Playground tests: latency, caching, and feedback.</p>
     </header>
+    <Skeleton className="h-9 w-60 max-w-full shrink-0 rounded-lg" />
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-0.5 pb-3">
       <div className="flex max-h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-3"><h2 className="text-sm font-medium">Recent queries</h2><Skeleton className="h-3 w-36" /></div>
