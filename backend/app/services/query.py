@@ -31,6 +31,7 @@ from . import memory as memory_service
 from . import query_cache
 from . import retrieval
 from . import semantic_cache
+from .document_insights import source_attribution
 from .tracing import observed_generate
 
 logger = logging.getLogger(__name__)
@@ -644,6 +645,7 @@ def run_query(
                 cache_layer=cache_layer,
                 retrieval_similarity=_mean_similarity(result.sources),
                 cache_similarity=cache_similarity,
+                document_sources=source_attribution(_mark_cited(result.answer, result.sources)),
             )
             db.add(query_log)
             db.commit()
@@ -1052,6 +1054,7 @@ def run_query_stream(
             cache_layer=cache_layer,
             retrieval_similarity=_mean_similarity(final.sources),
             cache_similarity=cache_similarity,
+            document_sources=source_attribution(_mark_cited(final.answer, final.sources)),
         )
         db.add(query_log)
         db.commit()

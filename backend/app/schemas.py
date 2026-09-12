@@ -459,6 +459,7 @@ class QueryRequest(BaseModel):
 
 
 class SourceChunk(BaseModel):
+    file_id: str | None = None
     filename: str
     page_number: int | None
     chunk_index: int

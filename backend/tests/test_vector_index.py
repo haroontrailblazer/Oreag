@@ -330,7 +330,7 @@ class TestAnnSqlShape:
         ann = str(retrieval.ann_semantic_sql(1536))
         assert _result_columns(ann) == _result_columns(exact)
         assert _result_columns(exact) == [
-            "id", "content", "page_number", "chunk_index", "filename", "similarity",
+            "id", "content", "page_number", "chunk_index", "filename", "file_id", "similarity",
         ]
         assert _bind_params(ann) == _bind_params(exact) == {
             "qvec", "project_id", "limit",
@@ -682,6 +682,7 @@ class TestExactStatementsAreUntouched:
         sql = " ".join(str(retrieval.SEMANTIC_SQL).split())
         assert sql == (
             "SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename, "
+            "CAST(f.id AS text) AS file_id, "
             "1 - (c.embedding <=> CAST(:qvec AS vector)) AS similarity "
             "FROM chunks c JOIN files f ON f.id = c.file_id "
             "WHERE c.project_id = :project_id "

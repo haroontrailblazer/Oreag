@@ -47,7 +47,7 @@ RRF_K = 60
 
 SEMANTIC_SQL = text(
     """
-    SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename,
+    SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename, CAST(f.id AS text) AS file_id,
            1 - (c.embedding <=> CAST(:qvec AS vector)) AS similarity
     FROM chunks c
     JOIN files f ON f.id = c.file_id
@@ -106,7 +106,7 @@ _TSV_QUERY = (
 # from "this corpus had no keyword matches".
 LEXICAL_SQL = text(
     f"""
-    SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename,
+    SELECT c.id, c.content, c.page_number, c.chunk_index, f.filename, CAST(f.id AS text) AS file_id,
            1 - (c.embedding <=> CAST(:qvec AS vector)) AS similarity
     FROM chunks c
     JOIN files f ON f.id = c.file_id
@@ -277,7 +277,7 @@ _ANN_SEMANTIC_TEMPLATE = """
         ORDER BY c.embedding::vector({dim}) <=> CAST(:qvec AS vector({dim}))
         LIMIT :limit
     )
-    SELECT nn.id, nn.content, nn.page_number, nn.chunk_index, f.filename,
+    SELECT nn.id, nn.content, nn.page_number, nn.chunk_index, f.filename, CAST(f.id AS text) AS file_id,
            1 - nn.distance AS similarity
     FROM nn JOIN files f ON f.id = nn.file_id
     ORDER BY nn.distance

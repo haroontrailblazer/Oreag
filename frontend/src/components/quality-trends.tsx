@@ -3,15 +3,16 @@
 import { useState } from "react"
 import Link from "next/link"
 import useSWR from "swr"
-import { ArrowRightIcon, ArrowsClockwiseIcon, ChartLineUpIcon, ChatCircleTextIcon, FlaskIcon, ThumbsUpIcon, FilesIcon } from "@phosphor-icons/react/dist/ssr"
+import { ArrowRightIcon, ArrowsClockwiseIcon, ChartLineUpIcon, ChatCircleTextIcon, FlaskIcon } from "@phosphor-icons/react/dist/ssr"
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { FilterSelect } from "@/components/filter-select"
+import { LiveQualityCharts } from "@/components/live-quality-charts"
 import { fetcher, isSessionExpired } from "@/lib/api"
-import { evaluationChange, qualityChange, qualityTrendsKey, type EvaluationTrendsReport, type QualityTrendsReport } from "@/lib/quality-trends"
+import { evaluationChange, qualityTrendsKey, type EvaluationTrendsReport, type QualityTrendsReport } from "@/lib/quality-trends"
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
 const percent = (value: number | null) => value == null ? "Not measured" : `${number.format(value)}%`
@@ -41,32 +42,14 @@ function TrendChart({ values, label, color }: { values: { date: string; value: n
 function LiveTrends({ days, project }: { days: string; project: string }) {
   const { data, error, mutate, isValidating } = useSWR<QualityTrendsReport>(qualityTrendsKey(days, project), fetcher, { refreshInterval: 60_000 })
   const current = data?.current
-  if (data && current?.queries === 0 && !data.limited) return <div className="space-y-3">
-    {error && !isSessionExpired(error) && <Retry stale onRetry={() => void mutate()} />}
-    <div className="space-y-3 rounded-xl border p-8 text-center"><ChatCircleTextIcon className="mx-auto size-7 text-muted-foreground" aria-hidden="true" /><p className="text-sm font-medium">No recorded queries in these {days} complete days</p><p className="text-xs leading-5 text-muted-foreground">Trends use completed UTC days. Today’s activity appears tomorrow.</p><Button size="sm" variant="outline" disabled={isValidating} onClick={() => void mutate()}>Refresh trends</Button></div>
-  </div>
   return <div className="space-y-4">
     {error && !isSessionExpired(error) && <Retry stale={!!data} onRetry={() => void mutate()} />}
     {!data && !error && <Loading />}
     {data && current && <>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><p>{day(current.start)} – {day(new Date(new Date(current.end).getTime() - 86400000).toISOString())} · Complete UTC days · {number.format(current.queries)} {current.complete ? "queries" : "sampled queries"}</p><Button size="icon-sm" variant="ghost" aria-label="Refresh live quality trends" disabled={isValidating} onClick={() => void mutate()}><ArrowsClockwiseIcon className="size-4" /></Button></div>
       {data.limited && <p className="rounded-lg border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">Showing the latest {data.scan_limit.toLocaleString()} retained queries. Comparisons are hidden where history is incomplete. Choose a project or shorter period for more coverage.</p>}
-      <div className="grid gap-4 xl:grid-cols-2">
-        <article className="min-w-0 space-y-3 rounded-xl border p-4">
-          <h3 className="flex items-center gap-2 text-xs font-medium"><ThumbsUpIcon className="size-4 text-muted-foreground" aria-hidden="true" />Helpful feedback</h3>
-          <p className="text-2xl font-semibold tracking-tight tabular-nums">{current.rated ? percent(current.helpful_percent) : "No ratings yet"}</p>
-          <p className="text-xs text-muted-foreground">{current.helpful} helpful out of {current.rated} rated answers · {current.queries - current.rated} unrated</p>
-          <p className="text-xs leading-5 text-muted-foreground">{change(qualityChange(current, data.previous, "helpful_percent"), `vs previous ${days} days`)}</p>
-          <TrendChart label="Helpful feedback" color="var(--chart-1)" values={data.daily.map(row => ({ date: row.date, value: row.complete ? row.helpful_percent : null }))} />
-        </article>
-        <article className="min-w-0 space-y-3 rounded-xl border p-4">
-          <h3 className="flex items-center gap-2 text-xs font-medium"><FilesIcon className="size-4 text-muted-foreground" aria-hidden="true" />Low document matches</h3>
-          <p className="text-2xl font-semibold tracking-tight tabular-nums">{current.measured ? percent(current.low_match_percent) : "No measurements"}</p>
-          <p className="text-xs text-muted-foreground">{current.low_match} of {current.measured} measured document queries · Lower is better</p>
-          <p className="text-xs leading-5 text-muted-foreground">{change(qualityChange(current, data.previous, "low_match_percent"), `vs previous ${days} days`)}</p>
-          <TrendChart label="Low document matches" color="var(--chart-3)" values={data.daily.map(row => ({ date: row.date, value: row.complete ? row.low_match_percent : null }))} />
-        </article>
-      </div>
+      {current.queries === 0 && !data.limited && <p className="rounded-lg bg-muted/20 p-3 text-xs leading-5 text-muted-foreground">No recorded queries in these {days} complete days. Today’s activity appears tomorrow. Preview chart shows an example of helpful feedback.</p>}
+      <LiveQualityCharts key={`${project}:${days}`} data={data} days={days} />
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Document matches are a review signal, not an answer-accuracy score.</p><Button asChild variant="outline" size="sm"><Link href={`/knowledge-gaps${project ? `?project=${encodeURIComponent(project)}` : ""}`}>Review gaps<ArrowRightIcon /></Link></Button></div>
       <details className="text-xs leading-5 text-muted-foreground"><summary className="w-fit cursor-pointer rounded-sm font-medium text-foreground focus-visible:outline-2">Daily measurements</summary><div className="mt-3 max-h-72 overflow-auto rounded-lg border"><table className="w-full text-left text-xs"><caption className="sr-only">Daily quality measurements in UTC</caption><thead><tr className="border-b bg-muted/30"><th className="p-3">Day</th><th className="p-3">Helpful / rated</th><th className="p-3">Low / measured</th></tr></thead><tbody>{data.daily.map(row => <tr key={row.date} className="border-b last:border-0"><td className="whitespace-nowrap p-3">{day(row.date)}</td><td className="p-3">{row.complete ? `${row.helpful} / ${row.rated}` : "Incomplete"}</td><td className="p-3">{row.complete ? `${row.low_match} / ${row.measured}` : "Incomplete"}</td></tr>)}</tbody></table></div></details>
       <details className="text-xs leading-5 text-muted-foreground"><summary className="w-fit cursor-pointer rounded-sm font-medium text-foreground focus-visible:outline-2">How live trends work</summary><div className="mt-2 space-y-2"><p>Feedback uses current ratings on queries created in each period. Unrated answers are excluded from the helpful percentage. Comparisons need at least five relevant measurements in each equal period. Today is excluded; values reflect retained query history.</p><p>Low document matches are uncached queries with similarity below {data.weak_similarity_threshold.toFixed(2)}. Recognized casual conversation and obvious keyboard noise are excluded. {current.document_queries - current.measured} document queries have no similarity measurement. Missing measurements leave gaps in the chart.</p><p>These are observed changes, not proof of improvement or regression. Traffic, models, documents, and who submits feedback can change the results.</p></div></details>

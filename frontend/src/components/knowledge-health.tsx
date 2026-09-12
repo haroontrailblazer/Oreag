@@ -3,6 +3,7 @@
 import { useRef, useState } from "react"
 import { OperationsPanel } from "@/components/operations-panel"
 import { QualityTrends } from "@/components/quality-trends"
+import { DocumentInsights } from "@/components/document-insights"
 import Link from "next/link"
 import useSWR from "swr"
 import { ArrowRightIcon, HeartbeatIcon, MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr"
@@ -141,6 +142,7 @@ export function KnowledgeHealthDashboard() {
       {data && <div className="flex min-h-0 flex-1 flex-col gap-3 md:block md:space-y-4">
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-3 md:space-y-4 md:overflow-visible md:pb-0" role="region" aria-label="Health results" tabIndex={0}>
         <QualityTrends projects={projects} />
+        <DocumentInsights projects={projects} />
         <section aria-label="Project health" className="overflow-hidden rounded-xl border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
             <h2 className="text-sm font-medium">Projects</h2>

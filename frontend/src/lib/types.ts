@@ -183,6 +183,7 @@ export interface ApiKeyCreated extends ApiKey {
 }
 
 export interface SourceChunk {
+  file_id?: string | null
   filename: string
   page_number: number | null
   chunk_index: number

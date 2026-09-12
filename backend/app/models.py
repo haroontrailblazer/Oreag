@@ -584,7 +584,20 @@ class QueryLog(Base):
     feedback_note: Mapped[str | None] = mapped_column(NulSafeText)
     feedback_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timeline: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    # IDs and citation flags only, never historical answer/source text.
+    # None is unmeasured (including older cache payloads); [] is measured empty.
+    document_sources: Mapped[list | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DocumentReview(Base):
+    __tablename__ = "document_reviews"
+
+    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("files.id", ondelete="CASCADE"), primary_key=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    content_signature: Mapped[str] = mapped_column(Text)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
 
 
 class KnowledgeGapReview(Base):
