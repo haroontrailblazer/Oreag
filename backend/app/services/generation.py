@@ -102,7 +102,9 @@ def policy_for(project) -> tuple[str | None, str | None]:
     )
 
 
-def build_user_prompt(question: str, sources: list[dict]) -> str:
+def build_user_prompt(
+    question: str, sources: list[dict], original_question: str | None = None,
+) -> str:
     def _label(s: dict) -> str:
         page = s.get("page_number")
         return s["filename"] + (f" (page {page})" if page is not None else "")
@@ -110,6 +112,14 @@ def build_user_prompt(question: str, sources: list[dict]) -> str:
     context = "\n\n".join(
         f"[{i + 1}] {_label(s)}:\n{s['content']}" for i, s in enumerate(sources)
     )
+    if original_question is not None:
+        return (
+            f"Context:\n{context}\n\nResolved conversation topic: {question}\n\n"
+            "Answer the current request below. The resolved topic supplies context; "
+            "keep the current request's action, detail, language and format, even "
+            "if the rewrite omitted them.\n\n"
+            f"Current user request: {original_question}"
+        )
     return f"Context:\n{context}\n\nQuestion: {question}"
 
 
@@ -251,6 +261,7 @@ def generate_answer(
     depth: str = "short",
     llm_fn=None,
     usage_acc=None,
+    original_question: str | None = None,
 ) -> str:
     # ``usage_acc`` (any object with .add(TokenUsage)) receives what this call
     # consumed - query.py passes its per-request accumulator so the final
@@ -286,7 +297,7 @@ def generate_answer(
         # and a project that named none keeps today's instruction.
         language = cross_lingual.answer_language_for(
             project,
-            question,
+            original_question if original_question is not None else question,
             sources,
             llm=llm,
             # `.add`, not the accumulator itself: usage_acc is an object with
@@ -298,7 +309,7 @@ def generate_answer(
             fallback=language,
         )
     system_prompt = system_prompt_for(depth, language, disclaimer)
-    user_prompt = build_user_prompt(question, sources)
+    user_prompt = build_user_prompt(question, sources, original_question)
     if pinned_always:
         # "Always this language" has to beat the question's own language, and
         # in the system prompt alone it does not - see enforce_language.
@@ -332,6 +343,7 @@ def generate_answer_stream(
     depth: str = "short",
     llm_fn=None,
     usage_acc=None,
+    original_question: str | None = None,
 ):
     """Yield the answer as text deltas. Providers that implement ``generate_stream``
     (OpenAI and every OpenAI-compatible vendor) stream token by token; any other
@@ -374,7 +386,7 @@ def generate_answer_stream(
         # and a project that named none keeps today's instruction.
         language = cross_lingual.answer_language_for(
             project,
-            question,
+            original_question if original_question is not None else question,
             sources,
             llm=llm,
             # `.add`, not the accumulator itself: usage_acc is an object with
@@ -386,7 +398,7 @@ def generate_answer_stream(
             fallback=language,
         )
     system_prompt = system_prompt_for(depth, language, disclaimer)
-    user_prompt = build_user_prompt(question, sources)
+    user_prompt = build_user_prompt(question, sources, original_question)
     if pinned_always:
         # "Always this language" has to beat the question's own language, and
         # in the system prompt alone it does not - see enforce_language.

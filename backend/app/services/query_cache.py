@@ -20,6 +20,7 @@ On top of a backend:
     in-memory backend it stays per-process, as before.
   * ``ConversationStore`` - server-side chat memory keyed by ``conversation_id``.
 """
+import hashlib
 import json
 import logging
 import threading
@@ -37,6 +38,10 @@ logger = logging.getLogger(__name__)
 # 20-turn history with 1 turn because one read timed out would be data loss.
 UNAVAILABLE = object()
 
+# Invalidate answers admitted by the former topic-only semantic policy in both
+# stores without flushing shared Redis or deleting conversation history.
+ANSWER_CACHE_VERSION = "request-v2"
+
 
 def normalize_question(question: str) -> str:
     """Canonical form of a question for the exact-match (L1) cache.
@@ -50,17 +55,24 @@ def normalize_question(question: str) -> str:
     return " ".join(question.lower().split()).strip(" ?!.,;:")
 
 
-def cache_key(project, question: str, top_k: int, content_signature: str) -> str:
+def cache_key(
+    project, question: str, top_k: int, content_signature: str,
+    history: list[dict] | None = None,
+) -> str:
     """Build the cache key for a query.
 
     Everything that can change the answer is part of the key: the project, the
     chat + embedding models, top_k, a signature of the indexed content, and the
-    normalized question (see ``normalize_question``), so trivial case/whitespace/
-    punctuation differences share an entry.
+    normalized original question (see ``normalize_question``), and the recent
+    conversation context. The caller supplies exactly the turns used to rewrite.
     """
-    normalized = normalize_question(question)
-    return "|".join(
+    # Use the ORIGINAL request, never the lossy LLM rewrite. Preserve the exact
+    # context the rewrite sees, including assistant answers and turn order.
+    # JSON avoids delimiter collisions; hashing keeps Redis keys bounded and
+    # prevents whole conversation transcripts appearing in key listings.
+    payload = json.dumps(
         [
+            ANSWER_CACHE_VERSION,
             str(project.id),
             project.llm_provider,
             project.llm_model,
@@ -68,9 +80,12 @@ def cache_key(project, question: str, top_k: int, content_signature: str) -> str
             project.embedding_model,
             str(top_k),
             content_signature,
-            normalized,
-        ]
+            normalize_question(question),
+            history or [],
+        ],
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     )
+    return f"{project.id}:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
 
 class InMemoryBackend:
@@ -594,7 +609,11 @@ class QueryCache:
         raw = self._backend.get(self._namespaced(key))
         if raw is None or raw is UNAVAILABLE:
             return None
-        return self._deserialize(raw)
+        try:
+            return self._deserialize(raw)
+        except (ValueError, TypeError, KeyError):
+            logger.warning("Unreadable cached answer; treating it as a miss")
+            return None
 
     def set(self, key: str, value: Any) -> None:
         self._backend.set(self._namespaced(key), self._serialize(value), self._ttl)
@@ -684,21 +703,33 @@ class ConversationStore:
     def _namespaced(scope: str, conversation_id: str) -> str:
         return f"conv:{scope}:{conversation_id}"
 
-    def _read(self, scope: str, conversation_id: str) -> tuple[list[dict], bool]:
+    def read_history(self, scope: str, conversation_id: str) -> tuple[list[dict], bool]:
         """Returns (history, degraded). ``degraded`` means the backend failed -
         the caller must not write back what may be a truncated view."""
         raw = self._backend.get(self._namespaced(scope, conversation_id))
         if raw is UNAVAILABLE:
             return [], True
-        return (json.loads(raw) if raw else []), False
+        try:
+            history = json.loads(raw) if raw else []
+            if not isinstance(history, list) or any(
+                not isinstance(turn, dict)
+                or not isinstance(turn.get("question"), str)
+                or not isinstance(turn.get("answer"), str)
+                for turn in history
+            ):
+                raise ValueError("Invalid conversation history")
+            return history, False
+        except (ValueError, TypeError):
+            logger.warning("Unreadable conversation history")
+            return [], True
 
     def get_history(self, scope: str, conversation_id: str) -> list[dict]:
-        return self._read(scope, conversation_id)[0]
+        return self.read_history(scope, conversation_id)[0]
 
     def append_turn(
         self, scope: str, conversation_id: str, question: str, answer: str
     ) -> list[dict]:
-        history, degraded = self._read(scope, conversation_id)
+        history, degraded = self.read_history(scope, conversation_id)
         history.append({"question": question, "answer": answer})
         history = history[-self._max_turns :]
         if degraded:

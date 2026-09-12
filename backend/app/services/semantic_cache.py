@@ -3,9 +3,9 @@
 The Redis CAG cache (L1) only hits when the normalized question text matches
 exactly. This layer catches the far more common case of *similar* questions
 from different users: each answered question is stored with its embedding, and
-a new question is served from cache when its cosine similarity to a cached one
-clears ``settings.semantic_cache_min_similarity``; below the threshold the
-query runs for real.
+a standalone question is served only when similarity clears the threshold AND
+the request wording passes a conservative equivalence check. Topic similarity
+alone says nothing about whether the user wants code, detail, or a definition.
 
 Everything is best-effort and never raises: a cache problem must degrade to
 "just answer normally", not break the query path. Lookup returns the query
@@ -13,6 +13,8 @@ vector alongside the hit so a subsequent store() never re-embeds.
 """
 import dataclasses
 import logging
+import math
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
@@ -24,6 +26,7 @@ from ..providers import resolver
 from ..providers.base import ProviderUnavailableError
 from ..providers.registry import get_embedder
 from . import agentic
+from .query_cache import normalize_question
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,7 @@ logger = logging.getLogger(__name__)
 # maintenance would be pure cost.
 _LOOKUP_SQL = text(
     """
-    SELECT result, 1 - (embedding <=> CAST(:qvec AS vector)) AS similarity
+    SELECT question, result, 1 - (embedding <=> CAST(:qvec AS vector)) AS similarity
     FROM semantic_query_cache
     WHERE project_id = :project_id
       AND content_signature = :signature
@@ -50,6 +53,34 @@ _LOOKUP_SQL = text(
     LIMIT 1
     """
 )
+
+
+def _request_identity(question: str) -> str:
+    """Allow only small, known wording variations without an extra model call.
+
+    Keep subject order, qualifiers, numbers, negation, identifiers and output
+    requests intact. No bag-of-words comparison or fuzzy spelling: those can
+    turn a framework/version change into a hit. Unrecognised paraphrases simply
+    generate fresh answers, including languages without a known wrapper here.
+    """
+    question = normalize_question(question)
+    question = re.sub(r"^(?:(?:can|could|would) you (?:please )?|please )", "", question)
+    question = re.sub(r"[, ]+please$", "", question)
+    # These definition requests can share an answer only when the ENTIRE
+    # remaining subject/constraints match. Other actions stay literal.
+    match = re.fullmatch(r"(?:what is|what are|define|explain|describe|tell me about) (.+)", question)
+    if match:
+        subject = re.sub(r" to me$", "", match.group(1))
+        return "definition:" + subject
+    return "literal:" + question
+
+
+def equivalent_request(question: str, cached_question: str) -> bool:
+    return bool(question.strip() and cached_question.strip()) and (
+        agentic.detect_depth(question) == agentic.detect_depth(cached_question)
+    ) and (
+        _request_identity(question) == _request_identity(cached_question)
+    )
 
 
 def _embed_question(db: Session, project: Project, question: str) -> list[float] | None:
@@ -107,15 +138,25 @@ def lookup(
                 "top_k": top_k,
             },
         ).first()
-        if row is None or float(row.similarity) < settings.semantic_cache_min_similarity:
+        if row is None:
             return None, vector, None
-        similarity = round(float(row.similarity), 4)
+        score = float(row.similarity)
+        if (
+            not math.isfinite(score)
+            or score < settings.semantic_cache_min_similarity
+            or not equivalent_request(question, row.question)
+        ):
+            return None, vector, None
+        result = agentic.AgenticResult(**row.result)
+        if result.needs_clarification or not result.answer:
+            return None, vector, None
+        similarity = round(score, 4)
         logger.info(
             "Semantic cache hit (similarity %.3f) for project %s",
             similarity,
             project.id,
         )
-        return agentic.AgenticResult(**row.result), vector, similarity
+        return result, vector, similarity
     except Exception:
         logger.exception("Semantic cache lookup failed; answering normally")
         db.rollback()

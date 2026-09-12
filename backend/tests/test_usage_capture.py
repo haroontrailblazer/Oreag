@@ -122,6 +122,35 @@ def _wire(monkeypatch, llm):
 
 
 class TestTokensSummedAcrossCalls:
+    @pytest.mark.parametrize("streaming", [False, True])
+    def test_context_exact_hit_saves_condense_tokens_too(self, monkeypatch, streaming):
+        llm = MeteredLLM()
+        query = _wire(monkeypatch, llm)
+        project = _project()
+        usages = []
+        for cid in ["original-context", "identical-context"]:
+            query._conversations.append_turn(
+                str(project.id), cid, "what is deep learning", "An ML subfield.",
+            )
+            usage = {}
+            if streaming:
+                events = list(query.run_query_stream(
+                    FakeDB([10, 0]), project, "explain that in more detail", None,
+                    conversation_id=cid, usage_out=usage,
+                ))
+                assert events[-1]["type"] == "done"
+            else:
+                query.run_query(
+                    FakeDB([10, 0]), project, "explain that in more detail", None,
+                    None, conversation_id=cid, usage_out=usage,
+                )
+            usages.append(usage)
+        assert len(llm.calls) == 3
+        assert usages[0]["usage"] == TokenUsage(300, 30, "gpt-4o-mini")
+        assert usages[1]["cache_layer"] == "l1"
+        assert usages[1]["usage"].known is False
+        assert usages[1]["saved"] == TokenUsage(300, 30, "gpt-4o-mini")
+
     def test_condense_plan_and_generate_sum_into_one_figure(self, monkeypatch):
         llm = MeteredLLM()
         query = _wire(monkeypatch, llm)

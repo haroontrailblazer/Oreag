@@ -247,7 +247,11 @@ CONDENSE_SYSTEM_PROMPT = (
     "Given a conversation and a follow-up message, rewrite the follow-up as a "
     "standalone question that can be understood on its own. Resolve references "
     "like 'it', 'that', 'this', 'the previous one'. If the follow-up is already "
-    "standalone, return it unchanged. Output only the rewritten question - no "
+    "standalone, return it unchanged. Preserve the user's requested action and "
+    "every constraint: code or example programs, more detail, brevity, framework, "
+    "language, version, and negation. A request for a program must remain a "
+    "request for a program, not become a general explanation of the topic. "
+    "Output only the rewritten question - no "
     "preamble, no quotes."
 )
 

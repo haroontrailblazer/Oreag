@@ -48,6 +48,21 @@ class _Clock:
 
 
 class TestCacheKey:
+    def test_original_request_and_ordered_context_are_part_of_key(self):
+        from app.services.query_cache import cache_key
+
+        project = _project()
+        history = [{"question": "what is pytorch", "answer": "A tensor library."}]
+        key = cache_key(project, "give example program", 5, "v2", history)
+        assert key != cache_key(project, "explain in more detailed way", 5, "v2", history)
+        assert key != cache_key(project, "give example program", 5, "v2", [])
+        assert key != cache_key(project, "give example program", 5, "v2", [
+            {"question": "what is pytorch", "answer": "A different earlier answer."},
+        ])
+        assert key == cache_key(project, "give example program", 5, "v2", list(history))
+        assert "tensor library" not in key
+        assert len(key) < 110
+
     def test_normalizes_case_and_whitespace(self):
         from app.services.query_cache import cache_key
 

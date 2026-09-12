@@ -6,6 +6,8 @@ database's job; these tests pin the decision logic around it.
 import uuid
 from types import SimpleNamespace
 
+import pytest
+
 from app.models import Project
 from app.services import semantic_cache
 from app.services.agentic import AgenticResult
@@ -49,14 +51,16 @@ class _LookupDB:
 class TestSemanticLookup:
     def test_hit_at_or_above_threshold(self, monkeypatch):
         monkeypatch.setattr(semantic_cache, "_embed_question", lambda db, p, q: [0.1])
-        row = SimpleNamespace(result=_result_dict(), similarity=0.82)
+        row = SimpleNamespace(
+            question="define deep learning", result=_result_dict(), similarity=0.94,
+        )
         hit, vector, similarity = semantic_cache.lookup(
             _LookupDB(row), _project(), "what is deep learning", 5, "3:0"
         )
         assert isinstance(hit, AgenticResult)
         assert hit.answer == "cached answer"
         assert vector == [0.1]
-        assert similarity == 0.82
+        assert similarity == 0.94
 
     def test_miss_below_threshold_still_returns_vector(self, monkeypatch):
         monkeypatch.setattr(semantic_cache, "_embed_question", lambda db, p, q: [0.1])
@@ -69,11 +73,45 @@ class TestSemanticLookup:
         assert similarity is None
 
     def test_threshold_default(self):
-        # 0.75: strict enough that different topics don't collide, loose
-        # enough that rephrasings of one question still hit.
-        from app.config import settings
+        from app.config import Settings
 
-        assert settings.semantic_cache_min_similarity == 0.75
+        assert Settings.model_fields["semantic_cache_min_similarity"].default == 0.90
+
+    @pytest.mark.parametrize(("question", "cached_question"), [
+        ("give example program", "how to build a basic neural network"),
+        ("explain in more detailed way", "how to build a basic neural network"),
+        ("how to build a basic neural network in pytorch", "how to build a basic neural network"),
+        ("neural network in pytorch", "neural network in tensorflow"),
+        ("explain deep learning in detail", "what is deep learning"),
+        ("explain deep learning", "what is deep learning"),
+        ("explain deep learning in Tamil", "explain deep learning in English"),
+        ("delete files without backups", "delete files with backups"),
+        ("what is not supported", "what is supported"),
+        ("compare version 2.1 to 2.2", "compare version 2.2 to 2.1"),
+        ("can editors remove admins", "can admins remove editors"),
+        ("¿Cómo instalar PyTorch?", "¿Cómo instalar TensorFlow?"),
+    ])
+    def test_topic_similarity_cannot_override_a_changed_request(self, monkeypatch, question, cached_question):
+        monkeypatch.setattr(semantic_cache, "_embed_question", lambda *a: [0.1])
+        # Even an operator retaining the old low threshold cannot bypass the guard.
+        monkeypatch.setattr(semantic_cache.settings, "semantic_cache_min_similarity", 0.75)
+        row = SimpleNamespace(question=cached_question, result=_result_dict(), similarity=0.99)
+        hit, vector, similarity = semantic_cache.lookup(_LookupDB(row), _project(), question, 5, "v2")
+        assert hit is None
+        assert vector == [0.1]
+        assert similarity is None
+
+    @pytest.mark.parametrize("score", [0.76, 0.83, 0.84, float("nan")])
+    def test_loose_or_invalid_similarity_is_a_miss(self, monkeypatch, score):
+        monkeypatch.setattr(semantic_cache, "_embed_question", lambda *a: [0.1])
+        monkeypatch.setattr(semantic_cache.settings, "semantic_cache_min_similarity", 0.90)
+        row = SimpleNamespace(question="define deep learning", result=_result_dict(), similarity=score)
+        hit, vector, similarity = semantic_cache.lookup(_LookupDB(row), _project(), "what is deep learning", 5, "v2")
+        assert (hit, vector, similarity) == (None, [0.1], None)
+
+    @pytest.mark.parametrize("question", ["Please define deep learning", "Could you define deep learning?", "tell me about deep learning, please"])
+    def test_small_wording_changes_can_still_reuse_an_answer(self, question):
+        assert semantic_cache.equivalent_request(question, "what is deep learning")
 
     def test_lookup_never_raises(self, monkeypatch):
         monkeypatch.setattr(semantic_cache, "_embed_question", lambda db, p, q: [0.1])

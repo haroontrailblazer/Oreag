@@ -252,7 +252,7 @@ def _answer_signature(project, db=None, question: str | None = None) -> str:
     already compare this one signature for equality, so extending it costs
     nothing and needs no migration on a high-churn table.
     """
-    parts = [f"v{project.content_version}"]
+    parts = [query_cache.ANSWER_CACHE_VERSION, f"v{project.content_version}"]
     # getattr keeps this working for the lightweight project stand-ins used in
     # tests, which do not carry the 0032 columns.
     sim = getattr(project, "min_similarity", None)
@@ -483,36 +483,35 @@ def run_query(
     # Conversation memory: load prior turns and rewrite a follow-up like
     # "summarize that" into a standalone question before retrieval. Empty history
     # (or no conversation) leaves the question untouched and costs nothing.
-    history = (
-        _conversations.get_history(project_key, conversation_id)
+    history, history_unavailable = (
+        _conversations.read_history(project_key, conversation_id)
         if conversation_id
-        else []
+        else ([], False)
     )
+    history = history[-settings.conversation_history_turns:]
+    # A missing context read must not look like a new standalone request or
+    # publish an answer into the shared cache under an incomplete context.
+    bypass_cache = bypass_cache or history_unavailable
+    semantic_allowed = not history and not history_unavailable
 
     try:
-        agentic_question = (
-            _llm_step(
-                db,
-                _llm,
-                lambda llm: agentic.condense_question(
-                    _TrackedLLM(llm, "condense-question", request_usage),
-                    history,
-                    question,
-                    settings.conversation_history_turns,
-                ),
-            )
-            if history
-            else question
-        )
-
         def compute() -> agentic.AgenticResult:
             # The compute phase gets its own subtotal alongside the request
             # total: these are the tokens a future cache hit will have SAVED,
-            # so they travel with the result into both caches. Condense is
-            # deliberately outside - it runs before the caches and is spent
-            # again on every follow-up, hit or not.
+            # so they travel with the result into both caches. Condense now
+            # happens ONLY on a miss and is included in the saved work.
             fresh_usage = _UsageAccumulator()
             compute_usage = _FanoutUsage(request_usage, fresh_usage)
+            agentic_question = (
+                _llm_step(
+                    db, _llm,
+                    lambda llm: agentic.condense_question(
+                        _TrackedLLM(llm, "condense-question", compute_usage),
+                        history, question, settings.conversation_history_turns,
+                    ),
+                )
+                if history else question
+            )
             result = agentic.run_agentic_query(
                 question=agentic_question,
                 retrieve_fn=retrieve_fn,
@@ -526,7 +525,8 @@ def run_query(
                     ),
                 ),
                 generate_fn=lambda q, srcs, depth: generation.generate_answer(
-                    db, project, q, srcs, depth, llm_fn=_llm, usage_acc=compute_usage
+                    db, project, q, srcs, depth, llm_fn=_llm, usage_acc=compute_usage,
+                    original_question=question if history else None,
                 ),
                 clarify_fn=lambda q: _llm_step(
                     db,
@@ -550,28 +550,32 @@ def run_query(
             )
 
         # Two cache layers, cheapest first. L1 (Redis/in-memory) hits when the
-        # normalized question repeats EXACTLY. L2 (pgvector) hits when a
-        # SIMILAR question was already answered - cosine similarity above the
-        # threshold reuses the cached answer, below it the query runs for real.
+        # original question and its context repeat EXACTLY. L2 (pgvector)
+        # accepts only equivalent standalone requests, never a follow-up whose
+        # rewrite may have lost the user's action or constraints.
         # Both are scoped by models + top_k + content_version, so ANY content
         # write (including in-place edits) instantly orphans stale answers.
         signature = _answer_signature(project, db, question)
         semantic_vector: list[float] | None = None
         cache_layer: str | None = None
         cache_similarity: float | None = None
+        computed_here = False
 
         def compute_and_remember() -> agentic.AgenticResult:
+            nonlocal computed_here
+            computed_here = True
             fresh = compute()
-            semantic_cache.store(
-                db, project, agentic_question, top_k, signature, fresh, semantic_vector
-            )
+            if semantic_allowed:
+                semantic_cache.store(
+                    db, project, question, top_k, signature, fresh, semantic_vector
+                )
             return fresh
 
         if bypass_cache:
             result = compute()
         else:
             key = (
-                query_cache.cache_key(project, agentic_question, top_k, signature)
+                query_cache.cache_key(project, question, top_k, signature, history)
                 if settings.query_cache_enabled
                 else None
             )
@@ -579,14 +583,16 @@ def run_query(
             if result is not None:
                 cache_layer = "l1"
             else:
-                hit, semantic_vector, cache_similarity = semantic_cache.lookup(
-                    db, project, agentic_question, top_k, signature, embed_fn=embed_query
-                )
+                hit = None
+                if semantic_allowed:
+                    hit, semantic_vector, cache_similarity = semantic_cache.lookup(
+                        db, project, question, top_k, signature, embed_fn=embed_query
+                    )
                 if semantic_vector is not None:
                     # The lookup embedded through the memo, but seed defensively in
                     # case a caller monkeypatches lookup - retrieval must never
                     # re-embed the same string.
-                    embed_memo[agentic_question] = semantic_vector
+                    embed_memo[question] = semantic_vector
                 if hit is not None:
                     result = hit
                     cache_layer = "l2"
@@ -600,6 +606,8 @@ def run_query(
                     # reason to sit on a pool slot.
                     generation.release_connection(db)
                     result = _cache.get_or_compute(key, compute_and_remember)
+                    if not computed_here:
+                        cache_layer = "l1"
                 else:
                     result = compute_and_remember()
     except ProviderUnavailableError as exc:
@@ -818,55 +826,41 @@ def run_query_stream(
                 db.rollback()
         return sources
 
-    history = (
-        _conversations.get_history(project_key, conversation_id)
+    history, history_unavailable = (
+        _conversations.read_history(project_key, conversation_id)
         if conversation_id
-        else []
+        else ([], False)
     )
+    history = history[-settings.conversation_history_turns:]
+    semantic_allowed = not history and not history_unavailable
     # signature was captured with the other Project reads in the guarded
     # pre-flight above - nothing between here and there writes content_version.
     cache_layer: str | None = None
     cache_similarity: float | None = None
     semantic_vector: list[float] | None = None
-    # Compute-phase subtotal (what a future cache hit will have saved) - see
-    # the non-streaming twin's compute() for why condense stays outside it.
+    # Compute-phase subtotal, including the condense call saved on an L1 hit.
     fresh_usage = _UsageAccumulator()
     compute_usage = _FanoutUsage(request_usage, fresh_usage)
 
     try:
-        agentic_question = (
-            _llm_step(
-                db,
-                _llm,
-                lambda llm: agentic.condense_question(
-                    _TrackedLLM(llm, "condense-question", request_usage),
-                    history,
-                    question,
-                    settings.conversation_history_turns,
-                ),
-            )
-            if history
-            else question
-        )
-
         # Same two-layer cache as run_query. A hit streams the stored text in
         # slices (so the UX is identical); a miss gathers context, then streams
         # the live generation and stores the finished answer back.
         key = (
-            query_cache.cache_key(project, agentic_question, top_k, signature)
-            if settings.query_cache_enabled
+            query_cache.cache_key(project, question, top_k, signature, history)
+            if settings.query_cache_enabled and not history_unavailable
             else None
         )
         result = _cache.get(key) if key is not None else None
         if result is not None:
             cache_layer = "l1"
-        else:
+        elif semantic_allowed:
             hit, semantic_vector, cache_similarity = semantic_cache.lookup(
-                db, project, agentic_question, top_k, signature, embed_fn=embed_query
+                db, project, question, top_k, signature, embed_fn=embed_query
             )
             if semantic_vector is not None:
                 # Seed the memo with the lookup's vector - see run_query.
-                embed_memo[agentic_question] = semantic_vector
+                embed_memo[question] = semantic_vector
             if hit is not None:
                 result = hit
                 cache_layer = "l2"
@@ -915,6 +909,16 @@ def run_query_stream(
                     yield {"type": "token", "text": piece}
                 final = result
             else:
+                agentic_question = (
+                    _llm_step(
+                        db, _llm,
+                        lambda llm: agentic.condense_question(
+                            _TrackedLLM(llm, "condense-question", compute_usage),
+                            history, question, settings.conversation_history_turns,
+                        ),
+                    )
+                    if history else question
+                )
                 # Context gathering is the silent phase (no tokens yet) - run
                 # it on a helper thread and emit keep-alive pings so proxies
                 # don't kill the idle stream. The request thread only WAITS
@@ -993,6 +997,7 @@ def run_query_stream(
                         ctx.depth,
                         llm_fn=_llm,
                         usage_acc=compute_usage,
+                        original_question=question if history else None,
                     ):
                         acc.append(tok)
                         yield {"type": "token", "text": tok}
@@ -1009,9 +1014,10 @@ def run_query_stream(
                     )
                     if key is not None:
                         _cache.set(key, final)
-                    semantic_cache.store(
-                        db, project, agentic_question, top_k, signature, final, semantic_vector
-                    )
+                    if semantic_allowed:
+                        semantic_cache.store(
+                            db, project, question, top_k, signature, final, semantic_vector
+                        )
         finally:
             if lead_lock is not None:
                 lead_lock.release()
