@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..evaluation_schemas import EvaluationCase, EvaluationConfig, EvaluationSuite, StartEvaluation
-from ..models import EvaluationRun, Project
+from ..models import EvaluationRun, KnowledgeGapReview, Project
 from ..services import evaluations, knowledge_gaps
 from .deps import get_owned_project, heavy_dashboard_limit
 
@@ -35,8 +35,15 @@ class VerifyGap(BaseModel):
 @router.get("")
 def history(key: GapKey, project: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
     from ..services.quality import project_config
-    runs = db.scalars(select(EvaluationRun).where(EvaluationRun.project_id == project.id, EvaluationRun.gap_key == key)
-                     .order_by(EvaluationRun.created_at.desc(), EvaluationRun.id.desc()).limit(5))
+    runs = list(db.scalars(select(EvaluationRun).where(EvaluationRun.project_id == project.id, EvaluationRun.gap_key == key)
+                     .order_by(EvaluationRun.created_at.desc(), EvaluationRun.id.desc()).limit(5)))
+    review = db.get(KnowledgeGapReview, (project.id, key))
+    attached_id = review.verification_run_id if review else None
+    if attached_id and all(run.id != attached_id for run in runs):
+        attached = db.scalar(select(EvaluationRun).where(EvaluationRun.id == attached_id,
+            EvaluationRun.project_id == project.id, EvaluationRun.gap_key == key))
+        if attached:
+            runs.append(attached)
     config = project_config(project).model_dump()
     items = []
     for run in runs:
@@ -81,7 +88,15 @@ def verify(key: GapKey, body: VerifyGap, days: int = Query(30, ge=7, le=90), pro
             raise HTTPException(422, "This question exceeds the evaluator's 4,000-character limit")
         cases.append(EvaluationCase(id=f"query-{case.query_id}", question=row["question"], expected=case.expected, source=case.source, match=case.match))
     config = EvaluationConfig(**{name: getattr(project, name) for name in EvaluationConfig.model_fields if hasattr(project, name)})
-    evaluations.create_run(db, project, StartEvaluation(id=body.id, suite=EvaluationSuite(cases=cases, variants=[config])), commit=False)
+    suite = EvaluationSuite(cases=cases, variants=[config])
+    # Only compare identical questions, checks, and configurations. A passing
+    # first run establishes current behavior; it does not demonstrate improvement.
+    previous_checks = db.scalars(select(EvaluationRun).where(EvaluationRun.project_id == project.id,
+        EvaluationRun.gap_key == key, EvaluationRun.status == "completed", EvaluationRun.archived_at.is_(None))
+        .order_by(EvaluationRun.created_at.desc(), EvaluationRun.id.desc()).limit(20))
+    reference = next((check for check in previous_checks if check.suite == suite.model_dump()), None)
+    evaluations.create_run(db, project, StartEvaluation(id=body.id, suite=suite,
+        reference_run_id=reference.id if reference else None), commit=False)
     run = db.get(EvaluationRun, body.id)
     run.gap_key, run.gap_evidence_version, run.trigger_reason = key, body.evidence_version, "gap_verification"
     db.commit()

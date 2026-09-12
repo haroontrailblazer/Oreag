@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import useSWR, { useSWRConfig } from "swr"
-import { ArrowRightIcon, ArrowsClockwiseIcon, CheckCircleIcon, FloppyDiskIcon, MagnifyingGlassIcon, TrayIcon } from "@phosphor-icons/react/dist/ssr"
+import { ArchiveIcon, ArrowRightIcon, ArrowsClockwiseIcon, CheckCircleIcon, FloppyDiskIcon, MagnifyingGlassIcon, TrayIcon } from "@phosphor-icons/react/dist/ssr"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -28,10 +28,10 @@ const count = (value: number) => value.toLocaleString("en-US")
 const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
 
 function StatusBadge({ item }: { item: GapItem }) {
-  const Icon = item.reopened ? ArrowsClockwiseIcon : item.status === "resolved" ? CheckCircleIcon : TrayIcon
-  return <Badge variant="outline" className={cn("shrink-0", item.status === "resolved"
+  const Icon = item.reopened ? ArrowsClockwiseIcon : item.status === "resolved" ? item.verification_run_id ? CheckCircleIcon : ArchiveIcon : TrayIcon
+  return <Badge variant="outline" className={cn("shrink-0", item.status === "resolved" && item.verification_run_id
     ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
-    : "border-amber-500/30 text-amber-700 dark:text-amber-400")}><Icon aria-hidden="true" />{gapStatus(item)}</Badge>
+    : item.status === "resolved" ? "text-muted-foreground" : "border-amber-500/30 text-amber-700 dark:text-amber-400")}><Icon aria-hidden="true" />{gapStatus(item)}</Badge>
 }
 
 function GapReview({ item, days, verificationId, onUpdate }: { item: GapItem; days: string; verificationId: string | null; onUpdate: (result: GapDetail) => Promise<void> }) {
@@ -44,6 +44,7 @@ function GapReview({ item, days, verificationId, onUpdate }: { item: GapItem; da
   const [conflict, setConflict] = useState(false)
   const [message, setMessage] = useState("")
   const endpoint = gapDetailKey(item.project_id, item.question_key, days)
+  const canAttach = !!verificationId && (baseline.status !== "resolved" || verificationId !== baseline.verification_run_id)
 
   async function save(status: "open" | "resolved", verification = baseline.verification_run_id) {
     if (busy) return
@@ -56,7 +57,7 @@ function GapReview({ item, days, verificationId, onUpdate }: { item: GapItem; da
       setBaseline(result.item); setNote(result.item.note ?? ""); setConflict(false)
       await onUpdate(result)
       setMessage(result.item.reopened ? "New evidence arrived. This gap still needs review."
-        : status === "resolved" ? verification ? "Review resolved with verification attached." : "Review closed. Documents and answers are unchanged." : "Review saved. This gap is open.")
+        : status === "resolved" ? verification ? "Resolved with a passing check attached. You can review the saved answer above." : "Review closed without a test. No fix has been verified." : "Review saved. This gap is open.")
     } catch (error) {
       if (!isSessionExpired(error)) {
         setFailure(error instanceof Error ? error.message : "Could not save this review.")
@@ -83,15 +84,15 @@ function GapReview({ item, days, verificationId, onUpdate }: { item: GapItem; da
       <Textarea value={note} onChange={event => setNote(event.target.value)} maxLength={2000} disabled={!!busy}
         placeholder="What did you check or change? If the answer was correct, note that here." className="min-h-24 text-base md:text-sm" />
     </label>
-    <p className="text-xs leading-5 text-muted-foreground">Mark resolved closes this review. It does not change documents or answers. New flagged queries or negative feedback can reopen it.</p>
-    {baseline.verification_run_id && <p className="flex items-center gap-2 text-xs text-muted-foreground"><CheckCircleIcon aria-hidden="true" className="size-4" />A verification run is attached to this resolution.</p>}
+    <p className="text-xs leading-5 text-muted-foreground">Use Verify fix above to test the answer and attach a passing result. Close review dismisses the issue without testing it. New flagged evidence can reopen either outcome.</p>
+    {baseline.status === "resolved" && <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">{baseline.verification_run_id ? <CheckCircleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" /> : <ArchiveIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}<span>{baseline.verification_run_id ? "A passing check is saved with this resolution. Its questions, answers, and checks are shown above." : "Closed without verification. You can still run Verify fix and attach a passing result."}</span></p>}
     {failure && <p role="alert" className="text-xs text-destructive">{failure}</p>}
     {message && <p role="status" className="text-xs leading-5 text-muted-foreground">{message}</p>}
     <div className="flex flex-wrap gap-2">
-      {verificationId && baseline.status !== "resolved" && <Button size="sm" disabled={!!busy || conflict} onClick={() => void save("resolved", verificationId)}><CheckCircleIcon aria-hidden="true" />Resolve with verification</Button>}
-      <Button size="sm" disabled={!!busy || conflict} onClick={() => void save(baseline.status === "resolved" ? "open" : "resolved")}>
-        {busy === "save" ? <Spinner size={16} /> : baseline.status === "resolved" ? <ArrowsClockwiseIcon aria-hidden="true" className="size-4" /> : <CheckCircleIcon aria-hidden="true" className="size-4" />}
-        {busy === "save" ? "Saving…" : baseline.status === "resolved" ? "Reopen gap" : "Mark resolved"}
+      {canAttach && <Button size="sm" disabled={!!busy || conflict} onClick={() => void save("resolved", verificationId)}><CheckCircleIcon aria-hidden="true" />Resolve with verification</Button>}
+      <Button size="sm" variant="outline" disabled={!!busy || conflict} onClick={() => void save(baseline.status === "resolved" ? "open" : "resolved", null)}>
+        {busy === "save" ? <Spinner size={16} /> : baseline.status === "resolved" ? <ArrowsClockwiseIcon aria-hidden="true" className="size-4" /> : <ArchiveIcon aria-hidden="true" className="size-4" />}
+        {busy === "save" ? "Saving…" : baseline.status === "resolved" ? "Reopen gap" : "Close review"}
       </Button>
       <Button size="sm" variant="outline" disabled={!!busy || conflict || note.trim() === (baseline.note ?? "")} onClick={() => void save(baseline.status)}><FloppyDiskIcon aria-hidden="true" className="size-4" />Save note</Button>
       <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void refresh()}>{busy === "refresh" ? <Spinner size={16} /> : <ArrowsClockwiseIcon aria-hidden="true" className="size-4" />}{busy === "refresh" ? "Refreshing…" : "Refresh evidence"}</Button>
@@ -106,7 +107,7 @@ function GapDetailView({ selected, days, onSaved }: { selected: GapItem; days: s
   const { data, error, isLoading, mutate } = useSWR<GapDetail>(gapDetailKey(selected.project_id, selected.question_key, days, offset), fetcher, { revalidateOnFocus: false, keepPreviousData: true })
   async function update(result: GapDetail) {
     await updateCache(gapDetailKey(selected.project_id, selected.question_key, days), result, { revalidate: false })
-    setOffset(0); onSaved()
+    setOffset(0); setVerificationId(null); onSaved()
   }
   return <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6 pt-2 [overflow-wrap:anywhere]">
     {error && !isSessionExpired(error) && <div role="alert" className="space-y-2 rounded-xl border p-4 text-sm">
@@ -133,7 +134,7 @@ function GapDetailView({ selected, days, onSaved }: { selected: GapItem; days: s
         <Button asChild variant="outline" size="sm"><Link href={`/projects/${encodeURIComponent(data.item.project_id)}?tab=files`}>Review documents<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>
         <Button asChild variant="outline" size="sm"><Link href={`/projects/${encodeURIComponent(data.item.project_id)}?tab=playground`}>Test in Playground<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>
       </div>
-      <GapVerification gap={data} days={days} onSelect={setVerificationId} />
+      <GapVerification gap={data} days={days} resolutionRunId={verificationId} onSelect={setVerificationId} />
       <GapReview item={data.item} days={days} verificationId={verificationId} onUpdate={update} />
       <section className="space-y-3" aria-label="Queries behind this gap" aria-busy={isLoading}>
         <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">Queries behind this gap</h3><span className="text-xs text-muted-foreground">Flagged first · Last {days} days</span></div>
@@ -186,7 +187,7 @@ export function KnowledgeGapsDashboard({ initialProject = "" }: { initialProject
           <div className="space-y-4">
             <FilterSelect label="Project" value={filters.project} onChange={project => change({ project })} options={[{ value: "", label: "All projects" }, ...(projects ?? []).map(project => ({ value: project.id, label: project.name }))]} />
             <FilterSelect label="Time range" value={filters.days} onChange={days => change({ days })} options={[7, 30, 90].map(days => ({ value: String(days), label: `Last ${days} days` }))} />
-            <FilterSelect label="Status" value={filters.status} onChange={status => change({ status })} options={[{ value: "open", label: "Needs review" }, { value: "resolved", label: "Resolved" }, { value: "all", label: "All statuses" }]} />
+            <FilterSelect label="Status" value={filters.status} onChange={status => change({ status })} options={[{ value: "open", label: "Needs review" }, { value: "resolved", label: "Closed reviews" }, { value: "all", label: "All statuses" }]} />
             <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
               <label htmlFor="repeated-gap-questions" className="cursor-pointer text-sm font-medium">Only repeated questions<span className="mt-1 block text-xs font-normal text-muted-foreground">At least 2 matching queries</span></label>
               <Switch id="repeated-gap-questions" checked={filters.recurring} onCheckedChange={recurring => change({ recurring })} />
@@ -198,19 +199,19 @@ export function KnowledgeGapsDashboard({ initialProject = "" }: { initialProject
       </div>
     </header>
     <div role="region" aria-label="Knowledge gaps overview" tabIndex={0} className="min-h-0 flex-1 space-y-4 overflow-y-auto pb-3 pr-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-      <p className="break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">Last {filters.days} days · {filters.project ? projects?.find(project => project.id === filters.project)?.name ?? "Selected project" : "All projects"} · {filters.status === "all" ? "All statuses" : filters.status === "resolved" ? "Resolved" : "Needs review"}{filters.recurring ? " · Repeated only" : ""}</p>
+      <p className="break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">Last {filters.days} days · {filters.project ? projects?.find(project => project.id === filters.project)?.name ?? "Selected project" : "All projects"} · {filters.status === "all" ? "All statuses" : filters.status === "resolved" ? "Closed reviews" : "Needs review"}{filters.recurring ? " · Repeated only" : ""}</p>
       {error && !isSessionExpired(error) && <div role="alert" className="space-y-2 rounded-xl border p-4 text-sm"><p>Could not load knowledge gaps.{data ? " Showing the last available snapshot." : " Please try again."}</p><Button size="sm" variant="outline" onClick={() => void mutate()}>Retry</Button></div>}
       {!data && !error && <KnowledgeGapsContentSkeleton />}
       {data && <>
         <section aria-label="Gap summary" className="grid grid-cols-3 gap-2 sm:gap-3">
-          {[["Needs review", data.open_groups], ["Resolved", data.resolved_groups], ["Flagged queries", data.flagged_queries]].map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border bg-card p-3 sm:p-4"><p className="min-h-8 text-[11px] leading-4 text-muted-foreground sm:min-h-0 sm:text-xs">{label}</p><p className="mt-2 text-2xl font-semibold tabular-nums">{count(Number(value))}</p></div>)}
+          {[["Needs review", data.open_groups], ["Closed reviews", data.resolved_groups], ["Flagged queries", data.flagged_queries]].map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border bg-card p-3 sm:p-4"><p className="min-h-8 text-[11px] leading-4 text-muted-foreground sm:min-h-0 sm:text-xs">{label}</p><p className="mt-2 text-2xl font-semibold tabular-nums">{count(Number(value))}</p></div>)}
         </section>
         <p className="text-xs leading-5 text-muted-foreground">Summary covers the selected projects and date range. Counts reflect current ratings.</p>
         {data.limited && <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5">Partial history: showing groups from the latest {count(data.scanned_queries)} queries in this scope. Filter to a project or a shorter date range to inspect more of its activity. Group details use that project’s own sample.</p>}
         <section aria-label="Knowledge gap results" aria-busy={isLoading} className="overflow-hidden rounded-xl border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3"><h2 className="text-sm font-medium">Question groups</h2><span role="status" className="text-xs text-muted-foreground">{count(data.matched_groups)} matching · Most flagged first</span></div>
           {!data.items.length ? <div className="space-y-3 px-6 py-12 text-center">
-            {filters.status === "resolved" ? <CheckCircleIcon aria-hidden="true" className="mx-auto size-7 text-muted-foreground" /> : <TrayIcon aria-hidden="true" className="mx-auto size-7 text-muted-foreground" />}
+            {filters.status === "resolved" ? <ArchiveIcon aria-hidden="true" className="mx-auto size-7 text-muted-foreground" /> : <TrayIcon aria-hidden="true" className="mx-auto size-7 text-muted-foreground" />}
             <p className="text-sm font-medium">{data.scanned_queries === 0 ? "No query activity in this window" : "No gaps match these filters"}</p>
             <p className="mx-auto max-w-md text-xs leading-5 text-muted-foreground">Questions with negative feedback or low document similarity appear here. Casual conversation and obvious keyboard noise are excluded from similarity flags.</p>
             {(activeFilters > 0 || search) && <Button size="sm" variant="outline" onClick={reset}>Reset filters</Button>}
@@ -232,7 +233,7 @@ export function KnowledgeGapsDashboard({ initialProject = "" }: { initialProject
     </div>
     <Sheet open={!!selected} onOpenChange={open => { if (!open) setSelected(null) }}>
       <SheetContent side="right" className="w-full max-w-full bg-background sm:w-[540px]" onCloseAutoFocus={event => { event.preventDefault(); if (trigger.current?.isConnected) trigger.current.focus(); else document.getElementById("knowledge-gaps-heading")?.focus() }}>
-        <SheetHeader className="shrink-0 p-6 pr-12"><SheetTitle className="text-lg">Review knowledge gap</SheetTitle><SheetDescription>Check why this was flagged. Improve the documents if needed, or resolve the review if the answer was correct.</SheetDescription></SheetHeader>
+        <SheetHeader className="shrink-0 p-6 pr-12"><SheetTitle className="text-lg">Review knowledge gap</SheetTitle><SheetDescription>Review the evidence, test a fix, or close the review if the answer was already correct.</SheetDescription></SheetHeader>
         {selected && <GapDetailView key={`${selected.project_id}:${selected.question_key}:${filters.days}`} selected={selected} days={filters.days} onSaved={() => void mutate()} />}
       </SheetContent>
     </Sheet>

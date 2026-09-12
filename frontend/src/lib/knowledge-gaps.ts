@@ -40,6 +40,6 @@ export function gapDetailKey(project: string, key: string, days: string, offset 
   return `${KNOWLEDGE_GAPS_KEY}/${encodeURIComponent(project)}/${encodeURIComponent(key)}?${params}`
 }
 
-export function gapStatus(item: Pick<GapItem, "status" | "reopened">) {
-  return item.reopened ? "New evidence" : item.status === "resolved" ? "Resolved" : "Needs review"
+export function gapStatus(item: Pick<GapItem, "status" | "reopened" | "verification_run_id">) {
+  return item.reopened ? "New evidence" : item.status === "resolved" ? item.verification_run_id ? "Resolved with checks" : "Closed review" : "Needs review"
 }

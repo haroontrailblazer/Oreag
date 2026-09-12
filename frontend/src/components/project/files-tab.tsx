@@ -453,7 +453,6 @@ export function FilesTab({
           </p>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          {fileCount > 1 && <SourceConflicts projectId={project.id} />}
           <BestPractices
             tips={[
               {
@@ -488,6 +487,7 @@ export function FilesTab({
               },
             ]}
           />
+          {fileCount > 1 && <SourceConflicts projectId={project.id} />}
           <AddFilesDialog
             project={project}
             onUploaded={() => {

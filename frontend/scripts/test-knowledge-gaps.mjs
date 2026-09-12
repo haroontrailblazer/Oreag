@@ -23,5 +23,7 @@ test("detail keys isolate groups and evidence pages and encode path segments", (
 test("new evidence is distinct from an explicitly open or resolved review", () => {
   assert.equal(gapStatus({ status: "open", reopened: true }), "New evidence")
   assert.equal(gapStatus({ status: "open", reopened: false }), "Needs review")
-  assert.equal(gapStatus({ status: "resolved", reopened: false }), "Resolved")
+  assert.equal(gapStatus({ status: "resolved", reopened: false }), "Closed review")
+  assert.equal(gapStatus({ status: "resolved", reopened: false, verification_run_id: "test" }), "Resolved with checks")
+  assert.equal(gapStatus({ status: "open", reopened: true, verification_run_id: "older-test" }), "New evidence")
 })

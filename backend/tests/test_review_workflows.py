@@ -230,15 +230,91 @@ def test_cache_observation_does_not_invent_missing_entry_reasons():
     assert cache_insights.snapshot(None) is None
 
 
-def test_finished_change_check_chains_can_be_archived(workflows):
+@pytest.mark.parametrize("reason", ["project_change", "gap_verification"])
+def test_finished_change_check_chains_can_be_archived(workflows, reason):
     from app.services.evaluation_retention import make_room
     _, db, project, _ = workflows
     prior = None
     for i in range(20):
-        run = EvaluationRun(project_id=project.id, status="completed", trigger_reason="project_change", reference_run_id=prior,
+        run = EvaluationRun(project_id=project.id, status="completed", trigger_reason=reason, reference_run_id=prior,
             suite=SUITE, corpus=[], corpus_count=1, content_version=i, results=[], quality_report={"state": "passed", "warnings": []},
             created_at=datetime.now(timezone.utc) - timedelta(days=20-i))
         db.add(run); db.flush(); prior = run.id
     db.commit()
     make_room(db, project.id)
     assert db.scalar(select(sa.func.count()).select_from(EvaluationRun).where(EvaluationRun.archived_at.is_not(None))) == 1
+
+
+def test_gap_verification_compares_only_matching_tests(workflows):
+    client, db, project, _ = workflows
+    endpoint, _, body = verification_body(client, db, project)
+    first = client.post(endpoint, json=body).json()
+    assert first["reference_run_id"] is None
+    run = db.get(EvaluationRun, uuid.UUID(first["id"]))
+    run.status = "completed"
+    run.results = [{"caseId": run.suite["cases"][0]["id"], "variant": 0, "status": "failed"}]
+    db.commit()
+    project.content_version += 1; db.commit()
+    second_response = client.post(endpoint, json={**body, "id": str(uuid.uuid4())})
+    assert second_response.status_code == 201, second_response.text
+    second = db.get(EvaluationRun, uuid.UUID(second_response.json()["id"]))
+    assert second.reference_run_id == run.id
+    second.status = "completed"
+    second.results = [{**run.results[0], "status": "passed"}]
+    second.quality_report = quality.assess(db, second)
+    assert second.quality_report["case_changes"] == [{"case_id": run.suite["cases"][0]["id"], "before": "failed", "after": "passed"}]
+    db.commit()
+    changed = client.post(endpoint, json={**body, "id": str(uuid.uuid4()), "cases": [{**body["cases"][0], "expected": "different check"}]})
+    assert changed.status_code == 201, changed.text
+    assert changed.json()["reference_run_id"] is None
+
+
+def test_attached_verification_remains_visible_beyond_latest_five_runs(workflows):
+    import gzip
+    import json
+    from fastapi.encoders import jsonable_encoder
+    client, db, project, _ = workflows
+    endpoint, review_endpoint, body = verification_body(client, db, project)
+    run_id = client.post(endpoint, json=body).json()["id"]
+    run = db.get(EvaluationRun, uuid.UUID(run_id))
+    run.status = "completed"
+    run.results = [{"caseId": run.suite["cases"][0]["id"], "variant": 0, "status": "passed"}]
+    db.commit()
+    item = client.get(review_endpoint).json()["item"]
+    assert client.put(review_endpoint, json={"status": "resolved", "revision": item["revision"],
+        "evidence_version": item["evidence_version"], "verification_run_id": run_id}).status_code == 200
+    run.archived_payload = gzip.compress(json.dumps(jsonable_encoder(evaluations.run_out(run))).encode())
+    run.archived_at = datetime.now(timezone.utc)
+    run.results = []
+    for i in range(6):
+        db.add(EvaluationRun(project_id=project.id, status="completed", suite=run.suite, gap_key=run.gap_key,
+            results=[], corpus=[], corpus_count=1, content_version=run.content_version, created_at=run.created_at + timedelta(minutes=i+1)))
+    db.commit()
+    history = client.get(endpoint).json()["runs"]
+    assert len(history) == 6
+    saved = next(entry for entry in history if entry["id"] == run_id)
+    assert saved["results"][0]["status"] == "passed"
+    assert saved["archived_at"] is not None
+
+
+@pytest.mark.parametrize("reason", ["gap_verification", "project_change"])
+def test_background_completion_preserves_case_comparisons(workflows, monkeypatch, reason):
+    from app.schemas import QueryResponse
+    from tests.test_evaluations import start
+    client, db, project, _ = workflows
+    suite = copy.deepcopy(SUITE)
+    suite["variants"] = suite["variants"][:1]
+    suite["cases"][0]["source"] = ""
+    before = db.get(EvaluationRun, uuid.UUID(start(client, project, suite)["id"]))
+    before.status = "completed"
+    before.results = [{"caseId": "q", "variant": 0, "status": "failed"}]
+    db.commit()
+    after = db.get(EvaluationRun, uuid.UUID(start(client, project, suite)["id"]))
+    after.trigger_reason, after.reference_run_id = reason, before.id
+    db.commit()
+    monkeypatch.setattr(evaluations, "run_query", lambda *args, **kwargs: QueryResponse(answer="30 days", sources=[], model="gpt-4o-mini", latency_ms=10))
+    for _ in range(3):
+        if after.status == "completed": break
+        assert quality.run_one(db)
+    assert after.status == "completed"
+    assert after.quality_report["case_changes"] == [{"case_id": "q", "before": "failed", "after": "passed"}]

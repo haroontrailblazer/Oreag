@@ -260,7 +260,7 @@ def advance(db: Session, project, run_id, api_key_id=None):
         if changes.get("status") == "completed":
             from .quality import assess
             snapshot = SimpleNamespace(project_id=project_id, suite=run.suite, results=changes.get("results", results),
-                                       reference_run_id=run.reference_run_id, quality_limits=run.quality_limits)
+                                       reference_run_id=run.reference_run_id, quality_limits=run.quality_limits, trigger_reason=run.trigger_reason)
             changes["quality_report"] = assess(db, snapshot)
         db.execute(update(EvaluationRun).where(EvaluationRun.id == run_id, EvaluationRun.lease_token == token, EvaluationRun.status != "cancelled")
                    .values(**changes, error=None, lease_token=None, lease_until=None, updated_at=datetime.now(timezone.utc)))

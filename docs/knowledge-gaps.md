@@ -1,6 +1,6 @@
 # Knowledge gaps
 
-Open **Knowledge gaps** in the dashboard sidebar, or choose **Review knowledge
+Open **Gaps** in the dashboard sidebar, or choose **Review knowledge
 gaps** from a project's Health detail. The inbox turns query history and answer
 feedback into a review workflow: inspect questions, update documents, add a
 regression case to the existing evaluator, and record the outcome.
@@ -40,9 +40,21 @@ queries. **Review documents** opens the project's Files tab. **Test in Playgroun
 opens Playground, where Evaluator is available. **Add to test set** on an evidence
 query uses the existing evaluator flow to save a regression case.
 
-Save a review note (up to 2,000 characters), **Mark resolved**, or **Reopen gap**.
+Save a review note (up to 2,000 characters), **Close review**, or **Reopen gap**.
 Review state is saved per project and group, independently of reporting windows.
-Resolving acknowledges the current group; it does not certify answer correctness.
+Closing a review dismisses the issue without testing it and displays **Closed review**.
+To verify a fix, select affected questions in **Verify fix**, add expected answer
+text or a source, and run the checks. Review the returned answers, choose **Use for
+resolution**, then **Resolve with verification**. Every selected check must pass
+against current documents, settings, and gap evidence. The outcome displays
+**Resolved with checks**, with the saved questions, answers, and checks available
+when you reopen its details, including after the run is archived.
+
+When a previous completed verification used identical questions, checks, and
+configurations, the results show the change in each check. **Previously failed;
+now passing** requires an actual failing earlier test. A first passing run records
+current behavior; it does not establish improvement or certify overall answer
+accuracy. A manually closed review can still have a passing verification attached.
 New flagged queries or negative feedback added/updated after the resolution cause
 the group to appear as **New evidence** and need review again. Healthy traffic
 alone does not reopen it. The previous review note remains available.
@@ -69,12 +81,15 @@ Every read and write is scoped through the owning project.
 |---|---|---|
 | GET | `/api/account/knowledge-gaps` | Filtered report; `days`, `project_id`, `status=open\|resolved\|all`, `search`, `recurring`, `offset`, `limit`. |
 | GET | `/api/account/knowledge-gaps/{project_id}/{key}` | Group and paginated evidence; `days`, `offset`, `limit`. |
-| PUT | `/api/account/knowledge-gaps/{project_id}/{key}` | Save `{status, note, revision, evidence_version}` for the selected `days`; returns refreshed detail. |
+| PUT | `/api/account/knowledge-gaps/{project_id}/{key}` | Save `{status, note, revision, evidence_version, verification_run_id}` for the selected `days`; returns refreshed detail. |
+| GET | `/api/projects/{project_id}/gaps/{key}/verification` | Latest verification runs plus the attached resolution evidence. |
+| POST | `/api/projects/{project_id}/gaps/{key}/verification` | Start selected query checks with an idempotent run ID and current evidence version; uses provider credits. |
 
 The key is a 64-character lowercase hex SHA-256 digest. Limits are 1–100 per
 page; offsets are 0–5,000. Invalid filters return 422, inaccessible projects or
 absent evidence return 404, and stale reviews/evidence return 409. GETs never
-write and no provider calls are made.
+write and no provider calls are made by report or review endpoints. Starting a
+verification creates a background evaluation and uses provider credits.
 
 ## Deployment
 
@@ -83,3 +98,7 @@ and frontend. It adds only `knowledge_gap_reviews`, with a composite primary key
 project cascade, validation constraints, and RLS. Direct authenticated Supabase
 clients can read only their own projects' reviews; writes go through the API's
 ownership and concurrency checks.
+
+Verification also requires `supabase/migrations/0050_review_workflows.sql`, which
+adds the run linkage and workflow metadata. This clarification of review states
+uses those existing columns and does not require another migration.

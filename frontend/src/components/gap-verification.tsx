@@ -14,10 +14,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { EvaluationCheckResults } from "@/components/evaluation-check-results"
 
 type Case = { query_id: string; question: string; expected: string; source: string; match: "contains" }
-type Verification = EvaluationRun & { gap_evidence_version: string; matches_current: boolean }
+type Verification = EvaluationRun & { gap_evidence_version: string; matches_current: boolean; reference_run_id: string | null }
 type History = { content_version: number; runs: Verification[] }
 
-export function GapVerification({ gap, days, onSelect }: { gap: GapDetail; days: string; onSelect: (id: string) => void }) {
+export function GapVerification({ gap, days, resolutionRunId, onSelect }: { gap: GapDetail; days: string; resolutionRunId: string | null; onSelect: (id: string) => void }) {
   const endpoint = `/api/projects/${gap.item.project_id}/gaps/${gap.item.question_key}/verification`
   const { data, error, mutate } = useSWR<History>(endpoint, fetcher, { refreshInterval: value => value?.runs.some(run => ["preparing", "running"].includes(run.status)) ? 2000 : 15000 })
   const [editing, setEditing] = useState(false)
@@ -25,10 +25,11 @@ export function GapVerification({ gap, days, onSelect }: { gap: GapDetail; days:
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState("")
   const [selected, setSelected] = useState("")
-  const [attached, setAttached] = useState("")
   const attempt = useRef<{ id: string; payload: string } | null>(null)
   const lock = useRef(false)
-  const run = data?.runs.find(run => run.id === selected) ?? data?.runs[0]
+  const savedResolution = gap.item.status === "resolved" ? data?.runs.find(run => run.id === gap.item.verification_run_id) : undefined
+  const run = data?.runs.find(run => run.id === selected) ?? savedResolution ?? data?.runs[0]
+  const isAttached = run && gap.item.status === "resolved" && run.id === gap.item.verification_run_id
   const active = data?.runs.some(run => ["preparing", "running"].includes(run.status))
   const verified = run?.status === "completed" && run.results.length === run.suite.cases.length && run.results.every(result => result.status === "passed")
   const current = run?.matches_current && run.gap_evidence_version === gap.item.evidence_version
@@ -54,7 +55,7 @@ export function GapVerification({ gap, days, onSelect }: { gap: GapDetail; days:
   }
   return <section aria-label="Verify gap fix" className="space-y-3 rounded-xl border bg-background p-4">
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-medium"><FlaskIcon aria-hidden="true" className="size-4 text-muted-foreground" />Verify fix</h3><Button size="sm" variant="outline" disabled={busy || active || !!error} onClick={() => setEditing(value => !value)}><PlayIcon aria-hidden="true" />{editing ? "Close setup" : "Verify fix"}</Button></div>
-    <p className="text-xs leading-5 text-muted-foreground">Test affected questions against the current documents and settings. Passing means your chosen checks passed; review the answers before resolving.</p>
+    <p className="text-xs leading-5 text-muted-foreground">Test affected questions against the current documents and settings. Review the answers, then select a passing run to resolve with verification.</p>
     {error && !isSessionExpired(error) && <div role="alert" className="space-y-2 text-xs"><p>Could not load verification history.</p><Button size="sm" variant="outline" onClick={() => void mutate()}>Retry</Button></div>}
     {editing && <div className="space-y-3">
       <p className="text-xs font-medium">Select questions from this evidence page ({cases.length}/20)</p>
@@ -68,11 +69,13 @@ export function GapVerification({ gap, days, onSelect }: { gap: GapDetail; days:
     </div>}
     {failure && <p role="alert" className="text-xs text-destructive">{failure}</p>}
     {run && <div className="space-y-3">
+      {isAttached && <p className="flex items-center gap-2 text-xs font-medium"><CheckCircleIcon aria-hidden="true" className="size-4 text-emerald-700 dark:text-emerald-400" />Saved resolution evidence</p>}
       <div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{run.status === "completed" ? verified ? "Checks passed" : "Review results" : run.status === "preparing" ? "Preparing documents" : run.status === "running" ? "Running checks" : run.status === "failed" ? "Run failed" : "Cancelled"}</Badge><span className="text-[11px] text-muted-foreground">{new Date(run.created_at).toLocaleString()}</span></div>
+      {run.status === "completed" && !run.quality_report?.case_changes && <p className="text-xs leading-5 text-muted-foreground">{run.reference_run_id && !run.quality_report ? "Comparing with the previous matching test…" : "No earlier matching test is available. These results show how the answer performs now."}</p>}
       {!current && <p className="text-xs leading-5 text-muted-foreground">Documents, settings, or gap evidence changed since this run. Verify again to attach a current result.</p>}
       {run.error && <p role="alert" className="text-xs text-destructive">{run.error}</p>}
       <EvaluationCheckResults run={run} />
-      <div className="flex flex-wrap gap-2">{verified && current && <Button size="sm" variant="outline" onClick={() => { onSelect(run.id); setAttached(run.id) }}><CheckCircleIcon aria-hidden="true" />{attached === run.id ? "Selected for resolution" : "Use for resolution"}</Button>}{["preparing", "running"].includes(run.status) && <Button size="sm" variant="outline" disabled={busy} onClick={() => void cancel()}><StopIcon aria-hidden="true" />Cancel run</Button>}<Button size="sm" variant="ghost" onClick={() => void mutate()}><ArrowsClockwiseIcon aria-hidden="true" />Refresh</Button></div>
+      <div className="flex flex-wrap gap-2">{verified && current && !isAttached && <Button size="sm" variant="outline" onClick={() => onSelect(run.id)}><CheckCircleIcon aria-hidden="true" />{resolutionRunId === run.id ? "Selected for resolution" : "Use for resolution"}</Button>}{["preparing", "running"].includes(run.status) && <Button size="sm" variant="outline" disabled={busy} onClick={() => void cancel()}><StopIcon aria-hidden="true" />Cancel run</Button>}<Button size="sm" variant="ghost" onClick={() => void mutate()}><ArrowsClockwiseIcon aria-hidden="true" />Refresh</Button>{savedResolution && !isAttached && <Button size="sm" variant="outline" onClick={() => setSelected(savedResolution.id)}>View resolution evidence</Button>}</div>
       {data && data.runs.length > 1 && <details className="text-xs"><summary className="w-fit cursor-pointer rounded-sm text-muted-foreground focus-visible:outline-2">Previous verification runs</summary><div className="mt-2 flex flex-wrap gap-2">{data.runs.map(item => <Button key={item.id} size="sm" variant="outline" onClick={() => setSelected(item.id)}>{new Date(item.created_at).toLocaleString()}</Button>)}</div></details>}
     </div>}
     {!run && !error && !editing && <p className="text-xs text-muted-foreground">{data ? "No verification runs yet." : "Loading verification history…"}</p>}

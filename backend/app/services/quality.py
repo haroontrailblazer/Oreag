@@ -147,7 +147,7 @@ def assess(db, run):
     baseline = metrics(ref)
     limits = QualityLimits.model_validate(run.quality_limits or {}).model_dump()
     report.update(state="passed", baseline=baseline)
-    if comparable_change:
+    if comparable_change or getattr(run, "trigger_reason", None) == "gap_verification":
         before = {(r["caseId"], r["variant"]): r["status"] for r in ref.results}
         report["case_changes"] = [{"case_id": r["caseId"], "before": before.get((r["caseId"], r["variant"])), "after": r["status"]} for r in run.results]
         report["configuration_changed"] = ref.suite["variants"] != run.suite["variants"]
