@@ -1,44 +1,36 @@
 "use client"
 
-import { useState } from "react"
-import { EyeIcon, FilesIcon, ThumbsUpIcon } from "@phosphor-icons/react/dist/ssr"
+import { FilesIcon, ThumbsUpIcon } from "@phosphor-icons/react/dist/ssr"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { qualityChange, type QualityTrendsReport } from "@/lib/quality-trends"
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
 const percent = (value: number | null) => value == null ? "Not measured" : `${number.format(value)}%`
-const day = (value: string) => value.startsWith("Day ") ? value : new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+const day = (value: string) => new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
 type DailyQuality = QualityTrendsReport["daily"][number]
 type FeedbackPoint = { date: string; helpful: number; rated: number; value: number | null }
-
-// This example never enters SWR, totals, exports, or the daily measurements table.
-const feedbackPreview: FeedbackPoint[] = [[6, 10], [9, 12], [7, 10], [16, 20], [18, 20], [17, 20], [19, 20]].map(([helpful, rated], index) => ({
-  date: `Day ${index + 1}`, helpful, rated, value: helpful / rated * 100,
-}))
 
 function PeriodChange({ value, days }: { value: number | null; days: string }) {
   if (value == null) return null
   return <p className="text-xs leading-5 text-muted-foreground">{value > 0 ? "+" : ""}{number.format(value)} percentage points vs previous {days} days</p>
 }
 
-function HelpfulFeedbackChart({ points, preview }: { points: FeedbackPoint[]; preview: boolean }) {
+function HelpfulFeedbackChart({ points }: { points: FeedbackPoint[] }) {
   const measured = points.filter(point => point.value != null).length
   if (!measured) return <div className="flex min-h-52 flex-col items-center justify-center gap-2 rounded-lg bg-muted/20 p-5 text-center">
     <ThumbsUpIcon className="size-6 text-muted-foreground" aria-hidden="true" />
     <p className="text-xs font-medium">No rated answers in this period</p>
-    <p className="max-w-64 text-xs leading-5 text-muted-foreground">Rate an answer in Playground or send feedback from your app. Select Preview chart to see an example.</p>
+    <p className="max-w-64 text-xs leading-5 text-muted-foreground">Rate an answer in Playground or send feedback from your app.</p>
   </div>
   return <div className="space-y-2">
     <p className="text-[11px] text-muted-foreground">Helpful answers (% of daily ratings)</p>
-    <ChartContainer config={{ value: { label: "Helpful feedback", color: "var(--chart-1)" } }} className="h-48 w-full aspect-auto" aria-label={preview ? "Helpful feedback preview using sample data" : "Helpful feedback by day"}>
+    <ChartContainer config={{ value: { label: "Helpful feedback", color: "var(--chart-1)" } }} className="h-48 w-full aspect-auto" aria-label="Helpful feedback by day">
       <AreaChart accessibilityLayer data={points} margin={{ top: 8, right: 14, bottom: 4, left: -14 }}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey="date" tickFormatter={day} minTickGap={32} tickLine={false} axisLine={false} tickMargin={10} />
         <YAxis domain={[0, 100]} ticks={[0, 50, 100]} tickFormatter={value => `${value}%`} tickLine={false} axisLine={false} />
-        <ChartTooltip content={<ChartTooltipContent labelFormatter={value => day(String(value))} formatter={(value, _name, item) => <div className="space-y-1"><p className="font-medium tabular-nums">{percent(Number(value))} helpful</p><p className="text-muted-foreground">{item.payload.helpful} of {item.payload.rated} rated answers</p>{preview && <p className="text-muted-foreground">Sample data</p>}</div>} />} />
+        <ChartTooltip content={<ChartTooltipContent labelFormatter={value => day(String(value))} formatter={(value, _name, item) => <div className="space-y-1"><p className="font-medium tabular-nums">{percent(Number(value))} helpful</p><p className="text-muted-foreground">{item.payload.helpful} of {item.payload.rated} rated answers</p></div>} />} />
         <Area type="linear" dataKey="value" stroke="var(--color-value)" fill="var(--color-value)" fillOpacity={0.08} strokeWidth={2} dot={{ r: 3, fill: "var(--color-value)" }} activeDot={{ r: 5 }} connectNulls={false} isAnimationActive={false} />
       </AreaChart>
     </ChartContainer>
@@ -74,14 +66,12 @@ function DocumentMatchChart({ daily }: { daily: DailyQuality[] }) {
 }
 
 export function LiveQualityCharts({ data, days }: { data: QualityTrendsReport; days: string }) {
-  const [preview, setPreview] = useState(false)
   const current = data.current
   const feedbackPoints = data.daily.map(row => ({ date: row.date, helpful: row.helpful, rated: row.rated, value: row.complete ? row.helpful_percent : null }))
   return <div className="grid gap-4 xl:grid-cols-2">
     <article className="flex min-w-0 flex-col gap-4 rounded-xl border p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex h-7 items-center">
         <h3 className="flex items-center gap-2 text-xs font-medium"><ThumbsUpIcon className="size-4 text-muted-foreground" aria-hidden="true" />Helpful feedback</h3>
-        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" aria-pressed={preview} onClick={() => setPreview(value => !value)}><EyeIcon className="size-3.5" />{preview ? "Show live chart" : "Preview chart"}</Button>
       </div>
       <div className="space-y-1.5">
         <p className="text-2xl font-semibold tracking-tight tabular-nums">{current.rated ? percent(current.helpful_percent) : "No ratings yet"}</p>
@@ -89,9 +79,8 @@ export function LiveQualityCharts({ data, days }: { data: QualityTrendsReport; d
         {current.queries > current.rated && <p className="text-xs text-muted-foreground">{number.format(current.queries - current.rated)} answers haven’t been rated.</p>}
         <PeriodChange value={qualityChange(current, data.previous, "helpful_percent")} days={days} />
       </div>
-      <div className="mt-auto space-y-3">
-        {preview && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-2.5 text-xs"><Badge variant="secondary">Sample data</Badge><span className="text-muted-foreground">7 example days, not your project’s ratings.</span></div>}
-        <HelpfulFeedbackChart points={preview ? feedbackPreview : feedbackPoints} preview={preview} />
+      <div className="mt-auto">
+        <HelpfulFeedbackChart points={feedbackPoints} />
       </div>
     </article>
     <article className="flex min-w-0 flex-col gap-4 rounded-xl border p-4">
