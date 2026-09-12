@@ -23,22 +23,68 @@ from ..models import KnowledgeGapReview, Project, QueryLog
 
 SCAN_LIMIT = 5000
 WEAK_SIMILARITY = 0.35  # A review heuristic, not an answer-policy threshold.
-# Conservative, whole-message matches only. A greeting followed by a real
-# question ("Hi, how do refunds work?") must still be checked for evidence.
+# Whole-message social phrases. A greeting followed by a real question must
+# still be checked for evidence. These rules affect review signals only.
 CONVERSATIONAL_MESSAGES = frozenset({
     "hi", "hello", "hey", "greetings", "hi there", "hello there", "hey there",
     "good morning", "good afternoon", "good evening", "good night",
     "thanks", "thank you", "thanks a lot", "thank you very much",
     "bye", "goodbye", "see you", "see you later",
     "how are you", "how are you doing", "how's it going", "what's up",
+    "hell nah", "hell no", "oh well", "no thanks", "no thank you",
+    "just kidding", "just joking", "never mind", "all good", "no worries",
 })
+_GREETING_WORD = re.compile(r"(?:h+i+|h+e+y+|h+e+l+o+|y+o+|h+o+w+d+y+)")
+_LAUGH_WORD = re.compile(r"(?:ha){2,}|(?:he){2,}")
+_SOCIAL_WORDS = frozenset({
+    "hi", "hello", "hey", "yo", "howdy", "there", "bro", "dude", "buddy",
+    "everyone", "folks", "guys", "thanks", "thank", "you", "bye", "goodbye",
+    "ok", "okay", "lol", "haha", "hehe", "nah", "no", "nope", "yep", "yeah", "hell",
+})
+_SOCIAL_ANCHORS = _SOCIAL_WORDS - {"there", "bro", "dude", "buddy", "everyone", "folks", "guys", "thank", "you", "hell"}
 
 
 def _is_conversational_only(question: str) -> bool:
     normalized = unicodedata.normalize("NFC", question).casefold()
     normalized = re.sub(r"\s+", " ", normalized).strip().replace("’", "'")
     normalized = re.sub(r"^[\W_]+|[\W_]+$", "", normalized)
-    return normalized in CONVERSATIONAL_MESSAGES
+    if normalized in CONVERSATIONAL_MESSAGES:
+        return True
+    # Only normalize a stretched word when it reduces to known social speech;
+    # never rewrite question keys, product names, or the user's query itself.
+    words = re.findall(r"\w+", normalized)
+    social = []
+    for word in words:
+        if _GREETING_WORD.fullmatch(word):
+            social.append("hi")
+        elif _LAUGH_WORD.fullmatch(word):
+            social.append("haha")
+        elif word in _SOCIAL_WORDS:
+            social.append(word)
+        else:
+            collapsed = re.sub(r"([a-z])\1+", r"\1", word)
+            social.append(collapsed if collapsed in _SOCIAL_WORDS else word)
+    return bool(social) and all(word in _SOCIAL_WORDS for word in social) and any(word in _SOCIAL_ANCHORS for word in social)
+
+
+def _is_keyboard_noise(question: str) -> bool:
+    """Exclude only unmistakably malformed, mixed keyboard input.
+
+    A short word, unknown acronym, identifier, URL, or code fragment must not
+    be rejected merely for having a low similarity. Require an unmatched
+    leading closer plus several mixed letter/digit runs and symbol types.
+    """
+    text = question.strip()
+    if not text or not any(char.isalnum() for char in text):
+        return True  # Emoji/punctuation alone provide no document question.
+    if len(text) < 12 or any(char.isspace() for char in text) or text[0] not in "]})":
+        return False
+    if any(char in text for char in "[{("):
+        return False
+    letters = re.findall(r"[a-zA-Z]+", text)
+    digits = re.findall(r"[0-9]+", text)
+    symbols = {char for char in text if not char.isalnum()}
+    return len(letters) >= 3 and len(digits) >= 3 and max(map(len, letters), default=0) <= 4 and len(symbols) >= 3
 
 
 def question_key(question: str) -> str:
@@ -57,7 +103,8 @@ def _flags(row) -> tuple[bool, bool]:
         row["feedback_rating"] == "not_helpful",
         row["cache_layer"] is None and similarity is not None
         and math.isfinite(similarity) and similarity < WEAK_SIMILARITY
-        and not _is_conversational_only(row["question"]),
+        and not _is_conversational_only(row["question"])
+        and not _is_keyboard_noise(row["question"]),
     )
 
 

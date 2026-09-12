@@ -141,6 +141,52 @@ def test_negative_feedback_on_a_greeting_still_needs_review(gaps):
 
 
 @pytest.mark.parametrize("question", [
+    "hey hi", "hey hiiiiiiiiiiiiii", "heeeeeeeey", "hell nah",
+    "]08]-9j4\\=9j24-9ujg0okl3ref", "👋😂", "?!?", "heyyy, hello!!!",
+    "heeeelloooo there", "HEY\nHIIII 👋", "hey bro", "hahahahaha", "loooool",
+    "hell naaaah", "ok thanks", "just kidding",
+])
+def test_casual_variations_and_obvious_noise_do_not_create_document_gaps(gaps, question):
+    client, db, mine, _ = gaps
+    query(db, mine, question, retrieval_similarity=0.188)
+    result = client.get(URL).json()
+    assert result["scanned_queries"] == 1
+    assert result["flagged_queries"] == 0 and result["items"] == []
+
+
+@pytest.mark.parametrize("question", ["heeeeeeeey", "hey hiiiiiiiiiiiiii", "hell nah", "]08]-9j4\\=9j24-9ujg0okl3ref", "😂"])
+def test_negative_feedback_is_preserved_even_for_casual_or_noisy_input(gaps, question):
+    client, db, mine, _ = gaps
+    query(db, mine, question, retrieval_similarity=0.188, feedback_rating="not_helpful")
+    item = client.get(URL).json()["items"][0]
+    assert item["not_helpful_count"] == item["flagged_count"] == 1
+    assert item["weak_evidence_count"] == 0
+
+
+@pytest.mark.parametrize("question", [
+    "heyyy, how do refunds work?", "hey hi where is my order", "lol why did payment fail?",
+    "hell nah that refund answer is incorrect", "hey SKU A1234 missing", "ERR_503",
+    "a12b34c56d78", "123e4567-e89b-12d3-a456-426614174000", "C++", "1+1?",
+    "https://example.com/a12?b=345", "x[0]=a12+b34", "What does ]08]-9j4 mean?",
+    "订单退款", "hi 404", "greeting policy",
+])
+def test_casual_detection_preserves_real_questions_code_and_identifiers(gaps, question):
+    client, db, mine, _ = gaps
+    query(db, mine, question, retrieval_similarity=0.188)
+    assert client.get(URL).json()["items"][0]["weak_evidence_count"] == 1
+
+
+def test_old_casual_queries_drop_out_without_deleting_logs_or_creating_reviews(gaps):
+    client, db, mine, _ = gaps
+    for question in ["hey hi", "hey hiiiiiiiiiiiiii", "heeeeeeeey", "hell nah", "]08]-9j4\\=9j24-9ujg0okl3ref"]:
+        query(db, mine, question, created_at=datetime.now(timezone.utc)-timedelta(minutes=5))
+    result = client.get(URL).json()
+    assert result["open_groups"] == result["flagged_queries"] == 0
+    assert db.scalar(sa.select(sa.func.count()).select_from(QueryLog)) == 5
+    assert db.scalar(sa.select(sa.func.count()).select_from(KnowledgeGapReview)) == 0
+
+
+@pytest.mark.parametrize("question", [
     "Hi, how do refunds work?", "Hello\nWhere is my order?", "Thanks, but that is wrong",
     "What is HI?", "refund", "C++?", "Thank you policy", "Hi there, explain billing",
 ])
