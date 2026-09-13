@@ -17,6 +17,7 @@
 .overviewGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .checksSection { display: grid; min-width: 0; gap: 16px; scroll-margin-top: 24px; }
 .checksGrid, .indexingGrid { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+.checksGrid { align-items: stretch; }
 .indexingActions { grid-column: 1 / -1; }
 :global(.dark) .page {
   --surface-shadow: #00000060;
@@ -75,7 +76,7 @@
 .metric { min-width: 0; border: 1px solid var(--border); padding: 12px; border-radius: 11px; background: color-mix(in oklch, var(--muted) 55%, var(--card)); box-shadow: inset 0 2px 3px var(--surface-shadow), 0 1px 0 var(--edge-light); }
 .metricLabel { font-size: 9px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground); }
 .metricValue { margin-top: 5px; font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cardGrid, .policyGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+.cardGrid, .policyGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: stretch; }
 .panel { min-width: 0; padding: 16px; border-radius: 14px; border: 1px solid var(--border); background: color-mix(in oklch, var(--muted) 35%, var(--card)); box-shadow: inset 0 2px 4px var(--surface-shadow), 0 1px 0 var(--edge-light); }
 .grounding { container-type: inline-size; background: linear-gradient(155deg, var(--background), color-mix(in oklch, var(--muted) 65%, var(--card))); box-shadow: inset 0 1px 0 var(--edge-light), 0 2px 3px var(--surface-shadow); }
 .knobLabel { display: flex; height: 48px; align-items: center; justify-content: center; gap: 2px; text-align: center; }
