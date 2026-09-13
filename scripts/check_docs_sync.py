@@ -6,9 +6,9 @@ asserts that every place we describe the system still agrees:
 
     surface            file
     ------------------------------------------------------------------
-    architecture model  oreag_1.c4
+    architecture model  frontend/public/architecture.c4
     README              Readme.md
-    flow doc            flow.md
+    flow doc            FLOW.md
     in-app docs page    frontend/src/app/docs/content.json
     in-app API tab      frontend/src/components/project/api-tab.tsx
 
@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # copy makes the LikeC4 tooling report every element as declared twice.
 C4 = ROOT / "frontend/public/architecture.c4"
 README = ROOT / "Readme.md"
-FLOW = ROOT / "flow.md"
+FLOW = ROOT / "FLOW.md"
 DOCS_JSON = ROOT / "frontend/src/app/docs/content.json"
 API_TAB = ROOT / "frontend/src/components/project/api-tab.tsx"
 CONFIG_PY = ROOT / "backend/app/config.py"
@@ -48,6 +48,28 @@ MCP_SERVER = ROOT / "mcp-server/oreag_mcp/server.py"
 ROUTERS_DIR = ROOT / "backend/app/routers"
 SERVICES_DIR = ROOT / "backend/app/services"
 MIGRATIONS = ROOT / "supabase/migrations"
+
+# Feature, in-app section/marker, connected LikeC4 element, implementation.
+# Keep frontend estimates here too: the service-only coverage check cannot see them.
+DASHBOARD_FEATURES = (
+    ("Spending-change insights", "usage-analytics", "Why did spending change?", "spendingInsights", "frontend/src/lib/usage-insights.ts"),
+    ("Budget forecast", "usage-analytics", "Budget forecast", "budgetForecast", "frontend/src/lib/budget-forecast.ts"),
+    ("Budgets and alerts", "usage-analytics", "Budgets and alerts", "budgets", "backend/app/services/budgets.py"),
+    ("Query history", "queries", "## Queries", "queryHistory", "backend/app/services/query_history.py"),
+    ("Query timeline", "queries", "Query debugging timeline", "queryTimeline", "backend/app/services/query_timeline.py"),
+    ("Cache inspector", "queries", "Cache inspector", "cacheInsights", "backend/app/services/cache_insights.py"),
+    ("Failed request explorer", "queries", "Failed request explorer", "requestFailures", "backend/app/services/request_failures.py"),
+    ("Saved views", "queries", "Saved views", "savedViews", "backend/app/routers/saved_views.py"),
+    ("Project readiness", "health", "Readiness and diagnostics", "knowledgeHealth", "backend/app/services/knowledge_health.py"),
+    ("Quality trends", "health", "Quality trends", "qualityTrends", "backend/app/services/quality_trends.py"),
+    ("Document impact and freshness", "health", "Document impact and freshness", "documentInsights", "backend/app/services/document_insights.py"),
+    ("Gaps", "knowledge-gaps", "Grouping and evidence", "knowledgeGaps", "backend/app/services/knowledge_gaps.py"),
+    ("Gap verification", "knowledge-gaps", "Verify fix", "gapVerification", "backend/app/routers/gap_verification.py"),
+    ("Evaluator", "querying", "Evaluation playground", "evaluations", "backend/app/services/evaluations.py"),
+    ("Automatic checks after changes", "projects", "Automatic checks after changes", "quality", "backend/app/services/quality.py"),
+    ("Source conflict review", "files-management", "Source conflict review", "sourceConflicts", "backend/app/services/source_conflicts.py"),
+    ("Page preloading", "dashboard", "Page preloading", "navigationPrefetch", "frontend/src/components/dashboard-prefetch.tsx"),
+)
 
 
 # ── findings ────────────────────────────────────────────────────────────────
@@ -443,6 +465,71 @@ def check_feature_surfaces(rep: Report) -> None:
                 )
 
 
+def documentation_sections(rep: Report) -> dict[str, dict]:
+    try:
+        sections = json.loads(read(DOCS_JSON))
+        if not isinstance(sections, list) or not all(
+            isinstance(item, dict) and isinstance(item.get("id"), str)
+            and isinstance(item.get("body"), str) for item in sections
+        ):
+            raise ValueError("expected sections with string ids and bodies")
+        by_id = {item["id"]: item for item in sections}
+        if len(by_id) != len(sections):
+            raise ValueError("duplicate section ids")
+        return by_id
+    except (ValueError, TypeError) as error:
+        rep.fail("docs-structure", str(error), str(DOCS_JSON.relative_to(ROOT)))
+        return {}
+
+
+def check_dashboard_features(rep: Report) -> None:
+    sections = documentation_sections(rep)
+    c4 = re.sub(r"(?m)^\s*//[^\n]*", "", read(C4))
+    # A named box is insufficient: require a real model relationship, not just
+    # text in a description or a dynamic-view annotation.
+    model = re.split(r"\bviews\s*\{", c4, maxsplit=1)[0]
+    connected = set()
+    for source, target in re.findall(r"\b(\w+)\s*(?:-\[[^\]]+\])?->\s*(\w+)\b", model):
+        connected.update((source, target))
+    coverage = read(ROOT / "docs/feature-coverage.md")
+    for name, section, marker, element, source in DASHBOARD_FEATURES:
+        body = sections.get(section, {}).get("body", "")
+        if marker.casefold() not in body.casefold():
+            rep.fail("dashboard-features", f"{name} is missing from its {section} guide", str(DOCS_JSON.relative_to(ROOT)))
+        if not (ROOT / source).is_file():
+            rep.fail("dashboard-features", f"{name} has no implementation at {source}", source)
+        if not re.search(rf"\b{re.escape(element)}\s*=\s*(?:component|worker)\b", c4):
+            rep.fail("dashboard-features", f"{name} has no {element} component", str(C4.relative_to(ROOT)))
+        elif element not in connected:
+            rep.fail("dashboard-features", f"{name} ({element}) is disconnected from the architecture model", str(C4.relative_to(ROOT)))
+        if f"`{element}`" not in coverage or source not in coverage:
+            rep.fail("dashboard-features", f"{name} is absent from the coverage inventory", "docs/feature-coverage.md")
+
+
+def check_dashboard_navigation(rep: Report) -> None:
+    sidebar = ROOT / "frontend/src/components/dashboard-sidebar.tsx"
+    match = re.search(r"const mainNav\s*=\s*\[([\s\S]*?)\n\]", read(sidebar))
+    links = re.findall(r'href:\s*"([^"]+)",\s*label:\s*"([^"]+)"', match[1]) if match else []
+    if not links:
+        rep.fail("dashboard-navigation", "could not extract mainNav", str(sidebar.relative_to(ROOT)))
+        return
+    body = documentation_sections(rep).get("dashboard", {}).get("body", "")
+    documented = [(href, label) for label, href in re.findall(r"\|\s*\*\*([^*]+)\*\*\s*\|\s*`(/[^`]+)`\s*\|", body)]
+    if documented != links:
+        rep.fail("dashboard-navigation", f"sidebar links/order differ: code={links}; docs={documented}", str(DOCS_JSON.relative_to(ROOT)))
+    for href, _ in links:
+        page = ROOT / "frontend/src/app/(dashboard)" / href.lstrip("/") / "page.tsx"
+        if not page.is_file():
+            rep.fail("dashboard-navigation", f"documented navigation has no page at {href}", str(page.relative_to(ROOT)))
+
+
+def check_documentation_images(rep: Report) -> None:
+    for section in documentation_sections(rep).values():
+        for image in re.findall(r"!\[[^\]]*\]\((/[^)\s]+)\)", section["body"]):
+            if not (ROOT / "frontend/public" / image.lstrip("/")).is_file():
+                rep.fail("docs-images", f"{section['id']} references missing image {image}", str(DOCS_JSON.relative_to(ROOT)))
+
+
 def check_api_tab(rep: Report, cfg: dict) -> None:
     """The in-app API tab is a user-facing contract; keep it honest."""
     tab = read(API_TAB)
@@ -555,6 +642,9 @@ def run() -> Report:
     check_c4_covers_services(rep, modules)
     check_readme_freshness(rep, n_migrations)
     check_feature_surfaces(rep)
+    check_dashboard_features(rep)
+    check_dashboard_navigation(rep)
+    check_documentation_images(rep)
     check_api_tab(rep, cfg)
     check_auth_redirects_are_public(rep)
     check_architecture_model_exists(rep)
@@ -600,7 +690,8 @@ def main() -> int:
         print()
     if not rep.failures:
         print("Docs are in sync with the code. "
-              f"({len(http_routes())} routes, {len(mcp_tools())} MCP tools checked)")
+              f"({len(http_routes())} routes, {len(mcp_tools())} MCP tools, "
+              f"{len(DASHBOARD_FEATURES)} dashboard features checked)")
         return 0
     print(f"Documentation drift: {len(rep.failures)} issue(s)\n")
     for f in rep.failures:

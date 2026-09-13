@@ -54,7 +54,7 @@ export function SourceConflicts({ projectId }: { projectId: string }) {
     setMessage(`Review saved: ${statusLabel[item.status].toLowerCase()}.`)
   }
   return <>
-    <Button variant="outline" size="sm" onClick={() => setOpen(true)} aria-label="Review source conflicts"><ScalesIcon aria-hidden="true" /><span className="hidden sm:inline">Conflicts</span></Button>
+    <Button variant="outline" size="icon" className="lg:w-28 lg:px-3" onClick={() => setOpen(true)} aria-label="Review source conflicts" title="Review source conflicts"><ScalesIcon aria-hidden="true" /><span className="hidden lg:inline">Conflicts</span></Button>
     <Sheet open={open} onOpenChange={setOpen}><SheetContent side="right" className="w-full max-w-full bg-background sm:w-[860px] sm:max-w-[calc(100vw-2rem)]">
       <SheetHeader className="p-6 pr-12"><SheetTitle className="flex items-center gap-2 text-lg"><ScalesIcon aria-hidden="true" className="size-5 text-muted-foreground" />Source conflicts</SheetTitle><SheetDescription>Compare possible disagreements and decide whether they matter.</SheetDescription></SheetHeader>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 pb-6">

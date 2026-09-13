@@ -154,15 +154,34 @@ model {
   // ── the software system in scope ─────────────────────────────────────────
 
   oreag = softwareSystem 'Oreag' 'Turns documents into a queryable RAG API with an agent memory graph. Multi-tenant, bring your own key.' {
-    link ./flow.md 'Flow diagrams'
-    link ./Readme.md 'README'
+    link /docs 'Product documentation'
+    link /architecture.c4 'Architecture source'
 
-    dashboard = container 'Dashboard' 'Projects, files, settings, streaming playground, 3D knowledge graph' {
+    dashboard = container 'Dashboard' 'Projects, Usage, Queries, Health, Gaps, account settings and project tools' {
       technology 'Next.js 16 · React 19 · TypeScript · Tailwind v4 · shadcn/ui · SWR'
       icon tech:nextjs
 
       ui = component 'Dashboard UI' 'Six project tabs: Files, Memory, Playground, API, Visualize, Settings' {
         style { shape browser }
+        metadata {
+          navigation 'New project, Overview, API keys, Usage, Queries, Health, Gaps. Profile is in the account menu.'
+          health-order 'Project readiness, Quality trends, then Document impact and freshness; operational warnings appear above the sections.'
+        }
+      }
+      navigationPrefetch = component 'Page preloading' 'Complete routes and shared SWR data warm independently; link hover, focus and touch have priority.' {
+        technology 'components/dashboard-prefetch.tsx · lib/navigation-prefetch.ts · lib/navigation-data.ts'
+        metadata {
+          bounds 'One idle data job plus one intent job; up to three projects prepare in the background. Other owned project links prepare on intent.'
+          lifecycle 'Pause while hidden or offline; Data Saver skips background speculation; sign-out stops jobs. Timeouts and rejected preloads remain retryable; mounted pages retain normal revalidation.'
+        }
+      }
+      spendingInsights = component 'Spending-change insights' 'Frontend arithmetic compares complete UTC periods, separating request volume from blended cost per request.' {
+        technology 'lib/usage-insights.ts · components/settings/usage-insights.tsx'
+        metadata { estimates 'Next 30 days extrapolates the recent complete-day rate. Missing costs withhold the effects and estimate. The breakdown describes recorded changes, not causal attribution.' }
+      }
+      budgetForecast = component 'Budget forecast' 'Frontend month-end estimate from recorded month-to-date spending and elapsed UTC days.' {
+        technology 'lib/budget-forecast.ts · components/settings/budget-forecast.tsx'
+        metadata { estimates 'Requires three elapsed days and measured activity. Partial positive spend shows Based on available costs and withholds headroom and a reach date. Estimates never trigger alerts or stop requests.' }
       }
       authRoutes = component 'Auth Route Handlers' '/auth/confirm · /auth/callback · /api/auth/methods'
     }
@@ -176,7 +195,7 @@ model {
         prepared-statements 'prepare_threshold=None is load-bearing under TRANSACTION pooling: a named prepared statement is created on one server backend and the next transaction can be routed to a different one'
         null-pool 'DB_USE_NULL_POOL is the escape hatch for many instances or a separate ingest service; off by default because a TLS + SCRAM handshake per request is worse than a cheap idle connection'
         cors 'allow_credentials=False is the actual control. The *.vercel.app preview pattern is a SHAPE filter and cannot prove ownership, since anyone can register a matching hostname under their own team. Startup REFUSES to run credentials plus a preview pattern - a hard failure the health check catches, not a warning that rots in a log.'
-        threads 'all four background threads (2 ingest workers, maintenance sweep, flight-lock heartbeat) are daemon=True with explicit stop signals, so none can hold the process open'
+        threads 'Ingestion, evaluation, webhook, budget, operations, snapshot and maintenance workers are daemon threads with stop signals. Redis single-flight also uses a bounded lock heartbeat; worker roles are defined by main.py and their service modules.'
       }
 
       routers = component 'Routers' 'backend/app/routers' {
@@ -186,6 +205,17 @@ model {
             version-decisions 'POST /files/{id}/version is the only way in or out of status=review, and the only owner-side surface that can retire live content. Both rows are locked in one id-ordered FOR UPDATE, everything lands in ONE commit, and it makes zero storage calls - so "the commit succeeded" and "the operation succeeded" are the same statement, and a replay is a no-op rather than a second supersession.'
             version-download 'GET /files/{id}/content?format=source|markdown is the only way to read a superseded edition. Without it the blobs kept forever would be unreachable storage.'
             no-public-confirm 'deliberately absent from /v1 and MCP: /openapi.json and /docs are unauthenticated, so a confirm endpoint there would be a publicly documented way to retire live law - and an API key is not the person the review gate exists to ask.'
+          }
+        }
+        savedViews = component 'Saved views API' 'Account-private named filters for Queries and Failed requests; no question or answer copies.' {
+          technology 'routers/saved_views.py · saved_query_views · migration 0050'
+          metadata { contract 'GET /api/account/query-views; PUT/DELETE /api/account/query-views/{view_id}. Validated project ownership, explicit retry-safe UUIDs, separate view kinds, maximum 50 per account.' }
+        }
+        gapVerification = component 'Gap verification API' 'Checks selected retained questions through the evaluator and exposes current or attached resolution evidence.' {
+          technology 'routers/gap_verification.py · evaluation_runs · knowledge_gap_reviews · migration 0050'
+          metadata {
+            contract 'GET/POST /api/projects/{project_id}/gaps/{key}/verification. Starting a run uses provider credits; viewing results does not.'
+            resolution 'Close review needs no test. Resolve with verification requires complete passing checks matching current documents, settings and evidence. An improvement claim needs a comparable earlier failing check; a first passing test shows only current behavior.'
           }
         }
         publicApi = component 'Public API' '/v1/* — query · stream · history · health · feedback · retrieve · explore · memory · graph · ingest' {
@@ -332,7 +362,7 @@ model {
           metadata {
             l1 'normalize_question (lowercase, collapse whitespace, strip trailing punctuation) then an exact key lookup in Redis'
             l2 'embeds standalone questions and runs pgvector cosine over cached questions; reuse also requires conservative request equivalence; a hit is promoted into L1'
-            key 'project + llm provider/model + embedding provider/model + top_k + content_version + normalized question'
+            key 'A SHA-256 hash of request-v2, project, LLM and embedding providers/models, top_k, answer/content signature, normalized original question and exact recent conversation turns. The project id prefixes the hash.'
             isolation 'project.id is the FIRST key element, so cache and lock are scoped per project and two projects asking the identical question can never collide. A project has exactly one owner, so accounts cannot share an answer either. The dashboard /api and the public /v1 deliberately DO share, because both run the same run_query.'
             invalidation 'content_version bumps on any chunk or memory write, so the whole key space rolls over'
             singleflight 'SET NX PX with a per-acquisition token. The leader computes, the followers wait, and only the leader stores.'
@@ -414,11 +444,12 @@ model {
             measurements '30-day query activity and current feedback ratings; retrieval averages use measured uncached queries only, preserving missing values as null'
           }
         }
-        knowledgeGaps = component 'Knowledge Gaps' 'Owner inbox grouping repeated questions with negative feedback or weak measured evidence, with persistent review state.' {
+        knowledgeGaps = component 'Gaps' 'Owner inbox grouping matching question wording with negative feedback or weak measured evidence, with persistent review state.' {
           #readpath
           technology 'services/knowledge_gaps.py · GET /api/account/knowledge-gaps · GET/PUT /api/account/knowledge-gaps/{project_id}/{key} · migration 0048'
           metadata {
             scope 'Owner-scoped query and review reads; bounded samples preserve missing evidence measurements; no provider calls or changes to retrieval.'
+            signals 'Only measured uncached document questions below 0.35 contribute weak evidence. Recognized greetings, casual speech and clear keyboard noise are excluded from that signal. Explicit negative feedback still flags a query.'
             workflow 'Revision and evidence checks protect review updates. New flagged evidence reopens resolved groups. Selected evidence can be checked through the evaluator; attaching verification requires complete passing checks against current documents, settings and evidence.'
           }
         }
@@ -464,7 +495,7 @@ model {
           metadata {
             tenancy 'every query filters on the authenticated owner. usage_events carries owner_id directly; query_logs has no owner column, so it is reached only through a JOIN on projects.owner_id - filtering it by project id alone would let a guessed UUID read a different account.'
             null-honesty 'SUM over all-NULL stays null end to end. A token count of 0 is a measurement; never measured is a different fact, and COALESCE only ever touches request counts.'
-            caveats 'the response names what it cannot see: rows whose provider reported no token usage (and which models produced them), and that image captioning and audio transcription build their SDK clients directly instead of going through the provider factory, so no wrapper sees them. Ingestion embedding IS now counted.'
+            caveats 'Missing provider usage and unpriced models remain explicit. Ingestion embedding, image captioning and audio transcription ARE metered; vision_and_audio_excluded is retained for compatibility and currently false.'
             round-trips 'nine aggregate queries became four. Each was fast and each cost a network round trip, and against a pooled Postgres the round trip is the entire cost - five seconds of report for milliseconds of query. One GROUP BY on the full key tuple yields a cube every rollup derives from.'
             dialect-trap 'the grouping keys are bare IS NULL predicates, not CASE. A CASE renders its 1/0 as bind parameters which SQLAlchemy numbers independently in SELECT and GROUP BY, so Postgres rejects the query - while SQLite, which the suite runs on, accepts it. Tests passed and production would have 500d; a compile-against-postgresql test now guards it.'
           }
@@ -664,6 +695,12 @@ model {
   ui -[uses]-> dashboardApi 'calls the dashboard API, streams the playground over SSE' {
     technology 'Bearer JWT'
   }
+  ui -[internal]-> navigationPrefetch 'background and link-intent preparation'
+  navigationPrefetch -[uses]-> dashboardApi 'warm the same owner-scoped read keys as each page'
+  ui -[internal]-> spendingInsights 'render recorded spending comparisons'
+  spendingInsights -[uses]-> usageReport 'consume the shared usage payload; no extra report request'
+  ui -[internal]-> budgetForecast 'render month-end recorded-cost estimates'
+  budgetForecast -[uses]-> budgets 'consume current monthly budget totals'
   authRoutes -[auth]-> identity 'verifyOtp · exchangeCodeForSession'
   mcpServer -[uses]-> publicApi 'proxies all nine tools' {
     technology 'Bearer oreag_sk_…'
@@ -693,10 +730,22 @@ model {
   ingestion -[internal]-> contentVersion 'bumps, invalidating every cache'
 
   dashboardApi -[internal]-> queryHistory 'owner-scoped query list and detail'
+  dashboardApi -[internal]-> savedViews 'list, save, rename and delete private filter presets'
+  savedViews -[persist]-> db 'validated filters in saved_query_views'
+  dashboardApi -[internal]-> knowledgeGaps 'read groups and save review decisions'
+  knowledgeGaps -[persist]-> db 'owned query evidence and knowledge_gap_reviews'
+  dashboardApi -[internal]-> gapVerification 'start or inspect selected question checks'
+  gapVerification -[internal]-> knowledgeGaps 'validate retained evidence and its version'
+  gapVerification -[internal]-> evaluations 'create retry-safe isolated background runs'
+  gapVerification -[persist]-> db 'read current and attached runs, including archived results'
   dashboardApi -[internal]-> sourceConflicts 'read comparisons and save review decisions'
   dashboardApi -[internal]-> documentInsights 'read document impact and save content reviews'
   dashboardApi -[internal]-> qualityTrends 'read observed live and evaluation trends'
   dashboardApi -[internal]-> requestFailures 'inspect retained failures'
+  documentInsights -[persist]-> db 'read document attribution and record content-signature reviews'
+  qualityTrends -[persist]-> db 'bounded live query samples and comparable evaluation results'
+  requestFailures -[persist]-> db 'read retained owner-scoped request_metrics'
+  usageReport -[persist]-> db 'aggregate owned usage_events and query diagnostics'
   cacheInsights -[internal]-> queryTimeline 'attach observed cache decisions to request context'
   sourceConflicts -[persist]-> db 'read indexed passages and persist review state'
   quality -[internal]-> evaluations 'drive isolated saved runs and assess regressions'
@@ -929,6 +978,37 @@ views {
     }
 
     autoLayout LeftRight 120 90
+  }
+
+  view dashboardExperience {
+    title 'Dashboard — Navigation and spending'
+    description 'Full route/data preloading and frontend estimates, separate from measured spend and warning-only budgets.'
+    include oreag.dashboard.ui, oreag.dashboard.navigationPrefetch,
+      oreag.dashboard.spendingInsights, oreag.dashboard.budgetForecast,
+      oreag.backend.routers.dashboardApi, oreag.backend.services.usageReport,
+      oreag.backend.services.budgets, oreag.db
+    autoLayout LeftRight 110 90
+  }
+
+  view monitoring {
+    title 'Dashboard — Queries and Health'
+    description 'Observed query/cache diagnostics, private Saved views, request failures, quality trends and explicit document reviews.'
+    include oreag.dashboard.ui, oreag.backend.routers.dashboardApi,
+      oreag.backend.routers.savedViews, oreag.backend.services.queryHistory,
+      oreag.backend.services.queryTimeline, oreag.backend.services.cacheInsights,
+      oreag.backend.services.requestFailures, oreag.backend.services.knowledgeHealth,
+      oreag.backend.services.qualityTrends, oreag.backend.services.documentInsights, oreag.db
+    autoLayout LeftRight 110 90
+  }
+
+  view reviewWorkflows {
+    title 'Dashboard — Gaps and verification'
+    description 'Review closure, evidence-backed verification, automatic checks after changes and source conflict decisions.'
+    include oreag.dashboard.ui, oreag.backend.routers.dashboardApi,
+      oreag.backend.services.knowledgeGaps, oreag.backend.routers.gapVerification,
+      oreag.backend.services.evaluations, oreag.backend.services.quality,
+      oreag.backend.services.sourceConflicts, oreag.db
+    autoLayout LeftRight 110 90
   }
 
   view readpath {

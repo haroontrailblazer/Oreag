@@ -43,6 +43,8 @@ GitLab, VS Code, Obsidian, and most Markdown viewers.
 | 8 | [Admission control](#8-admission-control--rate-limits-quotas-metering) | decision tree |
 | 9 | [Structural scale](#9-structural-scale--indexes-pooling-fleet-wide-locks) | decision tree |
 | 10 | [Passkeys, codes and two-factor](#10-passkeys-codes-and-two-factor) | decision tree + sequence |
+| 11 | [Monitoring and review workflows](#11-monitoring-and-review-workflows) | feature map + verification flow |
+| 12 | [Page preloading](#12-page-preloading) | navigation and data lifecycle |
 
 ---
 
@@ -758,3 +760,59 @@ only review metadata in `knowledge_gap_reviews`, scoped through project ownershi
 and guarded by revision/evidence-version checks. New flagged evidence reopens a
 resolved group; query-log retention governs which groups are visible. See
 [Knowledge gaps](docs/knowledge-gaps.md) for grouping, limits, API and deployment.
+
+## 11. Monitoring and review workflows
+
+The dashboard reuses recorded measurements for the following workflows. Owner
+reports do not call an LLM or infer missing costs. Starting an evaluation or gap
+verification is an explicit action that consumes provider credits.
+
+| Surface | Implemented behavior | Source of evidence |
+|---|---|---|
+| Usage | Spending-change insights and next-30-day estimate | Complete UTC periods from the shared usage report; arithmetic effects are not causal attribution. |
+| Budgets | Warning-only thresholds and budget forecast | Recorded UTC month-to-date spend; forecasts need three elapsed days, label estimates, and never trigger alerts. |
+| Queries | Query history, query timeline and Cache inspector | Retained per-invocation measurements; cache decisions are recorded during the request, not reconstructed later. |
+| Failed request explorer | Filters, pagination and status-based guidance | Retained request metrics, including interrupted or failed streams; no saved request body or original error text. |
+| Saved views | Private, named Query/Failed request filter presets | `saved_query_views`; validated filters only, with retry-safe IDs and an account limit of 50. |
+| Health | Project readiness, Quality trends, then Document impact and freshness | Live query feedback, comparable evaluation results, document attribution and explicit content reviews. |
+| Gaps | Group wording, inspect evidence, Close review, or Resolve with verification | Retained query evidence and revision-checked reviews. A recognized greeting is not a weak-document-match signal; negative feedback remains reviewable. |
+| Evaluator and automatic checks | Isolated tests, scheduled runs and checks after changes | Frozen document/memory snapshots and explicit expected-text/source checks; live project vectors are not changed. |
+| Files | Source conflict review | Bounded comparisons of currently effective English passages; saving a review does not modify documents or retrieval. |
+
+```mermaid
+flowchart LR
+    Q[Recorded questions and feedback] --> G[Gaps: group and inspect evidence]
+    G --> C[Close review without a test]
+    G --> V[Verify fix: selected questions and expected checks]
+    V --> E[Evaluator: fresh isolated snapshot and provider calls]
+    E --> P{All checks pass and evidence is current?}
+    P -- yes --> R[Resolve with verification: attach run]
+    P -- no --> O[Inspect results; keep the review open]
+    R --> N[New flagged evidence reopens the review]
+    C --> N
+    D[Document, memory or answer-setting change] --> A[Automatic checks: debounce and wait for indexing]
+    A --> E
+```
+
+Passing selected checks establishes their current result. Improvement requires a
+comparable earlier failing check; a first passing run does not prove improvement.
+Attached evidence remains reachable after evaluation archival. Source conflict
+decisions and document freshness reviews are separate from gap resolutions.
+
+## 12. Page preloading
+
+The signed-in dashboard schedules full Next.js route prefetches independently of
+SWR data reads. Hover, keyboard focus and touch intent bypass idle waiting. One
+background data read and one priority read can run together; a ten-second timeout
+keeps speculative reads bounded. Default page keys include Gaps, failed requests,
+Health trends, Usage budgets and Operations, and account settings.
+
+Up to three owned projects prepare in the background; other projects prepare on
+link intent. Hidden/offline tabs pause scheduling, Data Saver skips background
+speculation, and sign-out stops it. Preloading retains normal page revalidation
+and never changes backend retrieval or converts unknown measurements into zero.
+
+The interactive model includes dedicated **Dashboard — Navigation and spending**,
+**Dashboard — Queries and Health**, and **Dashboard — Gaps and verification** views.
+See [feature coverage](docs/feature-coverage.md) for implementation pointers and
+the checks that keep these docs and diagrams aligned.

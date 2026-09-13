@@ -30,6 +30,9 @@ sentence-transformers), stored encrypted at rest.
 
 ## Features
 
+- **Spending insights and budget forecasts** - Usage explains changes in recorded spend, separates request volume from blended cost per request, and estimates the next 30 days. Monthly budget forecasts use their own UTC month-to-date totals. Budgets send threshold alerts without stopping requests; estimates label their assumptions and preserve missing costs.
+- **Quality trends and document impact** - Health shows project readiness, live feedback and document-match trends, comparable evaluation runs, then document impact and freshness. Reviews are due after 90 days or changed content; indexing alone does not establish freshness. Failed request explorer separates retained errors, rejections, stream failures, and interruptions.
+- **Page preloading** - full routes and shared page data prepare independently, with hover, focus, and touch priority. Background project loading is bounded; Data Saver, offline state, and sign-out are respected.
 - **Review workflows** - verify gap fixes with current evaluator checks, inspect recorded cache decisions, save private Query and Failed request views, run checks after project changes, and review possible source conflicts in Files. Requires migration 0050.
 - **Knowledge gaps inbox** - groups repeated query wording within each project, flags negative feedback and low measured retrieval similarity, and saves review notes with resolve/reopen actions. New negative evidence reopens resolved groups. Inspect source queries, review documents, and add evaluator test cases without changing live retrieval. See [the Knowledge gaps guide](docs/knowledge-gaps.md); requires migration 0048.
 - **Any document to an API** - upload, auto-convert to Markdown, chunk, embed, and serve.
@@ -51,8 +54,8 @@ sentence-transformers), stored encrypted at rest.
 - **Secure by design** - Supabase Auth (JWT/JWKS), Row-Level Security, SHA-256-hashed API keys, Fernet-encrypted provider keys.
 - **Tunable** - chunk size/overlap (global or per-file), embedding model, LLM, top-K, and the answer policy above (grounding threshold, sources required, answer language, standing notice) - with one-click re-index. Everything except the embedding config takes effect instantly.
 - **Matryoshka (MRL) dimensions** - MRL-capable embedding models (OpenAI text-embedding-3, gemini-embedding-001, Cohere embed-v4.0, Jina v3) offer multiple sizes; shrinking the same model truncates stored vectors (chunks **and** memories) in place instantly with zero re-embedding, while growing or switching models re-embeds everything.
-- **Approximate vector search (HNSW)** - migration 0018 builds one *partial* HNSW index per embedding dimension (256/384/512/768/1024/1536; 3072 is over pgvector's 2,000-dimension limit and stays exact). A query is only routed onto an index when four gates pass: the feature flag, pgvector >= 0.8, a valid cosine index for that exact dimension, and a project holding >= 20,000 chunks *and* >= 2% of all indexed rows - because a global index must post-filter by `project_id`, so recall depends on the project's share while exact cost depends on its size. Everything else keeps the exact scan, which is never removed. See [flow.md §9.1](flow.md#9-structural-scale--indexes-pooling-fleet-wide-locks).
-- **Passkeys, verification codes and two-factor** - sign in with a **passkey** in one step (no password, phishing-resistant, and it ends the ceremony because it is already possession plus biometric), or with a password or a 6-digit emailed code. Weaker paths pass through an optional **two-factor** gate; passkey sign-ins skip it by design rather than by special case. Every email carries both a code and a link, so a code works on a phone while the link still works for anyone who clicks it. Changing a password while signed in now requires an emailed code that is verified BEFORE the password fields appear, closing the hole where a stolen session became permanent takeover. **Lost your authenticator?** Ten single-use recovery codes are issued when you enrol; entering one removes the account's second factors so you can sign in and set it up again (a code cannot grant `aal2` - only Supabase issues that - so removing the factor is the only shape that works). Only SHA-256 hashes are stored. Enforcement is server-side: `backend/app/auth/jwt.py` reads the JWT's `aal` claim and refuses a session below `aal2` for any account with a verified factor, so lifting a token out of the browser and calling the API with curl does not bypass the prompt. See [flow.md §10](flow.md#10-passkeys-codes-and-two-factor).
+- **Approximate vector search (HNSW)** - migration 0018 builds one *partial* HNSW index per embedding dimension (256/384/512/768/1024/1536; 3072 is over pgvector's 2,000-dimension limit and stays exact). A query is only routed onto an index when four gates pass: the feature flag, pgvector >= 0.8, a valid cosine index for that exact dimension, and a project holding >= 20,000 chunks *and* >= 2% of all indexed rows - because a global index must post-filter by `project_id`, so recall depends on the project's share while exact cost depends on its size. Everything else keeps the exact scan, which is never removed. See [FLOW.md §9.1](FLOW.md#9-structural-scale--indexes-pooling-fleet-wide-locks).
+- **Passkeys, verification codes and two-factor** - sign in with a **passkey** in one step (no password, phishing-resistant, and it ends the ceremony because it is already possession plus biometric), or with a password or a 6-digit emailed code. Weaker paths pass through an optional **two-factor** gate; passkey sign-ins skip it by design rather than by special case. Every email carries both a code and a link, so a code works on a phone while the link still works for anyone who clicks it. Changing a password while signed in now requires an emailed code that is verified BEFORE the password fields appear, closing the hole where a stolen session became permanent takeover. **Lost your authenticator?** Ten single-use recovery codes are issued when you enrol; entering one removes the account's second factors so you can sign in and set it up again (a code cannot grant `aal2` - only Supabase issues that - so removing the factor is the only shape that works). Only SHA-256 hashes are stored. Enforcement is server-side: `backend/app/auth/jwt.py` reads the JWT's `aal` claim and refuses a session below `aal2` for any account with a verified factor, so lifting a token out of the browser and calling the API with curl does not bypass the prompt. See [FLOW.md §10](FLOW.md#10-passkeys-codes-and-two-factor).
 - **Built for concurrency** - the pooled database connection is handed back *before* every provider call (`release_connection`), so a multi-minute streamed completion no longer parks a connection nobody else can use; `DATABASE_URL` uses the Supabase **transaction pooler** with the client pool sized at or below the tenant pool so overload fast-fails into a 503 instead of queueing invisibly; and single-flight de-duplication is fleet-wide via a token-checked Redis lock, so N instances asking the same question compute once, not once each. Each of the three degrades safely: a kill switch, a fast-fail, and fail-open to a per-process lock.
 
 ---
@@ -381,17 +384,22 @@ Oreag/
 │                             # (the LikeC4 model lives at
 │                             #  frontend/public/architecture.c4 - served at
 │                             #  /architecture.c4 and rendered at /architecture)
-└── flow.md                   # architecture + flow diagrams
+└── FLOW.md                   # architecture + flow diagrams
 ```
 
 ---
 
 ## Keeping the docs honest
 
+The [dashboard feature coverage inventory](docs/feature-coverage.md) maps current
+features to implementation files, in-app guides, and connected architecture
+elements. The diagram includes focused views for navigation/spending, monitoring,
+and Gaps verification.
+
 The code is the source of truth. `scripts/check_docs_sync.py` extracts the real
 facts from the source (routes, tuning constants, provider catalog, MCP tools,
 migrations) and fails if any surface that describes the system has drifted:
-the LikeC4 model, this README, `flow.md`, the in-app docs page and the in-app
+the LikeC4 model, this README, `FLOW.md`, the in-app docs page and the in-app
 API tab.
 
 ```bash

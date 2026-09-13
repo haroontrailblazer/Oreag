@@ -441,8 +441,8 @@ export function FilesTab({
     // list off-screen. That number had to account for the card's OWN header;
     // this one does not, which is why it cannot rot the same way.
     <Card role="region" aria-label="Files listing" className="flex max-h-full min-h-0 flex-col gap-0 overflow-hidden p-0">
-      <div className="flex shrink-0 items-start justify-between gap-3 border-b px-5 py-4">
-        <div className="min-w-0 flex-1 space-y-0.5">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
+        <div className="min-w-28 flex-1 space-y-0.5">
           <h3 className="text-sm font-semibold">Files</h3>
           <p className="text-xs text-muted-foreground">
             {fileCount === 0
@@ -499,8 +499,9 @@ export function FilesTab({
           {files && files.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" aria-label="File actions">
-                  <MoreHorizontal className="size-4" />
+                <Button variant="outline" size="icon" className="lg:w-28 lg:px-3" aria-label="File actions" title="File actions">
+                  <MoreHorizontal className="size-4" aria-hidden="true" />
+                  <span className="hidden lg:inline">More</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">

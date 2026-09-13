@@ -41,7 +41,7 @@ export function Markdown({
   children: string
 }) {
   return (
-    <div className="prose max-w-[68ch] dark:prose-invert prose-headings:scroll-mt-24 prose-h2:mt-0 prose-h2:border-b prose-h2:pb-3 prose-h2:text-2xl prose-h2:font-bold prose-h2:tracking-tight prose-h3:mt-10 prose-h3:text-lg prose-h3:font-semibold prose-h3:tracking-tight prose-p:leading-[1.8] prose-p:text-foreground/90 prose-li:leading-[1.8] prose-li:my-1 prose-li:text-foreground/90 prose-strong:text-foreground prose-strong:font-semibold prose-a:font-medium prose-a:text-sky-600 dark:prose-a:text-sky-400 prose-a:underline-offset-2 prose-table:text-sm prose-code:before:content-none prose-code:after:content-none sm:prose-lg sm:prose-h2:text-3xl sm:prose-h3:text-xl sm:prose-table:text-base">
+    <div className="prose max-w-[68ch] [overflow-wrap:break-word] dark:prose-invert prose-headings:scroll-mt-24 prose-h2:mt-0 prose-h2:border-b prose-h2:pb-3 prose-h2:text-2xl prose-h2:font-bold prose-h2:tracking-tight prose-h3:mt-10 prose-h3:text-lg prose-h3:font-semibold prose-h3:tracking-tight prose-p:leading-[1.8] prose-p:text-foreground/90 prose-li:leading-[1.8] prose-li:my-1 prose-li:text-foreground/90 prose-strong:text-foreground prose-strong:font-semibold prose-a:font-medium prose-a:text-sky-600 dark:prose-a:text-sky-400 prose-a:underline-offset-2 prose-table:text-sm prose-code:before:content-none prose-code:after:content-none sm:prose-lg sm:prose-h2:text-3xl sm:prose-h3:text-xl sm:prose-table:text-base">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -66,7 +66,7 @@ export function Markdown({
             const isBlock = Boolean(lang) || text.includes("\n")
             if (!isBlock) {
               return (
-                <code className="rounded bg-muted px-1 py-0.5 text-[0.85em] font-normal [overflow-wrap:anywhere]">
+                <code className="rounded bg-muted px-1 py-0.5 text-[0.85em] font-normal">
                   {children}
                 </code>
               )

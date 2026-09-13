@@ -182,14 +182,14 @@ export function AddFilesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button
+          size="icon"
           aria-label="Add files"
           title="Add files"
-          // Square icon button on mobile (matches the 3-dots actions button);
-          // the default padded label from sm+ (desktop untouched).
-          className="shrink-0 max-sm:w-9 max-sm:p-0"
+          // Match Conflicts and More: compact squares, equal-width desktop actions.
+          className="lg:w-28 lg:px-3"
         >
           <FileUp className="size-4" />
-          <span className="hidden sm:inline">Add files</span>
+          <span className="hidden lg:inline">Add files</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto no-scrollbar sm:max-w-lg">

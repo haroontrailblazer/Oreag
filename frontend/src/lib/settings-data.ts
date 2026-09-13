@@ -1,17 +1,9 @@
-import { preload } from "swr"
-
-import { api, fetcher } from "@/lib/api"
+import { api } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 
 /**
- * Shared SWR keys + fetchers for the Settings pages, and the warm-up that
- * fills them before the user navigates.
- *
- * These used to be inline closures inside two-factor-card.tsx, which meant
- * nothing outside that component could populate them: SWR pairs a key with
- * whatever fetcher the FIRST subscriber supplies, so a preload with a
- * different function is a different fetch. Hoisting them here is what makes
- * warming possible at all.
+ * Shared SWR keys and fetchers for Settings and DashboardPrefetch. Page reads
+ * and speculative reads use identical keys and response shapes.
  */
 
 export type Passkey = {
@@ -97,24 +89,4 @@ export async function fetchRecoveryCount(): Promise<{ remaining: number }> {
   } catch {
     return { remaining: 0 }
   }
-}
-
-/**
- * Fill the Settings caches once, on entering the dashboard.
- *
- * Settings pages are reached by a deliberate click from a sidebar that is
- * already on screen, so the fetch can happen long before the click - by which
- * point the page renders populated instead of spinning. Five requests, once
- * per session, none of them large.
- *
- * This warms data only. DashboardPrefetch separately prepares routes after
- * checking the current session, avoiding cached sign-in redirects.
- */
-export function warmSettingsData(): void {
-  preload(PROVIDER_KEYS_KEY, fetcher)
-  preload(PASSKEYS_KEY, fetchPasskeys)
-  preload(TOTP_KEY, fetchTotpFactors)
-  preload(RECOVERY_KEY, fetchRecoveryCount)
-  // Only the default window - the page fetches 7/90 on demand.
-  preload(usageKey(DEFAULT_USAGE_WINDOW), fetcher)
 }

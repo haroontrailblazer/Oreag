@@ -43,7 +43,6 @@ import {
   DEFAULT_USAGE_WINDOW,
   USAGE_REFRESH_MS,
   usageKey,
-  warmSettingsData,
 } from "@/lib/settings-data"
 import { useProjectNavPending } from "@/lib/nav-pending"
 import type { FileRecord, Project } from "@/lib/types"
@@ -311,19 +310,6 @@ function SidebarBody() {
     refreshInterval: USAGE_REFRESH_MS,
   })
   const { data: budgetAlerts } = useSWR<BudgetAlerts>(BUDGET_ALERTS_KEY, fetcher, {refreshInterval:BUDGET_REFRESH_MS})
-
-  // Fill the Settings caches while the user is still looking at the dashboard.
-  //
-  // The sidebar is the one component mounted on every signed-in page, and it is
-  // also where the links to those pages live - so by the time one is clicked
-  // the data has been sitting in cache for a while and the page renders
-  // populated instead of spinning through a loading state.
-  //
-  // Runs once per mount, after paint, so it never competes with the first
-  // render. Each fetcher swallows its own errors (see lib/settings-data).
-  useEffect(() => {
-    warmSettingsData()
-  }, [])
 
   const filteredProjects = useMemo(() => {
     const term = query.trim().toLowerCase()
