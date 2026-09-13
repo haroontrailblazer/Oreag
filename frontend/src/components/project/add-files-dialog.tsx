@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils"
 import { fetcher, uploadWithProgress } from "@/lib/api"
 import { dimensionOptions, providerUsable } from "@/lib/models"
 import type { FileRecord, ModelsResponse, Project } from "@/lib/types"
+import toolbarStyles from "./files-toolbar.module.css"
 
 // No extension whitelist: the backend ingests any file it can extract text
 // from (rich formats via MarkItDown, everything else as plain text) and
@@ -182,14 +183,13 @@ export function AddFilesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button
-          size="icon"
+          size="sm"
           aria-label="Add files"
           title="Add files"
-          // Match Conflicts and More: compact squares, equal-width desktop actions.
-          className="lg:w-28 lg:px-3"
+          className={toolbarStyles.action}
         >
-          <FileUp className="size-4" />
-          <span className="hidden lg:inline">Add files</span>
+          <FileUp className="size-3.5" aria-hidden="true" />
+          <span>Add files</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto no-scrollbar sm:max-w-lg">

@@ -17,6 +17,7 @@ import useSWR, { mutate as globalMutate } from "swr"
 
 import { ProviderKeyField } from "@/components/project/provider-key-field"
 import { EvaluationSchedule } from "@/components/project/evaluation-schedule"
+import { ChangeChecks } from "@/components/change-checks"
 import { PolicyKnob } from "@/components/project/policy-knob"
 import policySwitchStyles from "@/components/project/policy-switch.module.css"
 import styles from "@/components/project/settings-tab.module.css"
@@ -778,12 +779,24 @@ export function SettingsTab({
   ]
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} role="region" aria-label="Project settings">
+      <header className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold tracking-tight">Project settings</h2>
+          <p className="text-xs leading-5 text-muted-foreground">Manage your project, tune answers, and keep quality checks in view.</p>
+        </div>
+        <nav aria-label="Project settings sections" className={styles.sectionNav}>
+          {[
+            ["general", "General"], ["model", "Answer model"], ["policy", "Answer policy"],
+            ["indexing", "Indexing"], ["checks", "Quality checks"], ["danger", "Danger zone"],
+          ].map(([id, label]) => <a key={id} href={`#project-settings-${id}`}>{label}</a>)}
+        </nav>
+      </header>
       {/* At-a-glance summary of the project's live configuration. */}
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={3} className="flex items-center gap-2">
             <Gauge className="size-4 text-muted-foreground" />
             Overview
           </CardTitle>
@@ -795,7 +808,7 @@ export function SettingsTab({
             This project&apos;s current configuration at a glance.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+        <CardContent className={styles.overviewGrid}>
           {overview.map((item) => (
             <div
               key={item.label}
@@ -815,11 +828,241 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
+      <div className={styles.cardGrid}>
+      <Card id="project-settings-general">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <CardTitle role="heading" aria-level={3} className="flex items-center gap-2">
+                <GearSix className="size-4 text-muted-foreground" />
+                General
+              </CardTitle>
+              <CardDescription>Name your project and set how many results each query retrieves.</CardDescription>
+            </div>
+            <BestPractices
+              className="ml-auto"
+              tips={[
+                {
+                  visual: <CostViz />,
+                  title: "Model switches re-embed everything",
+                  detail:
+                    "Chunks are wiped and re-ingested, and memory embeddings are re-embedded with the new model. Budget embedding cost before switching on a large project.",
+                },
+                {
+                  visual: <DimensionsViz />,
+                  title: "Shrinking dimensions is free",
+                  detail:
+                    "Same Matryoshka model at a smaller size (e.g. 3072 to 1024) truncates stored vectors in place - instant, no API calls. Growing back requires a full re-index.",
+                },
+                {
+                  visual: <KeyViz />,
+                  title: "Key changes are instant",
+                  detail:
+                    "Replacing a provider key never re-indexes anything - only model and chunking changes do.",
+                },
+                {
+                  visual: <OverrideViz />,
+                  title: "Project keys override account keys",
+                  detail:
+                    "A key set here wins over the account-level key for this project only - handy for separate billing or rate limits.",
+                },
+                {
+                  visual: <TopKViz />,
+                  title: "top_k trades recall for noise",
+                  detail:
+                    "More retrieved chunks catch more facts but dilute the context. 5 suits focused questions; raise it for broad, multi-part ones.",
+                },
+              ]}
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="settings-name">Project name</Label>
+            <Input
+              id="settings-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={20}
+            />
+            <div
+              className={`text-right text-xs tabular-nums ${
+                name.length >= 20
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {name.length}/20
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-description">Description (optional)</Label>
+            <Textarea
+              id="settings-description"
+              rows={4}
+              className={styles.descriptionEditor}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Shown on the project card and searched from the sidebar.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-topk">Top-K results</Label>
+            <Input
+              id="settings-topk"
+              type="number"
+              min={1}
+              max={20}
+              value={topK}
+              onChange={(e) => setTopK(Number(e.target.value))}
+            />
+          </div>
+          <div className={styles.saveRow}>
+            <p className={styles.saveNote} data-pending={generalChanged}>
+              {generalChanged ? "General settings have unsaved changes." : "Applies when you save."}
+            </p>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <><Spin /> Saving…</> : "Save general settings"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card id="project-settings-model">
+        <CardHeader>
+          <CardTitle role="heading" aria-level={3} className="flex items-center gap-2">
+            <ChatCircle className="size-4 text-muted-foreground" />
+            Answer model (LLM)
+          </CardTitle>
+          <CardDescription>
+            The chat model used to write answers. Only providers you have a key
+            for appear - add more in{" "}
+            <a href="/settings/api-keys" className="underline">
+              Settings → API keys
+            </a>
+            .
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Model</Label>
+            <Select value={llm} onValueChange={changeLlm}>
+              <SelectTrigger className={cn("w-full", !llmCurrentUsable && "text-muted-foreground")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {models ? (
+                  Object.entries(models.catalog.llm).flatMap(([provider, names]) =>
+                    names
+                      .filter((model) => {
+                        if (`${provider}/${model}` === llm) return true
+                        // Retired by the vendor. Kept resolvable so existing
+                        // projects keep answering, but never offered again -
+                        // some of these now silently redirect to a different,
+                        // differently-priced model.
+                        if (isDeprecated(models, "llm", provider, model))
+                          return false
+                        return providerUsable(provider, "llm", availability, project)
+                      })
+                      .map((model) => {
+                        const usable = providerUsable(
+                          provider,
+                          "llm",
+                          availability,
+                          project
+                        )
+                        const retired = isDeprecated(models, "llm", provider, model)
+                        return (
+                          <SelectItem
+                            key={`${provider}/${model}`}
+                            value={`${provider}/${model}`}
+                            className={cn(
+                              (!usable || retired) &&
+                                "text-muted-foreground opacity-70"
+                            )}
+                          >
+                            {provider} / {model}
+                            {retired
+                              ? " · retired - switch model"
+                              : !usable
+                                ? " · key removed"
+                                : ""}
+                          </SelectItem>
+                        )
+                      })
+                  )
+                ) : (
+                  <SelectItem value={llm}>{llm}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          {encryptingLlm ? (
+            <EncryptingLoader rows={3} />
+          ) : (
+            <ProviderKeyField
+              provider={llmProvider}
+              last4={llmOverrideLast4}
+              accountHasKey={llmAccountHasKey}
+              value={llmKeyInput}
+              onChange={setLlmKeyInput}
+              editing={llmEditingKey}
+              onEditingChange={setLlmEditingKey}
+              onRemove={() => patchLlmKey("")}
+              busy={savingLlm}
+            />
+          )}
+          {!encryptingLlm && (llmEditingKey || llmForcedInput || llmChanged) && (
+            <div className="flex gap-2">
+              {llmEditingKey && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setLlmKeyInput("")
+                    setLlmEditingKey(false)
+                  }}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button onClick={handleSaveLlm} disabled={!canSaveLlm || savingLlm}>
+                {savingLlm ? <Spin /> : "Save"}
+              </Button>
+            </div>
+          )}
+          <figure className={styles.answerFlow}>
+            <figcaption>From context to answer</figcaption>
+            <div className={styles.flowSteps}>
+              <div className={styles.flowStep}>
+                <div className={styles.flowIcon} aria-hidden="true"><Cube /></div>
+                <strong>Retrieve</strong>
+                <span>Up to {topK} chunks</span>
+              </div>
+              <div className={styles.flowStep}>
+                <div className={styles.flowIcon} aria-hidden="true"><ChatCircle /></div>
+                <strong>Generate</strong>
+                <span title={llm}>{llm.slice(llm.indexOf("/") + 1)}</span>
+              </div>
+              <div className={styles.flowStep}>
+                <div className={styles.flowIcon} aria-hidden="true"><Scales /></div>
+                <strong>Respond</strong>
+                <span title={answerLanguage || "Match the question"}>{answerLanguage || "Match question"}</span>
+              </div>
+            </div>
+            <p className={styles.flowDescription}>Retrieval finds relevant passages. Your answer model turns that context into a response.</p>
+          </figure>
+        </CardContent>
+      </Card>
+
+      </div>
+
       <Card id="project-settings-policy">
         <CardHeader className="pb-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-1.5">
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle role="heading" aria-level={3} className="flex items-center gap-2">
                 <Scales className="size-4 text-muted-foreground" />
                 Answer policy
               </CardTitle>
@@ -1164,239 +1407,9 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
-      {/* The grid follows the panel width. Explicit minmax tracks keep long
-          model names from expanding the mobile layout. */}
-      <div className={styles.cardGrid}>
-      <Card id="project-settings-general">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <CardTitle className="flex items-center gap-2">
-                <GearSix className="size-4 text-muted-foreground" />
-                General
-              </CardTitle>
-              <CardDescription>Name your project and set how many results each query retrieves.</CardDescription>
-            </div>
-            <BestPractices
-              className="ml-auto"
-              tips={[
-                {
-                  visual: <CostViz />,
-                  title: "Model switches re-embed everything",
-                  detail:
-                    "Chunks are wiped and re-ingested, and memory embeddings are re-embedded with the new model. Budget embedding cost before switching on a large project.",
-                },
-                {
-                  visual: <DimensionsViz />,
-                  title: "Shrinking dimensions is free",
-                  detail:
-                    "Same Matryoshka model at a smaller size (e.g. 3072 to 1024) truncates stored vectors in place - instant, no API calls. Growing back requires a full re-index.",
-                },
-                {
-                  visual: <KeyViz />,
-                  title: "Key changes are instant",
-                  detail:
-                    "Replacing a provider key never re-indexes anything - only model and chunking changes do.",
-                },
-                {
-                  visual: <OverrideViz />,
-                  title: "Project keys override account keys",
-                  detail:
-                    "A key set here wins over the account-level key for this project only - handy for separate billing or rate limits.",
-                },
-                {
-                  visual: <TopKViz />,
-                  title: "top_k trades recall for noise",
-                  detail:
-                    "More retrieved chunks catch more facts but dilute the context. 5 suits focused questions; raise it for broad, multi-part ones.",
-                },
-              ]}
-            />
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="settings-name">Project name</Label>
-            <Input
-              id="settings-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={20}
-            />
-            <div
-              className={`text-right text-xs tabular-nums ${
-                name.length >= 20
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-muted-foreground"
-              }`}
-            >
-              {name.length}/20
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="settings-description">Description (optional)</Label>
-            <Textarea
-              id="settings-description"
-              rows={4}
-              className={styles.descriptionEditor}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Shown on the project card and searched from the sidebar.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="settings-topk">Top-K results</Label>
-            <Input
-              id="settings-topk"
-              type="number"
-              min={1}
-              max={20}
-              value={topK}
-              onChange={(e) => setTopK(Number(e.target.value))}
-            />
-          </div>
-          <div className={styles.saveRow}>
-            <p className={styles.saveNote} data-pending={generalChanged}>
-              {generalChanged ? "General settings have unsaved changes." : "Applies when you save."}
-            </p>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? <><Spin /> Saving…</> : "Save general settings"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card id="project-settings-model">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ChatCircle className="size-4 text-muted-foreground" />
-            Answer model (LLM)
-          </CardTitle>
-          <CardDescription>
-            The chat model used to write answers. Only providers you have a key
-            for appear - add more in{" "}
-            <a href="/settings/api-keys" className="underline">
-              Settings → API keys
-            </a>
-            .
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Model</Label>
-            <Select value={llm} onValueChange={changeLlm}>
-              <SelectTrigger className={cn("w-full", !llmCurrentUsable && "text-muted-foreground")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {models ? (
-                  Object.entries(models.catalog.llm).flatMap(([provider, names]) =>
-                    names
-                      .filter((model) => {
-                        if (`${provider}/${model}` === llm) return true
-                        // Retired by the vendor. Kept resolvable so existing
-                        // projects keep answering, but never offered again -
-                        // some of these now silently redirect to a different,
-                        // differently-priced model.
-                        if (isDeprecated(models, "llm", provider, model))
-                          return false
-                        return providerUsable(provider, "llm", availability, project)
-                      })
-                      .map((model) => {
-                        const usable = providerUsable(
-                          provider,
-                          "llm",
-                          availability,
-                          project
-                        )
-                        const retired = isDeprecated(models, "llm", provider, model)
-                        return (
-                          <SelectItem
-                            key={`${provider}/${model}`}
-                            value={`${provider}/${model}`}
-                            className={cn(
-                              (!usable || retired) &&
-                                "text-muted-foreground opacity-70"
-                            )}
-                          >
-                            {provider} / {model}
-                            {retired
-                              ? " · retired - switch model"
-                              : !usable
-                                ? " · key removed"
-                                : ""}
-                          </SelectItem>
-                        )
-                      })
-                  )
-                ) : (
-                  <SelectItem value={llm}>{llm}</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-          {encryptingLlm ? (
-            <EncryptingLoader rows={3} />
-          ) : (
-            <ProviderKeyField
-              provider={llmProvider}
-              last4={llmOverrideLast4}
-              accountHasKey={llmAccountHasKey}
-              value={llmKeyInput}
-              onChange={setLlmKeyInput}
-              editing={llmEditingKey}
-              onEditingChange={setLlmEditingKey}
-              onRemove={() => patchLlmKey("")}
-              busy={savingLlm}
-            />
-          )}
-          {!encryptingLlm && (llmEditingKey || llmForcedInput || llmChanged) && (
-            <div className="flex gap-2">
-              {llmEditingKey && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setLlmKeyInput("")
-                    setLlmEditingKey(false)
-                  }}
-                >
-                  Cancel
-                </Button>
-              )}
-              <Button onClick={handleSaveLlm} disabled={!canSaveLlm || savingLlm}>
-                {savingLlm ? <Spin /> : "Save"}
-              </Button>
-            </div>
-          )}
-          <figure className={styles.answerFlow}>
-            <figcaption>From context to answer</figcaption>
-            <div className={styles.flowSteps}>
-              <div className={styles.flowStep}>
-                <div className={styles.flowIcon} aria-hidden="true"><Cube /></div>
-                <strong>Retrieve</strong>
-                <span>Up to {topK} chunks</span>
-              </div>
-              <div className={styles.flowStep}>
-                <div className={styles.flowIcon} aria-hidden="true"><ChatCircle /></div>
-                <strong>Generate</strong>
-                <span title={llm}>{llm.slice(llm.indexOf("/") + 1)}</span>
-              </div>
-              <div className={styles.flowStep}>
-                <div className={styles.flowIcon} aria-hidden="true"><Scales /></div>
-                <strong>Respond</strong>
-                <span title={answerLanguage || "Match the question"}>{answerLanguage || "Match question"}</span>
-              </div>
-            </div>
-            <p className={styles.flowDescription}>Retrieval finds relevant passages. Your answer model turns that context into a response.</p>
-          </figure>
-        </CardContent>
-      </Card>
-
       <Card id="project-settings-indexing">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={3} className="flex items-center gap-2">
             <Cube className="size-4 text-muted-foreground" />
             Indexing &amp; embedding
           </CardTitle>
@@ -1405,7 +1418,7 @@ export function SettingsTab({
             chunking re-processes every file; changing only the key is instant.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className={styles.indexingGrid}>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="settings-chunk-size">Chunk size</Label>
@@ -1546,7 +1559,7 @@ export function SettingsTab({
             />
           )}
           {!encryptingEmb && (reindexNeeded || embEditingKey || embForcedInput) && (
-            <div className="flex gap-2">
+            <div className={cn(styles.indexingActions, "flex flex-wrap gap-2")}>
               {embEditingKey && (
                 <Button
                   variant="outline"
@@ -1592,11 +1605,20 @@ export function SettingsTab({
         </CardContent>
       </Card>
 
-      <section id="project-settings-checks"><EvaluationSchedule base={`/api/projects/${project.id}/evaluations`} history={[]} /></section>
+      <section id="project-settings-checks" aria-labelledby="project-settings-checks-title" className={styles.checksSection}>
+        <div className="space-y-1">
+          <h2 id="project-settings-checks-title" className="text-base font-semibold tracking-tight">Quality checks</h2>
+          <p className="text-xs leading-5 text-muted-foreground">Configure automatic tests and review what changed in the latest results.</p>
+        </div>
+        <div className={styles.checksGrid}>
+          <EvaluationSchedule base={`/api/projects/${project.id}/evaluations`} history={[]} showChangeChecks={false} />
+          <ChangeChecks base={`/api/projects/${project.id}/evaluations`} />
+        </div>
+      </section>
 
       <Card id="project-settings-danger" className={styles.dangerCard}>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-destructive">
+          <CardTitle role="heading" aria-level={3} className="flex items-center gap-2 text-destructive">
             <WarningOctagon className="size-4" />
             Danger zone
           </CardTitle>
@@ -1644,7 +1666,6 @@ export function SettingsTab({
           </div>
         </CardContent>
       </Card>
-      </div>
 
       <Dialog open={confirmReindex} onOpenChange={setConfirmReindex}>
         <DialogContent>

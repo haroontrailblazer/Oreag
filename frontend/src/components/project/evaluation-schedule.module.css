@@ -1,0 +1,14 @@
+.content { container: automatic-checks / inline-size; min-width: 0; display: grid; gap: 16px; }
+.triggers, .options, .thresholds { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.trigger { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
+.trigger [data-slot="switch"] { margin-top: 2px; }
+.footer { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.actions > * { flex: 1 1 160px; }
+@container automatic-checks (min-width: 480px) {
+  .triggers, .options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .thresholds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .thresholds label > span { min-height: 32px; }
+  .actions { justify-content: flex-end; }
+  .actions > * { flex: 0 1 auto; }
+}

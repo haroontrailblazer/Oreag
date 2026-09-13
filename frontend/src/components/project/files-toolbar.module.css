@@ -1,0 +1,14 @@
+.card { container: files-toolbar / inline-size; }
+.header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; flex-shrink: 0; padding: 16px; border-bottom: 1px solid var(--border); }
+.intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-width: 0; }
+.help { height: 32px; width: auto; gap: 6px; padding: 0 8px; border-color: transparent; border-radius: 6px; background: transparent; box-shadow: none; font-size: 12px; }
+.help:hover { background: var(--muted); }
+.help > span { display: inline; }
+.actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; min-width: 0; }
+.action { height: 32px; min-width: 96px; padding: 0 10px; gap: 6px; font-size: 12px; box-shadow: none; }
+.action > svg { width: 14px; height: 14px; }
+@container files-toolbar (min-width: 560px) {
+  .header { flex-wrap: nowrap; padding-inline: 20px; }
+  .intro { width: auto; justify-content: flex-start; gap: 20px; }
+  .actions { width: auto; flex-shrink: 0; }
+}

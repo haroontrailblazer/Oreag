@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
 import { FilterSelect } from "@/components/filter-select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import toolbarStyles from "@/components/project/files-toolbar.module.css"
 
 type Passage = { file_id: string; filename: string; page_number: number | null; passage: string; in_force_from: string | null; in_force_to: string | null; version_label: string | null }
 type Conflict = { key: string; reason: string; left: Passage; right: Passage; status: "open" | "confirmed" | "dismissed"; note: string | null; revision: number }
@@ -54,7 +55,7 @@ export function SourceConflicts({ projectId }: { projectId: string }) {
     setMessage(`Review saved: ${statusLabel[item.status].toLowerCase()}.`)
   }
   return <>
-    <Button variant="outline" size="icon" className="lg:w-28 lg:px-3" onClick={() => setOpen(true)} aria-label="Review source conflicts" title="Review source conflicts"><ScalesIcon aria-hidden="true" /><span className="hidden lg:inline">Conflicts</span></Button>
+    <Button variant="outline" size="sm" className={toolbarStyles.action} onClick={() => setOpen(true)} aria-label="Review source conflicts" title="Review source conflicts"><ScalesIcon aria-hidden="true" /><span>Conflicts</span></Button>
     <Sheet open={open} onOpenChange={setOpen}><SheetContent side="right" className="w-full max-w-full bg-background sm:w-[860px] sm:max-w-[calc(100vw-2rem)]">
       <SheetHeader className="p-6 pr-12"><SheetTitle className="flex items-center gap-2 text-lg"><ScalesIcon aria-hidden="true" className="size-5 text-muted-foreground" />Source conflicts</SheetTitle><SheetDescription>Compare possible disagreements and decide whether they matter.</SheetDescription></SheetHeader>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 pb-6">

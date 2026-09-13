@@ -7,9 +7,17 @@
   container: settings / inline-size;
   min-width: 0;
   display: grid;
-  gap: 22px;
+  gap: 24px;
   color: var(--foreground);
 }
+.sectionNav { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.sectionNav a { display: inline-flex; align-items: center; min-height: 32px; padding: 6px 10px; border-radius: 8px; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.sectionNav a:hover { background: var(--muted); color: var(--foreground); }
+.sectionNav a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.overviewGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.checksSection { display: grid; min-width: 0; gap: 16px; scroll-margin-top: 24px; }
+.checksGrid, .indexingGrid { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+.indexingActions { grid-column: 1 / -1; }
 :global(.dark) .page {
   --surface-shadow: #00000060;
   --edge-light: color-mix(in oklch, var(--card) 85%, white);
@@ -22,15 +30,15 @@
 
 .page [data-slot="card"] {
   min-width: 0;
-  border-radius: 19px;
-  border-color: color-mix(in oklch, var(--border) 85%, var(--muted-foreground));
-  background: linear-gradient(165deg, var(--card), var(--panel));
-  box-shadow: inset 0 1px 0 var(--edge-light), 0 3px 0 color-mix(in oklch, var(--border) 70%, var(--card)), 0 7px 15px var(--surface-shadow);
+  border-radius: 12px;
+  border-color: var(--border);
+  background: var(--card);
+  box-shadow: 0 1px 2px var(--surface-shadow);
   scroll-margin-top: 24px;
 }
 .page [data-slot="card-header"] { gap: 8px; }
 .page [data-slot="card-title"] { gap: 10px; font-size: 15px; letter-spacing: -0.02em; line-height: 1.4; }
-.page [data-slot="card-title"] > svg { width: 17px; height: 17px; padding: 7px; box-sizing: content-box; border-radius: 10px; border: 1px solid var(--border); color: var(--foreground); background: linear-gradient(145deg, var(--background), var(--muted)); box-shadow: inset 0 1px 0 var(--edge-light), 0 2px 0 var(--border), 0 3px 4px var(--surface-shadow); flex-shrink: 0; }
+.page [data-slot="card-title"] > svg { width: 18px; height: 18px; color: var(--muted-foreground); flex-shrink: 0; }
 .page [data-slot="card-description"] { font-size: 12px; line-height: 1.7; }
 .page [data-slot="label"] { line-height: 1.5; }
 
@@ -67,7 +75,7 @@
 .metric { min-width: 0; border: 1px solid var(--border); padding: 12px; border-radius: 11px; background: color-mix(in oklch, var(--muted) 55%, var(--card)); box-shadow: inset 0 2px 3px var(--surface-shadow), 0 1px 0 var(--edge-light); }
 .metricLabel { font-size: 9px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground); }
 .metricValue { margin-top: 5px; font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cardGrid, .policyGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.cardGrid, .policyGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
 .panel { min-width: 0; padding: 16px; border-radius: 14px; border: 1px solid var(--border); background: color-mix(in oklch, var(--muted) 35%, var(--card)); box-shadow: inset 0 2px 4px var(--surface-shadow), 0 1px 0 var(--edge-light); }
 .grounding { container-type: inline-size; background: linear-gradient(155deg, var(--background), color-mix(in oklch, var(--muted) 65%, var(--card))); box-shadow: inset 0 1px 0 var(--edge-light), 0 2px 3px var(--surface-shadow); }
 .knobLabel { display: flex; height: 48px; align-items: center; justify-content: center; gap: 2px; text-align: center; }
@@ -80,7 +88,7 @@
 .saveRow { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--border); }
 .saveNote { min-width: 0; font-size: 11px; line-height: 1.5; color: var(--muted-foreground); }
 .saveNote[data-pending="true"] { color: var(--foreground); font-weight: 500; }
-.page .dangerCard { border-color: color-mix(in oklch, var(--destructive) 22%, var(--border)); box-shadow: inset 0 1px 0 var(--edge-light), 0 3px 0 var(--border), 0 6px 12px var(--surface-shadow); }
+.page .dangerCard { border-color: color-mix(in oklch, var(--destructive) 22%, var(--border)); }
 .page .dangerCard [data-slot="card-title"] > svg { color: var(--destructive); }
 .answerFlow { margin-top: 24px; padding: 18px 12px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in oklch, var(--muted) 40%, var(--card)); box-shadow: inset 0 2px 4px var(--surface-shadow), 0 1px 0 var(--edge-light); }
 .answerFlow figcaption { margin-bottom: 20px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); }
@@ -94,11 +102,15 @@
 .flowDescription { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 11px; line-height: 1.6; color: var(--muted-foreground); }
 
 @container settings (min-width: 720px) {
-  .cardGrid, .policyGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cardGrid, .policyGrid, .indexingGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overviewGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container settings (min-width: 1040px) {
+  .checksGrid { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
   .page { gap: 16px; }
-  .page [data-slot="card"] { padding-block: 18px; gap: 18px; border-radius: 15px; }
+  .page [data-slot="card"] { padding-block: 18px; gap: 18px; }
   .page [data-slot="card-header"], .page [data-slot="card-content"] { padding-inline: 12px; }
   .panel { padding: 10px; }
   .tracking { padding: 12px; flex-wrap: wrap; }

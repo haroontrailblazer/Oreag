@@ -53,6 +53,7 @@ import {
 import { api, fetcher } from "@/lib/api"
 import type { FileRecord, Project } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import toolbarStyles from "./files-toolbar.module.css"
 
 function formatSize(bytes: number | null): string {
   if (bytes == null) return "-"
@@ -440,20 +441,21 @@ export function FilesTab({
     // bundling animation later grew the header and pushed the bottom of the
     // list off-screen. That number had to account for the card's OWN header;
     // this one does not, which is why it cannot rot the same way.
-    <Card role="region" aria-label="Files listing" className="flex max-h-full min-h-0 flex-col gap-0 overflow-hidden p-0">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
-        <div className="min-w-28 flex-1 space-y-0.5">
-          <h3 className="text-sm font-semibold">Files</h3>
-          <p className="text-xs text-muted-foreground">
-            {fileCount === 0
-              ? "No documents yet"
-              : `${fileCount} document${fileCount === 1 ? "" : "s"} · ${totalChunks} chunk${
-                  totalChunks === 1 ? "" : "s"
-                }`}
-          </p>
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+    <Card role="region" aria-label="Files listing" className={cn("flex max-h-full min-h-0 flex-col gap-0 overflow-hidden p-0", toolbarStyles.card)}>
+      <div className={toolbarStyles.header}>
+        <div className={toolbarStyles.intro}>
+          <div className="min-w-0 space-y-0.5">
+            <h3 className="text-sm font-semibold">Files</h3>
+            <p className="text-xs text-muted-foreground">
+              {fileCount === 0
+                ? "No documents yet"
+                : `${fileCount} document${fileCount === 1 ? "" : "s"} · ${totalChunks} chunk${
+                    totalChunks === 1 ? "" : "s"
+                  }`}
+            </p>
+          </div>
           <BestPractices
+            className={toolbarStyles.help}
             tips={[
               {
                 visual: <DocTypesViz />,
@@ -487,6 +489,8 @@ export function FilesTab({
               },
             ]}
           />
+        </div>
+        <div role="group" aria-label="File actions" className={toolbarStyles.actions}>
           {fileCount > 1 && <SourceConflicts projectId={project.id} />}
           <AddFilesDialog
             project={project}
@@ -499,9 +503,8 @@ export function FilesTab({
           {files && files.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="lg:w-28 lg:px-3" aria-label="File actions" title="File actions">
-                  <MoreHorizontal className="size-4" aria-hidden="true" />
-                  <span className="hidden lg:inline">More</span>
+                <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" aria-label="File actions" title="More file actions">
+                  <MoreHorizontal className="size-5" aria-hidden="true" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
