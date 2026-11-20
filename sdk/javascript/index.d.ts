@@ -8,8 +8,11 @@ export type UploadedFile = { id: string; filename: string; status: string; [key:
 export type EvaluationSuite = { version: 2; cases: { id: string; question: string; expected?: string; source?: string; match?: "contains" | "exact" }[]; variants: { llm_provider: string; llm_model: string; embedding_provider: string; embedding_model: string; embedding_dimensions: number; top_k?: number; [key: string]: unknown }[] };
 export type EvaluationRun = { id: string; status: "preparing" | "running" | "completed" | "failed" | "cancelled"; suite: EvaluationSuite; execution: "background" | "manual"; results: Record<string, unknown>[]; quality_report: Record<string, unknown> | null; error: string | null };
 export class OreagError extends Error { status: number; detail: unknown; retryAfter: string | null }
+export const DISCOVERY_URL: string;
+export const FALLBACK_BASE_URL: string;
 export class OreagClient {
-  constructor(options: { apiKey: string; projectId: string; baseUrl?: string; fetch?: typeof fetch });
+  /** Without baseUrl the client asks discoveryUrl which server is serving, and follows the hosted API between its servers on its own. */
+  constructor(options: { apiKey: string; projectId: string; baseUrl?: string; discoveryUrl?: string; fetch?: typeof fetch });
   query(question: string, options?: QueryOptions & { idempotencyKey?: string }): Promise<QueryResponse>;
   streamQuery(question: string, options?: QueryOptions): AsyncGenerator<StreamEvent>;
   uploadFiles(files: { data: Blob; name: string }[], options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<UploadedFile[]>;

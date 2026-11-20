@@ -35,7 +35,80 @@ export function getApiBase(): string {
   return `${window.location.protocol}//${window.location.hostname}:${BACKEND_PORT}`
 }
 
-/** Backwards-compatible constant. Prefer getApiBase() in client components. */
+/**
+ * Production runs the backend on two Render accounts and moves between them on
+ * its own as each runs out of free hours (lib/render-accounts.ts). So when the
+ * build points at a real host, the browser asks the app which account is
+ * serving instead of trusting the build-time URL; a switch reaches open tabs
+ * within seconds and needs no redeploy. Local development (no
+ * NEXT_PUBLIC_API_BASE_URL, or a localhost one) keeps the fixed URL above.
+ */
+const DISCOVERY_TTL_MS = 15_000
+let discovered: { base: string; at: number } | null = null
+let discovering: Promise<string> | null = null
+const baseListeners = new Set<() => void>()
+
+function discoveryEnabled(): boolean {
+  if (typeof window === "undefined") return false
+  const explicit = process.env.NEXT_PUBLIC_API_BASE_URL?.trim()
+  if (!explicit) return false
+  try {
+    return !LOCAL_HOSTS.includes(new URL(explicit).hostname)
+  } catch {
+    return false
+  }
+}
+
+function remember(base: string) {
+  const changed = discovered?.base !== base
+  discovered = { base, at: Date.now() }
+  if (changed) baseListeners.forEach((listener) => listener())
+}
+
+/** The backend to call right now. Every request in this file goes through it. */
+export function resolveApiBase(): Promise<string> {
+  if (!discoveryEnabled()) return Promise.resolve(getApiBase())
+  if (discovered && Date.now() - discovered.at < DISCOVERY_TTL_MS) {
+    return Promise.resolve(discovered.base)
+  }
+  discovering ??= fetch("/api/active-backend", { cache: "no-store" })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((body) => {
+      const base =
+        typeof body?.apiBase === "string" ? body.apiBase.replace(/\/+$/, "") : ""
+      if (base) remember(base)
+      return base || discovered?.base || getApiBase()
+    })
+    .catch(() => discovered?.base || getApiBase())
+    .finally(() => {
+      discovering = null
+    })
+  return discovering
+}
+
+/**
+ * A request that got no answer at all may have gone to an account Render just
+ * suspended: its 503 page carries no CORS headers, so the browser reports it as
+ * a network error. Ask again on the next request rather than wait out the TTL.
+ */
+function forgetApiBase() {
+  if (discovered) discovered = { ...discovered, at: 0 }
+}
+
+/** For useSyncExternalStore: the base URL to show, updated when it changes. */
+export function subscribeApiBase(listener: () => void): () => void {
+  baseListeners.add(listener)
+  void resolveApiBase()
+  return () => {
+    baseListeners.delete(listener)
+  }
+}
+
+export function getKnownApiBase(): string {
+  return discovered?.base ?? getApiBase()
+}
+
+/** Backwards-compatible constant. Prefer resolveApiBase() in client code. */
 export const API_BASE =
   typeof window !== "undefined"
     ? getApiBase()
@@ -148,7 +221,13 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set("Content-Type", "application/json")
   }
 
-  const res = await fetch(`${getApiBase()}${path}`, { ...init, headers })
+  let res: Response
+  try {
+    res = await fetch(`${await resolveApiBase()}${path}`, { ...init, headers })
+  } catch (error) {
+    if (!init?.signal?.aborted) forgetApiBase()
+    throw error
+  }
   if (!res.ok) {
     let detail = res.statusText
     try {
@@ -192,7 +271,13 @@ export async function downloadFile(path: string, filename: string): Promise<void
   const headers = new Headers()
   if (session) headers.set("Authorization", `Bearer ${session.access_token}`)
 
-  const res = await fetch(`${getApiBase()}${path}`, { headers })
+  let res: Response
+  try {
+    res = await fetch(`${await resolveApiBase()}${path}`, { headers })
+  } catch (error) {
+    forgetApiBase()
+    throw error
+  }
   if (!res.ok) throw new ApiError(res.status, res.statusText)
 
   const url = URL.createObjectURL(await res.blob())
@@ -228,12 +313,18 @@ export async function apiStream(
   if (session) headers.set("Authorization", `Bearer ${session.access_token}`)
   headers.set("Content-Type", "application/json")
 
-  const res = await fetch(`${getApiBase()}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal,
-  })
+  let res: Response
+  try {
+    res = await fetch(`${await resolveApiBase()}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (error) {
+    if (!signal?.aborted) forgetApiBase()
+    throw error
+  }
   if (!res.ok || !res.body) {
     let detail = res.statusText
     try {
@@ -300,10 +391,11 @@ export async function uploadWithProgress<T>(
   const {
     data: { session },
   } = await supabase.auth.getSession()
+  const base = await resolveApiBase()
 
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open("POST", `${getApiBase()}${path}`)
+    xhr.open("POST", `${base}${path}`)
     if (session) {
       xhr.setRequestHeader("Authorization", `Bearer ${session.access_token}`)
     }
@@ -343,7 +435,10 @@ export async function uploadWithProgress<T>(
       reject(new ApiError(xhr.status, detail))
     }
 
-    xhr.onerror = () => reject(new ApiError(0, "Network error during upload"))
+    xhr.onerror = () => {
+      forgetApiBase()
+      reject(new ApiError(0, "Network error during upload"))
+    }
     xhr.onabort = () =>
       reject(new DOMException("Upload aborted", "AbortError"))
 

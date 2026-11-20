@@ -4,21 +4,52 @@ export class OreagError extends Error {
   }
 }
 
+// The hosted API runs on two Render accounts and moves between them as each runs
+// out of free hours. Without an explicit baseUrl the client asks this endpoint
+// which one is serving, so a switch needs no code change and no upgrade.
+export const DISCOVERY_URL = "https://oreag.vercel.app/api/active-backend";
+export const FALLBACK_BASE_URL = "https://oreag.onrender.com";
+const DISCOVERY_TTL_MS = 15_000;
+
+// Render's own answer for a suspended account: the backend never saw the request.
+const renderSuspended = (response) => response.status === 503 && /suspend/i.test(response.headers.get("x-render-routing") ?? "");
+
 export class OreagClient {
-  constructor({ apiKey, projectId, baseUrl = "https://oreag.onrender.com", fetch: transport = globalThis.fetch }) {
+  constructor({ apiKey, projectId, baseUrl, discoveryUrl = DISCOVERY_URL, fetch: transport = globalThis.fetch }) {
     if (!apiKey || !projectId) throw new TypeError("apiKey and projectId are required");
-    this.base = `${baseUrl.replace(/\/$/, "")}/v1/projects/${encodeURIComponent(projectId)}`;
+    this.path = `/v1/projects/${encodeURIComponent(projectId)}`;
+    this.fixedBase = baseUrl ? baseUrl.replace(/\/$/, "") : null;
+    this.discoveryUrl = discoveryUrl; this.found = null;
     this.apiKey = apiKey; this.fetch = transport;
   }
+  async root() {
+    if (this.fixedBase) return this.fixedBase;
+    if (this.found && Date.now() - this.found.at < DISCOVERY_TTL_MS) return this.found.base;
+    let base = null;
+    try {
+      // No Authorization header: the API key is never sent to the discovery endpoint.
+      const response = await this.fetch(this.discoveryUrl, { redirect: "error" });
+      const found = response.ok ? (await response.json())?.apiBase : null;
+      if (typeof found === "string" && found.startsWith("https://")) base = found.replace(/\/+$/, "");
+    } catch { /* Keep the last answer below. */ }
+    // On failure keep the last answer, and do not ask again on every call.
+    this.found = { base: base ?? this.found?.base ?? FALLBACK_BASE_URL, at: Date.now() };
+    return this.found.base;
+  }
   async request(path, { method = "GET", body, signal, stream = false, idempotencyKey } = {}) {
+    const url = (await this.root()) + this.path + path;
     let response;
     try {
-      response = await this.fetch(this.base + path, { method, signal, redirect: "error",
+      response = await this.fetch(url, { method, signal, redirect: "error",
         headers: { ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}), Authorization: `Bearer ${this.apiKey}`, ...(body !== undefined && !(body instanceof FormData) ? { "Content-Type": "application/json" } : {}) },
         ...(body !== undefined ? { body: body instanceof FormData ? body : JSON.stringify(body) } : {}) });
     } catch (e) {
       if (signal?.aborted) throw e;
       throw new OreagError("Could not reach Oreag. The request may have been accepted; it was not retried.");
+    }
+    if (renderSuspended(response)) {
+      this.found = null;
+      throw new OreagError("Oreag is moving to its standby server. This request was not accepted; try again in a few seconds.", response.status);
     }
     if (!response.ok) {
       let detail = null;

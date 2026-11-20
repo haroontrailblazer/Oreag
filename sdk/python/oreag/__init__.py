@@ -1,4 +1,7 @@
-"""Oreag's synchronous, typed API client. Requests are never silently retried."""
+"""Oreag's synchronous, typed API client. Requests are never silently retried.
+
+Without an explicit base_url the client follows the hosted API between its two
+servers on its own (see DISCOVERY_URL)."""
 import hashlib
 import hmac
 import json
@@ -68,15 +71,58 @@ class OreagError(Exception):
         self.status, self.detail, self.retry_after = status, detail, retry_after
 
 
+# The hosted API runs on two Render accounts and moves between them as each runs
+# out of free hours. Without an explicit base_url the client asks this endpoint
+# which one is serving, so a switch needs no code change and no upgrade.
+DISCOVERY_URL = "https://oreag.vercel.app/api/active-backend"
+FALLBACK_BASE_URL = "https://oreag.onrender.com"
+DISCOVERY_TTL_SECONDS = 15.0
+
+
+def _render_suspended(response: httpx.Response) -> bool:
+    """Render's own answer for a suspended account: the backend never saw the request."""
+    return response.status_code == 503 and "suspend" in response.headers.get("x-render-routing", "").lower()
+
+
 class Oreag:
-    def __init__(self, api_key: str, project_id: str, *, base_url: str = "https://oreag.onrender.com", timeout: float = 120, transport: httpx.BaseTransport | None = None):
+    def __init__(self, api_key: str, project_id: str, *, base_url: str | None = None, timeout: float = 120, transport: httpx.BaseTransport | None = None, discovery_url: str = DISCOVERY_URL):
         if not api_key or not project_id:
             raise ValueError("api_key and project_id are required")
-        self.base = base_url.rstrip("/") + "/v1/projects/" + quote(project_id, safe="")
+        self._path = "/v1/projects/" + quote(project_id, safe="")
+        self._fixed_base = base_url.rstrip("/") if base_url else None
+        self._discovery_url = discovery_url
+        self._found: tuple[str, float] | None = None
         self.client = httpx.Client(headers={"Authorization": "Bearer " + api_key}, timeout=timeout, transport=transport, follow_redirects=False)
+        # Separate client: the API key is never sent to the discovery endpoint.
+        self._discovery = httpx.Client(timeout=10, transport=transport, follow_redirects=False)
+
+    @property
+    def base(self) -> str:
+        return self._root() + self._path
+
+    def _root(self) -> str:
+        if self._fixed_base:
+            return self._fixed_base
+        now = time.monotonic()
+        if self._found and now - self._found[1] < DISCOVERY_TTL_SECONDS:
+            return self._found[0]
+        try:
+            response = self._discovery.get(self._discovery_url)
+            found = response.json().get("apiBase") if response.is_success else None
+        except (httpx.HTTPError, ValueError, AttributeError):
+            found = None
+        if isinstance(found, str) and found.startswith("https://"):
+            root = found.rstrip("/")
+        else:
+            # Keep using the last answer, and do not ask again on every call
+            # while the discovery endpoint is unreachable.
+            root = self._found[0] if self._found else FALLBACK_BASE_URL
+        self._found = (root, now)
+        return root
 
     def close(self) -> None:
         self.client.close()
+        self._discovery.close()
 
     def __enter__(self):
         return self
@@ -84,10 +130,12 @@ class Oreag:
     def __exit__(self, *args):
         self.close()
 
-    @staticmethod
-    def _check(response: httpx.Response) -> None:
+    def _check(self, response: httpx.Response) -> None:
         if response.is_success:
             return
+        if _render_suspended(response):
+            self._found = None
+            raise OreagError("Oreag is moving to its standby server. This request was not accepted; try again in a few seconds.", response.status_code)
         try:
             detail = response.json().get("detail")
         except (ValueError, AttributeError):

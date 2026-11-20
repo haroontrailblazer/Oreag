@@ -1,7 +1,9 @@
 import contextvars
 import os
 import re
+import time
 
+import httpx
 from mcp.server.fastmcp import FastMCP
 
 from .client import OreagClient
@@ -24,8 +26,38 @@ mcp = FastMCP(
 )
 
 
+# The hosted backend runs on two Render accounts and moves between them as each
+# runs out of free hours. With OREAG_API_BASE unset, ask which one is serving.
+# Each deployed MCP server sets OREAG_API_BASE to the backend in its own
+# account: Render suspends a whole account at once, so the pair stays together.
+DISCOVERY_URL = "https://oreag.vercel.app/api/active-backend"
+FALLBACK_API_BASE = "https://oreag.onrender.com"
+_DISCOVERY_TTL = 15.0
+_found: tuple[str, float] | None = None
+
+
+def _api_base() -> str:
+    global _found
+    explicit = os.environ.get("OREAG_API_BASE", "").strip()
+    if explicit:
+        return explicit
+    now = time.monotonic()
+    if _found and now - _found[1] < _DISCOVERY_TTL:
+        return _found[0]
+    try:
+        found = httpx.get(DISCOVERY_URL, timeout=10).json().get("apiBase")
+    except (httpx.HTTPError, ValueError, AttributeError):
+        found = None
+    if isinstance(found, str) and found.startswith("https://"):
+        base = found.rstrip("/")
+    else:
+        base = _found[0] if _found else FALLBACK_API_BASE
+    _found = (base, now)
+    return base
+
+
 def _client() -> OreagClient:
-    base = os.environ.get("OREAG_API_BASE", "https://oreag.onrender.com")
+    base = _api_base()
     creds = _request_creds.get()
     if creds is not None:
         api_key, project_id = creds

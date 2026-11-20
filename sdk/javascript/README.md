@@ -32,6 +32,10 @@ const event = verifyWebhook(rawBody, request.headers, process.env.OREAG_WEBHOOK_
 
 Signature verification allows five minutes of clock skew. Preserve the raw body; never reserialize JSON before verification. Events can repeat and arrive out of order. `examples.mjs` is runnable with environment variables. Run `npm test` for transport and signature tests.
 
+## Server switching (0.3.0)
+
+The hosted API runs on two servers and moves between them on its own when one runs out of free hours. Leave `baseUrl` unset and the client asks `https://oreag.vercel.app/api/active-backend` which one is serving (at most every 15 seconds; the API key is never sent there), so a switch needs no code change. A request that lands on a server that was just suspended raises `OreagError` with status 503; Render never passed it to the API, so it is safe to send again a few seconds later. Pass `baseUrl` to pin a server, for example a self-hosted backend.
+
 ## Safe retries (0.2.0)
 
 Pass `{ idempotencyKey: "one-logical-request" }` to `query` or `uploadFiles`, or as the fourth argument to `startEvaluation(id, suite, referenceId, options)`. Reuse the same key and content after a lost response. The server retains encrypted completed responses for 24 hours, scoped to the API key and operation. Different content returns 409; pending or uncertain work also returns 409 and is never executed again with that key within the retention window. Inspect the resource before creating a new key for an uncertain operation. Streaming does not support this header. These clients never retry automatically.

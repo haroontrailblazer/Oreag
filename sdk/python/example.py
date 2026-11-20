@@ -5,7 +5,7 @@ from pathlib import Path
 from oreag import Oreag, OreagError
 
 try:
-    with Oreag(os.environ["OREAG_API_KEY"], os.environ["OREAG_PROJECT_ID"], base_url=os.getenv("OREAG_BASE_URL", "https://oreag.onrender.com")) as client:
+    with Oreag(os.environ["OREAG_API_KEY"], os.environ["OREAG_PROJECT_ID"], base_url=os.getenv("OREAG_BASE_URL")) as client:
         if len(sys.argv) > 1:
             path = Path(sys.argv[1])
             with path.open("rb") as file:

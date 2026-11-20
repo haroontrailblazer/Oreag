@@ -31,6 +31,10 @@ event = verify_webhook(raw_request_bytes, request_headers, signing_secret)
 
 Verify the exact raw bytes before parsing JSON. Verification allows five minutes of clock skew. Events can repeat and arrive out of order. Run `python -m unittest test_sdk.py` from this directory.
 
+## Server switching (0.3.0)
+
+The hosted API runs on two servers and moves between them on its own when one runs out of free hours. Leave `base_url` unset and the client asks `https://oreag.vercel.app/api/active-backend` which one is serving (at most every 15 seconds; the API key is never sent there), so a switch needs no code change. A request that lands on a server that was just suspended raises `OreagError` with status 503; Render never passed it to the API, so it is safe to send again a few seconds later. Pass `base_url=` to pin a server, for example a self-hosted backend.
+
 ## Safe retries (0.2.0)
 
 Pass `idempotency_key="one-logical-request"` to `query`, `upload_files`, or `start_evaluation`. Reuse the same key and content after a lost response. The server retains encrypted completed responses for 24 hours, scoped to the API key and operation. Different content returns 409; pending or uncertain work also returns 409 and is never executed again with that key within the retention window. Inspect the resource before creating a new key for an uncertain operation. Streaming does not support this header. These clients never retry automatically.

@@ -1,12 +1,19 @@
+import {
+  ACCOUNTS,
+  activeAccount,
+  forgetActiveAccount,
+  isSuspended,
+} from "@/lib/render-accounts"
+
 /**
  * Stable MCP connector URL: /mcp/projects/<project-id>/mcp
  *
  * The MCP server runs on two Render accounts, because one account's free hours
- * run out mid-month (see scripts/render_failover.py). An MCP client stores a
- * single URL, so rather than pointing clients at either account, this route
- * forwards each request to the first account that is serving: Hexra first,
- * the second account only while Render reports Hexra suspended or Hexra cannot
- * be reached. The decision is made per request, so it needs no redeploy.
+ * run out mid-month (see lib/render-accounts.ts). An MCP client stores a single
+ * URL, so rather than pointing clients at either account, this route forwards
+ * each request to the account that is serving, and to the other one if Render
+ * answers that the first is suspended or it cannot be reached. No redeploy and
+ * no client change is needed when the accounts switch, in either direction.
  *
  * Only this path shape is forwarded, and only to these fixed hosts, so the
  * route cannot be pointed anywhere else. The caller's
@@ -19,14 +26,6 @@ export const runtime = "nodejs"
 // A sleeping free Render instance takes up to a minute to boot before it
 // answers, and a tool call such as ask_docs can take a while after that.
 export const maxDuration = 300
-
-const UPSTREAMS = (
-  process.env.MCP_UPSTREAMS ??
-  "https://oreag-1.onrender.com,https://oreag-mcp.onrender.com"
-)
-  .split(",")
-  .map((url) => url.trim().replace(/\/+$/, ""))
-  .filter(Boolean)
 
 const REQUEST_HEADERS = [
   "authorization",
@@ -56,14 +55,6 @@ function pick(from: Headers, names: string[]): Headers {
   return picked
 }
 
-/** Render's answer for a service in a suspended account. */
-function isSuspended(response: Response): boolean {
-  return (
-    response.status === 503 &&
-    /suspend/i.test(response.headers.get("x-render-routing") ?? "")
-  )
-}
-
 async function forward(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
@@ -75,7 +66,12 @@ async function forward(
       : await request.arrayBuffer()
   const headers = pick(request.headers, REQUEST_HEADERS)
 
-  for (const base of UPSTREAMS) {
+  const serving = await activeAccount()
+  const upstreams = [serving, ...ACCOUNTS.filter((a) => a !== serving)].map(
+    (account) => account.mcp
+  )
+
+  for (const base of upstreams) {
     let upstream: Response
     try {
       upstream = await fetch(
@@ -91,6 +87,7 @@ async function forward(
       )
     } catch (error) {
       if (request.signal.aborted) throw error
+      forgetActiveAccount()
       continue // unreachable: try the next account
     }
 
@@ -98,6 +95,7 @@ async function forward(
     // tool call on the other account could run it twice.
     if (isSuspended(upstream)) {
       await upstream.body?.cancel()
+      forgetActiveAccount()
       continue
     }
 

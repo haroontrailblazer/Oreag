@@ -62,7 +62,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { getApiBase, api, fetcher } from "@/lib/api"
+import { getKnownApiBase, subscribeApiBase, api, fetcher } from "@/lib/api"
 import type { ApiKey, ApiKeyCreated, Project } from "@/lib/types"
 import styles from "./api-tab.module.css"
 
@@ -220,9 +220,7 @@ const BEST_PRACTICE_TIPS = [
   },
 ]
 
-// Static-value "store" plumbing for useSyncExternalStore: the API base never
-// changes after load, so subscribing is a no-op.
-const subscribeNoop = () => () => {}
+// The server render has no browser to ask, so it shows nothing until hydration.
 const getServerApiBase = () => ""
 
 export function ApiTab({ project }: { project: Project }) {
@@ -249,10 +247,11 @@ export function ApiTab({ project }: { project: Project }) {
   const deleteDone = useRef(false)
 
   // Resolve the public base URL on the client so the copyable endpoint reflects
-  // the host the dashboard is actually open on (localhost or a LAN IP).
-  // useSyncExternalStore keeps the server render ("") hydration-safe without
-  // setting state inside an effect.
-  const apiBase = useSyncExternalStore(subscribeNoop, getApiBase, getServerApiBase)
+  // the backend actually serving right now: whichever Render account is up in
+  // production, or the host the dashboard is open on (localhost or a LAN IP)
+  // in development. useSyncExternalStore keeps the server render ("")
+  // hydration-safe and re-renders if the serving account changes.
+  const apiBase = useSyncExternalStore(subscribeApiBase, getKnownApiBase, getServerApiBase)
 
   const basePath = `/v1/projects/${project.id}`
   const endpoint = `${apiBase}${basePath}/query`
