@@ -1,14 +1,15 @@
-name: Sync standby fork
+name: Standby fork
 # The standby Render account deploys from RenderDeploy/Oreag, a fork of this
 # repository; Hexra deploys from this one. A fork does not follow its parent,
-# so without this the standby would fall behind main and serve old code
-# whenever Hexra is suspended. Updating the fork's main makes Render redeploy
-# the standby on its own (auto-deploy on commit).
+# and the standby serves whenever Hexra is suspended, so it must not fall
+# behind on the code it runs.
 #
-# Needs STANDBY_FORK_TOKEN: a fine-grained token from the RenderDeploy GitHub
-# account, for RenderDeploy/Oreag only, with Contents and Workflows set to
-# "Read and write" (Workflows, because commits that change files in
-# .github/workflows are refused without it).
+# The fork is synced by hand on GitHub ("Sync fork"), after which Render
+# redeploys the standby on its own. This job never fails: it warns when the
+# fork is missing changes to backend/ or mcp-server/, the only folders the
+# standby builds. If STANDBY_FORK_TOKEN is ever set (a fine-grained token from
+# the RenderDeploy account for RenderDeploy/Oreag, Contents and Workflows
+# "Read and write"), it syncs the fork itself instead.
 on:
   push:
     branches: [main]
@@ -19,18 +20,25 @@ concurrency:
   group: sync-standby-fork
   cancel-in-progress: false
 jobs:
-  sync:
-    # The fork receives this file too; it must not try to sync itself.
+  check:
+    # The fork receives this file too; it must not check itself.
     if: github.repository == 'haroontrailblazer/Oreag'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Bring RenderDeploy/Oreag up to date with main
+      - name: Sync the fork, or warn if the standby would run old code
         env:
-          GH_TOKEN: ${{ secrets.STANDBY_FORK_TOKEN }}
+          FORK_TOKEN: ${{ secrets.STANDBY_FORK_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::STANDBY_FORK_TOKEN is not set, so the standby Render account keeps running old code."
-            exit 1
+          if [ -n "$FORK_TOKEN" ]; then
+            GH_TOKEN="$FORK_TOKEN" gh api -X POST repos/RenderDeploy/Oreag/merge-upstream -f branch=main
+            exit 0
           fi
-          gh api -X POST repos/RenderDeploy/Oreag/merge-upstream -f branch=main
+          missing=$(gh api "repos/RenderDeploy/Oreag/compare/main...haroontrailblazer:Oreag:main" \
+            --jq '[.files[]?.filename | select(startswith("backend/") or startswith("mcp-server/"))] | length')
+          if [ "$missing" != "0" ]; then
+            echo "::warning::RenderDeploy/Oreag is missing changes to $missing file(s) in backend/ or mcp-server/. Press \"Sync fork\" on github.com/RenderDeploy/Oreag so the standby Render account runs the same code."
+          else
+            echo "The standby builds the same backend/ and mcp-server/ code as main."
+          fi
