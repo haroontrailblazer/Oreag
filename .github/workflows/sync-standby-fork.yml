@@ -1,0 +1,36 @@
+name: Sync standby fork
+# The standby Render account deploys from RenderDeploy/Oreag, a fork of this
+# repository; Hexra deploys from this one. A fork does not follow its parent,
+# so without this the standby would fall behind main and serve old code
+# whenever Hexra is suspended. Updating the fork's main makes Render redeploy
+# the standby on its own (auto-deploy on commit).
+#
+# Needs STANDBY_FORK_TOKEN: a fine-grained token from the RenderDeploy GitHub
+# account, for RenderDeploy/Oreag only, with Contents and Workflows set to
+# "Read and write" (Workflows, because commits that change files in
+# .github/workflows are refused without it).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sync-standby-fork
+  cancel-in-progress: false
+jobs:
+  sync:
+    # The fork receives this file too; it must not try to sync itself.
+    if: github.repository == 'haroontrailblazer/Oreag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Bring RenderDeploy/Oreag up to date with main
+        env:
+          GH_TOKEN: ${{ secrets.STANDBY_FORK_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::STANDBY_FORK_TOKEN is not set, so the standby Render account keeps running old code."
+            exit 1
+          fi
+          gh api -X POST repos/RenderDeploy/Oreag/merge-upstream -f branch=main
