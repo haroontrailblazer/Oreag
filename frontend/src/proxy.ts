@@ -26,6 +26,7 @@ const PUBLIC_PATHS = [
   "/auth/confirm", // token_hash links: signup confirm, password recovery
   "/auth/reset-password", // landed on after /auth/confirm; checks its own session
   "/api/auth/methods", // pre-auth identifier-first login lookup
+  "/api/active-backend", // read by scripts/render_failover.py, no session
 ]
 
 /**
@@ -141,6 +142,10 @@ export const config = {
     // `c4`, `js` and `css` join the extension list for the same reason the
     // image types are there: the viewer loads its own bundles from
     // /architecture/assets, and the raw model is served at /architecture.c4.
-    "/((?!architecture|_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|icon|apple-icon|sitemap\\.xml|robots\\.txt|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|c4|js|css)$).*)",
+    //
+    // `mcp/` is the MCP connector proxy (app/mcp/projects/[projectId]/mcp).
+    // MCP clients carry a project API key, never a browser session, so the
+    // sign-in redirect would answer every tool call with the login page.
+    "/((?!architecture|mcp/|_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|icon|apple-icon|sitemap\\.xml|robots\\.txt|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|c4|js|css)$).*)",
   ],
 }
